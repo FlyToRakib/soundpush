@@ -1,6 +1,8 @@
 //! OS integration: sleep prevention and muting the default output device.
 
-use std::process::{Child, Command};
+use std::process::Child;
+#[cfg(unix)]
+use std::process::Command;
 
 /// Keeps the system awake while alive.
 pub enum SleepInhibitor {
