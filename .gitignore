@@ -38,3 +38,7 @@ sound-push-mobile/android/core-engine/src/main/java/uniffi/
 
 # Local tool config
 .claude/
+
+# VB-CABLE package downloaded at build time (sound-push-desktop/drivers/vbcable/fetch.sh)
+sound-push-desktop/drivers/vbcable/package/
+sound-push-desktop/drivers/vbcable/*.zip

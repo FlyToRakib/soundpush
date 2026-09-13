@@ -37,7 +37,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Gain 0–20 dB, soft limiter, RNNoise, level meter, mic monitor | ✅ | |
 | "Ask" permission prompt for microphone | ✅ | tested end-to-end |
 | Headset mode (both routes in one action) | 🟡 | desktop + Android home task |
-| Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⏳ | final plan, [virtual-microphone.md](virtual-microphone.md) §3–§4 |
+| Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
 | Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | ⏳ | replaces VB-CABLE once Microsoft-signed |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
 | Linux PipeWire virtual source created by the app | ⏳ | |

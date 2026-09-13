@@ -102,9 +102,13 @@ Options we checked:
 **Final plan for Windows (decided 2026-09-13):**
 
 1. **Stage 1: bundle VB-CABLE (now).** VB-CABLE is installed together with SoundPush
-   (§3). It is free, Microsoft-signed and allowed to be bundled under VB-Audio's
-   donationware licence. Before the public release, ask VB-Audio for a short written
-   confirmation (vb-audio.com/Services/support.htm).
+   (§3). It is free and Microsoft-signed.
+   **Blocked until VB-Audio agrees in writing.** Their licensing web page allows bundling,
+   but the licence inside the package (`readme.txt`) says: *"It is not allowed to integrate
+   the VB-CABLE package in another software installation procedure without Author
+   agreement."* Ask through https://vb-audio.com/Services/contact.htm. The download
+   script `sound-push-desktop/drivers/vbcable/fetch.sh` (SHA-256 pinned) is ready; the
+   installer step is added only after the agreement arrives.
 2. **Stage 2: our own driver (in parallel, switched on after signing).**
    - Write the SoundPush Windows driver in this repo at
      `sound-push-desktop/drivers/windows-virtual-audio/`: a WaveRT/PortCls driver
