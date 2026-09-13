@@ -353,7 +353,8 @@ Grouped by the goals in the draft.
 - No information conveyed by color alone (quality badges use icon + text).
 
 ### 5.7 Setup
-- The Windows virtual microphone driver installs **on demand** from inside the app.
+- The Windows virtual microphone is installed **together with SoundPush** by the same installer. Stage 1 is bundled VB-CABLE; stage 2 is our own signed "SoundPush Microphone" driver (§10.7). There is no separate install and one restart prompt.
+- The macOS virtual microphone ("SoundPush Microphone", our own AudioServerPlugIn) is embedded in the app and installed with one click.
 - Linux virtual microphone is created **automatically** through PipeWire (PulseAudio fallback). No terminal commands.
 - Firewall rule created at install (private networks); a network profile problem gets a guided fix.
 
@@ -365,7 +366,7 @@ Grouped by the goals in the draft.
 |---|---|---|---|
 | G1 | No visible pairing, authentication, or encryption; open fixed port 59100 | Anyone on the same Wi-Fi (café, dorm, office) could potentially connect to a running mic server | Pairing + mutual TLS + per-device permissions (§18, §21) |
 | G2 | Server/Player/Mode jargon; mic setup spans 3 screens on 2 devices plus OS sound settings | High setup failure rate | Task-based flows; one-tap "Use phone as microphone" starts both ends (§23) |
-| G3 | Linux mic requires manual `pactl` modules; Windows 7 requires VB-CABLE; macOS requires a third-party virtual device | Non-technical users blocked | Automatic PipeWire node; on-demand signed Windows driver; macOS HAL plug-in later |
+| G3 | Linux mic requires manual `pactl` modules; Windows 7 requires VB-CABLE; macOS requires a third-party virtual device | Non-technical users blocked | Automatic PipeWire node; Windows virtual mic installed with SoundPush (bundled VB-CABLE, then our own signed driver); built-in macOS HAL plug-in |
 | G4 | FAQ "app tries to constantly reconnect", "no sound → disable EventSync" | Fragile sessions; users must toggle internals | Explicit connection state machine, version negotiation, capture auto-fallback (§19, §20) |
 | G5 | Background killing on OEM ROMs; FAQ only links dontkillmyapp | Streams stop on Xiaomi/Samsung/etc. | Correct foreground-service types, battery-optimization exemption guidance per OEM, Wi-Fi lock, watchdog (§25) |
 | G6 | Custom buffer resets to 120 ms below about 105 ms (forum bug) | Users cannot reach low latency | Validated latency bounds; adaptive buffer; drift compensation (§15) |
@@ -469,7 +470,7 @@ Grouped by the goals in the draft.
 | Phone call / other app takes audio focus | Profile: Pause (auto-resume after call), Duck, or Mix. Mic source: Android silences mic capture during calls. Show "Paused during call" and resume after. |
 | Another app starts recording the mic on Android 10+ (shared capture) | Detect silenced capture via `AudioRecordingConfiguration` callbacks; show "Microphone in use by another app". |
 | Virtual mic selected but no route active | Driver outputs silence; tray shows "SoundPush Microphone idle". Optional "Start phone mic when an app opens the SoundPush Microphone" (driver notifies engine of stream open). |
-| Virtual mic driver not installed / blocked (Secure Boot, policy, S-mode) | Detect; guided install; if blocked, offer compatibility mode (VB-CABLE or any existing virtual device as the output target). |
+| Virtual mic driver not installed / blocked (Secure Boot, policy, S-mode) | Detect; one-click reinstall from the Audio page (Windows: bundled VB-CABLE setup; macOS: SoundPush Microphone). Any existing virtual cable (Voicemeeter, BlackHole) is also detected. A real speaker is never used as a virtual mic. |
 | Clipping from volume boost | Soft limiter after gain; clip indicator in the level meter. |
 | Sample-rate mismatch between devices | Always 48 kHz on the wire; resample at the edges. |
 | CPU starvation (games at 100 % CPU) | MMCSS "Pro Audio" priority; RNNoise auto-disables with notice if deadline misses exceed a threshold. |
@@ -613,14 +614,36 @@ This model replaces AudioRelay's Server/Player/Mode matrix, and new sources or s
 - PCM (lossless) for USB/LAN users who want zero coding artifacts (48 kHz stereo 16-bit ≈ 1.54 Mb/s).
 - FLAC/other codecs: not initially needed; the codec is behind a `Codec` trait (§33).
 
-### 10.7 Why a custom Windows virtual audio driver (and not VB-CABLE)
+### 10.7 Windows virtual microphone: bundled VB-CABLE first, own signed driver next
 
-- AudioRelay ships its own "Virtual Mic for AudioRelay" on Windows 10+. Parity requires our own device.
-- VB-CABLE redistribution requires a license and exposes two confusing devices (CABLE Input/Output).
-- Our driver exposes **one** capture endpoint "SoundPush Microphone" (plus optional "SoundPush Speakers" render endpoint). The engine feeds audio through a **private, ACL-protected shared ring buffer**, so no user-visible "sink" device is needed.
-- Written in C on the Microsoft SysVAD/WaveRT model because audio miniport drivers in Rust (`windows-drivers-rs`) are not yet mature for PortCls. Kept deliberately tiny (~2–3k LOC), with Static Driver Verifier, Driver Verifier, and IOCTL fuzzing.
-- Distributed via **Microsoft attestation signing** (EV code-signing certificate required). Installed on demand.
-- **Compatibility mode:** users can target any existing virtual device (VB-CABLE, VoiceMeeter) if driver install is blocked by policy.
+**Constraint.** Windows loads kernel audio drivers only when Microsoft-signed. Attestation signing needs
+an EV code-signing certificate, which the project does not have yet. AudioRelay's own "Virtual Mic for
+AudioRelay" is Microsoft-signed; no free route exists (see `docs/virtual-microphone.md` §4).
+
+**Stage 1: VB-CABLE bundled in the SoundPush installer (now).**
+- Packaging: the NSIS installer carries the official VB-CABLE package, downloaded from vb-audio.com in CI
+  and never committed.
+- Install flow: VB-CABLE installs silently (`VBCABLE_Setup_x64.exe -i -h`) in the same elevated step, and
+  the installer asks for one restart at the end, as VB-CABLE requires. The step is skipped if VB-CABLE is
+  already present. Uninstalling SoundPush leaves VB-CABLE in place, since other apps may use it.
+- Licence: VB-Audio's donationware licence permits bundling. The installer and Audio page show "VB-CABLE by
+  VB-Audio. VB-CABLE is a donationware, all participations are welcome". Only standard VB-CABLE (not
+  A+B / C+D) is bundled. Obtain VB-Audio's written confirmation before public release.
+- Engine: no change. It already feeds "CABLE Input"; apps select "CABLE Output". The Audio page shows the
+  exact name to pick and offers "Reinstall virtual microphone".
+
+**Stage 2: our own "SoundPush Microphone" driver (developed in parallel, shipped once signed).**
+- Driver: exposes **one** capture endpoint "SoundPush Microphone" (plus optional "SoundPush Speakers"
+  render endpoint), fed by the engine.
+- Language: C on the Microsoft SysVAD/WaveRT model, because audio miniport drivers in Rust
+  (`windows-drivers-rs`) are not yet mature for PortCls. Kept deliberately tiny (~2–3k LOC), with Static
+  Driver Verifier, Driver Verifier, and IOCTL fuzzing.
+- Source and CI: lives in `sound-push-desktop/drivers/windows-virtual-audio/`, built and test-signed in
+  GitHub Actions. Developers test it with `bcdedit /set testsigning on`.
+- Release: after **Microsoft attestation signing** (EV certificate + Partner Center), the installer ships this
+  driver instead of VB-CABLE.
+- Detection: the engine prefers "SoundPush Microphone" over "CABLE Input", so there is always one virtual
+  microphone in use.
 
 ---
 
@@ -1276,7 +1299,7 @@ Plus: **Quick Settings tile** (toggle last route), **home widget** (active route
 
 **First run (Android):** Welcome → Notification permission (explains why: controls for active streams) → Scan QR / Nearby PCs → paired → Home. Mic, camera, and MediaProjection permissions are requested **only when the feature is first used**.
 
-**Use phone as PC microphone (from phone):** Home → "Use as PC microphone" → (pick PC if > 1 trusted) → mic permission prompt if first time → streaming. The PC shows a toast "Phone microphone active — apps can use *SoundPush Microphone*". If the driver is missing, the PC shows a one-click install (UAC) and the route starts after install.
+**Use phone as PC microphone (from phone):** Home → "Use as PC microphone" → (pick PC if > 1 trusted) → mic permission prompt if first time → streaming. The PC shows a toast "Phone microphone active — apps can use *SoundPush Microphone*" ("*CABLE Output*" while Windows uses bundled VB-CABLE). If the virtual mic is missing, the PC shows a one-click install (UAC on Windows, administrator prompt on macOS) and the route starts after install.
 
 **Use phone as PC microphone (from PC):** Home → "Use phone as microphone" → pick phone → phone gets an Allow prompt (or starts directly if already permitted and the app is foreground/FGS) → streaming.
 

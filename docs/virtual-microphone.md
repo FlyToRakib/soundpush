@@ -61,11 +61,21 @@ Microsoft signed it.
   driver, must be signed with an Apple Developer ID and notarized ($99/year). Local
   builds work as they are.
 
-### Windows: compatibility mode for now 🟡
+### Windows: VB-CABLE installed together with SoundPush (stage 1, next to build) 🟡
 
-- SoundPush detects VB-CABLE, Voicemeeter or Hi-Fi Cable and uses them automatically.
-  Apps then select "CABLE Output".
-- A built-in Windows driver is **not shipped yet**, for the reason in §4.
+- **One installer.** The SoundPush Windows installer contains the official VB-CABLE
+  package. It is downloaded from vb-audio.com during the GitHub build and never committed
+  to the repo. The installer installs VB-CABLE silently in the same run, so the user sees
+  one installer, one UAC prompt and one restart request at the end. VB-CABLE needs a
+  reboot after its first install.
+- **Skips what exists.** If VB-CABLE is already installed, the step is skipped.
+  Uninstalling SoundPush leaves VB-CABLE in place, because other apps may use it.
+- **Credit (required by VB-Audio's licence).** The installer and the Audio page show
+  "VB-CABLE by VB-Audio. VB-CABLE is a donationware, all participations are welcome",
+  with a link to vb-audio.com. Only the standard VB-CABLE may be bundled, not A+B or C+D.
+- **No engine change needed.** SoundPush already detects "CABLE Input" and feeds the
+  phone microphone into it. Apps choose **"CABLE Output"**.
+- **Until the bundled installer ships,** users install VB-CABLE themselves (§5).
 
 ### Linux 🟡
 
@@ -89,13 +99,26 @@ Options we checked:
 | Bundle VB-CABLE | ✅ | Licence from VB-Audio | Still third-party; redistribution needs their permission |
 | User installs VB-CABLE (current) | ✅ | Free | One-time install by the user |
 
-**Current decision:** Windows uses compatibility mode until the project has an EV
-certificate (a sponsor, a foundation, or a maintainer with a company). The driver
-design is ready in the plan (`docs/soundpush-final.md` §10.7):
+**Final plan for Windows (decided 2026-09-13):**
 
-- a WaveRT/PortCls driver exposing one capture endpoint "SoundPush Microphone"
-- fed by the engine through its render endpoint
-- installed by the app with `pnputil`
+1. **Stage 1: bundle VB-CABLE (now).** VB-CABLE is installed together with SoundPush
+   (§3). It is free, Microsoft-signed and allowed to be bundled under VB-Audio's
+   donationware licence. Before the public release, ask VB-Audio for a short written
+   confirmation (vb-audio.com/Services/support.htm).
+2. **Stage 2: our own driver (in parallel, switched on after signing).**
+   - Write the SoundPush Windows driver in this repo at
+     `sound-push-desktop/drivers/windows-virtual-audio/`: a WaveRT/PortCls driver
+     exposing one capture endpoint "SoundPush Microphone", fed by the engine.
+   - Build and test-sign it in GitHub Actions. Developers can test it with
+     `bcdedit /set testsigning on`.
+   - When the project has an EV certificate and a Microsoft Partner Center account,
+     submit the driver for attestation signing.
+   - From then on the installer installs "SoundPush Microphone" instead of VB-CABLE.
+   - The engine already prefers "SoundPush Microphone" over "CABLE Input" (`VIRTUAL_CABLES`
+     order in `hooks.rs`), so users who still have VB-CABLE keep working.
+
+There is always exactly **one** virtual microphone that SoundPush installs: VB-CABLE
+before the signed driver exists, and SoundPush Microphone after.
 
 ## 5. Testing on Windows today
 
