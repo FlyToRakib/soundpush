@@ -5,6 +5,7 @@ mod commands;
 mod hooks;
 mod power;
 mod tray;
+mod virtual_mic;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -166,6 +167,9 @@ fn main() {
             commands::export_diagnostics,
             commands::open_logs_folder,
             commands::open_url,
+            commands::virtual_mic_status,
+            commands::install_virtual_mic,
+            commands::uninstall_virtual_mic,
         ])
         .build(tauri::generate_context!());
 

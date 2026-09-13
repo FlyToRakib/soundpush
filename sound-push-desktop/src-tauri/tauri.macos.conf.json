@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../drivers/macos-virtual-mic/build/SoundPushMicrophone.driver": "SoundPushMicrophone.driver"
+    }
+  }
+}

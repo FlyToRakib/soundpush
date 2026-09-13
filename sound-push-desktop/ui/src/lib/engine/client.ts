@@ -56,6 +56,9 @@ export const engine = {
   setMicMuted: (muted: boolean) => call<void>("set_mic_muted", { muted }),
   setMicMonitor: (enabled: boolean) => call<void>("set_mic_monitor", { enabled }),
   refreshAudioDevices: () => call<void>("refresh_audio_devices"),
+  virtualMicStatus: () => call<{ supported: boolean; installed: boolean }>("virtual_mic_status"),
+  installVirtualMic: () => call<void>("install_virtual_mic"),
+  uninstallVirtualMic: () => call<void>("uninstall_virtual_mic"),
 
   // settings & app
   updateSettings: (settings: Settings) => call<Settings>("update_settings", { settings }),

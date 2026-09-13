@@ -4,7 +4,7 @@
   import Button from "../lib/components/Button.svelte";
   import Card from "../lib/components/Card.svelte";
   import { engine } from "../lib/engine/client";
-  import { run } from "../lib/stores/toast.svelte";
+  import { run, toasts } from "../lib/stores/toast.svelte";
   import LevelMeter from "../lib/components/LevelMeter.svelte";
   import Segmented from "../lib/components/Segmented.svelte";
   import Select from "../lib/components/Select.svelte";
@@ -23,7 +23,8 @@
   const DEFAULT = "__default__";
   const outputs = $derived([
     { value: DEFAULT, label: t("audio.followDefault") },
-    ...app.audioDevices.filter((d) => !d.isInput).map((d) => ({ value: d.id, label: d.name })),
+    // Virtual cables are microphone plumbing, not speakers.
+    ...app.audioDevices.filter((d) => !d.isInput && !d.virtualCable).map((d) => ({ value: d.id, label: d.name })),
   ]);
   const inputs = $derived([
     { value: DEFAULT, label: t("audio.followDefault") },
@@ -44,8 +45,42 @@
     ...(chosenVm && !chosenIsCable ? [{ value: chosenVm, label: t("audio.virtualMic.notCableOption", chosenVm) }] : []),
   ]);
 
-  // Pick up virtual cables installed while the app was running.
+  /** SoundPush's own virtual microphone driver (built in on macOS). */
+  let driver = $state<{ supported: boolean; installed: boolean } | null>(null);
+  let installing = $state(false);
+
+  async function loadDriver() {
+    try {
+      driver = await engine.virtualMicStatus();
+    } catch {
+      driver = null;
+    }
+  }
+
+  async function recheck() {
+    await loadDriver();
+    await run(engine.refreshAudioDevices());
+  }
+
+  async function changeDriver(install: boolean) {
+    if (installing) return;
+    installing = true;
+    try {
+      await (install ? engine.installVirtualMic() : engine.uninstallVirtualMic());
+      if (install) toasts.show(t("audio.virtualMic.installed"), "info");
+    } catch (e) {
+      const message = (e as { message?: string }).message ?? String(e);
+      // Closing the password prompt is a choice, not an error.
+      if (!message.includes("cancelled")) toasts.show(t("audio.virtualMic.installFailed", message), "error");
+    } finally {
+      installing = false;
+      await loadDriver();
+    }
+  }
+
+  // Pick up virtual microphones installed while the app was running.
   onMount(() => {
+    void loadDriver();
     void engine.refreshAudioDevices().catch(() => {});
   });
   const bitrates = [10, 24, 32, 64, 96, 128, 192, 256, 320, 450, 510].map((k) => ({
@@ -102,6 +137,23 @@
     {/if}
     {#if app.capabilities.virtualMicInput}
       <p class="vm-ready">{t("audio.virtualMic.ready", app.capabilities.virtualMicInput)}</p>
+      {#if driver?.installed}
+        <div class="row">
+          <Button variant="ghost" onclick={() => changeDriver(false)}>{t("audio.virtualMic.remove")}</Button>
+        </div>
+      {/if}
+    {:else if driver?.supported}
+      <div class="vm-setup">
+        <p class="muted">{t(driver.installed ? "audio.virtualMic.installedPending" : "audio.virtualMic.installHint")}</p>
+        <div class="row">
+          {#if !driver.installed}
+            <Button variant="primary" onclick={() => changeDriver(true)}>
+              {t(installing ? "audio.virtualMic.installing" : "audio.virtualMic.install")}
+            </Button>
+          {/if}
+          <Button onclick={recheck}>{t("audio.virtualMic.recheck")}</Button>
+        </div>
+      </div>
     {:else}
       <div class="vm-setup">
         <p class="muted">{t("audio.virtualMic.missing", cable.name)}</p>

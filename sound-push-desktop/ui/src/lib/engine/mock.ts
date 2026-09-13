@@ -107,6 +107,8 @@ function emit(patch: Partial<EngineState>) {
   listeners.forEach((l) => l(state));
 }
 
+let mockDriverInstalled = false;
+
 export const mockEngine = {
   subscribe(handler: (s: EngineState) => void) {
     listeners.add(handler);
@@ -165,6 +167,23 @@ export const mockEngine = {
         return undefined as T;
       case "export_diagnostics":
         return "/tmp/soundpush-diagnostics.zip" as T;
+      case "virtual_mic_status":
+        return { supported: true, installed: mockDriverInstalled } as T;
+      case "install_virtual_mic":
+      case "uninstall_virtual_mic": {
+        mockDriverInstalled = cmd === "install_virtual_mic";
+        const input = mockDriverInstalled ? "SoundPush Microphone" : null;
+        emit({
+          capabilities: { ...state.capabilities, virtualMic: mockDriverInstalled, virtualMicDevice: input, virtualMicInput: input },
+          audioDevices: [
+            ...state.audioDevices.filter((d) => !d.virtualCable),
+            ...(mockDriverInstalled
+              ? [{ id: "SoundPush Microphone", name: "SoundPush Microphone", isInput: false, isDefault: false, virtualCable: true }]
+              : []),
+          ],
+        });
+        return undefined as T;
+      }
       default:
         return undefined as T;
     }

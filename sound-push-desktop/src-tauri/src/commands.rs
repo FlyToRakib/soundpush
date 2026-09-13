@@ -227,6 +227,38 @@ pub fn open_logs_folder(app: AppHandle, state: State<'_, AppState>) -> CmdResult
 }
 
 #[tauri::command]
+pub fn virtual_mic_status() -> crate::virtual_mic::Status {
+    crate::virtual_mic::status()
+}
+
+/// Install SoundPush Microphone. Waits while the user answers the OS administrator prompt.
+#[tauri::command]
+pub async fn install_virtual_mic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    change_virtual_mic(move || crate::virtual_mic::install(&app)).await?;
+    state.engine()?.refresh_audio_devices()?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn uninstall_virtual_mic(state: State<'_, AppState>) -> CmdResult<()> {
+    change_virtual_mic(crate::virtual_mic::uninstall).await?;
+    state.engine()?.refresh_audio_devices()?;
+    Ok(())
+}
+
+async fn change_virtual_mic(f: impl FnOnce() -> Result<(), String> + Send + 'static) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = f();
+        // The audio server needs a moment to restart and publish its devices.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        result
+    })
+    .await
+    .map_err(|e| EngineError::Internal(e.to_string()))?
+    .map_err(|e| EngineError::Internal(e).into())
+}
+
+#[tauri::command]
 pub fn open_url(app: AppHandle, url: String) -> CmdResult<()> {
     if !url.starts_with("https://") {
         return Err(invalid("url"));
