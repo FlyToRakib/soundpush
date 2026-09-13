@@ -94,6 +94,6 @@ fn windows_mute(muted: bool) -> windows::core::Result<()> {
         let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
         let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
         let volume: IAudioEndpointVolume = device.Activate(CLSCTX_ALL, None)?;
-        volume.SetMute(muted, std::ptr::null())
+        volume.SetMute(windows::Win32::Foundation::BOOL::from(muted), std::ptr::null())
     }
 }

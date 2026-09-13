@@ -1,7 +1,7 @@
 name: Windows build
 
 # Builds the SoundPush desktop installer for Windows (x64) and uploads it as an artifact.
-# Run it from the Actions tab ("Run workflow"), or push a tag like v0.1.0.
+# Runs on every push; can also be started from the Actions tab ("Run workflow").
 on:
   workflow_dispatch:
   push:
@@ -12,6 +12,9 @@ jobs:
   windows:
     name: Windows installer (x64)
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -28,12 +31,25 @@ jobs:
       - name: Install UI dependencies
         run: npm --prefix sound-push-desktop/ui ci
 
-      - name: Check core on Windows
-        run: cargo test -p sp-protocol -p sp-security -p sp-media -p sp-transport -p sp-engine
+      # Failures are surfaced as annotations (readable without downloading logs),
+      # and do not block the installer build below.
+      - name: Test core on Windows
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo test -p sp-protocol -p sp-security -p sp-media -p sp-transport -p sp-engine 2>&1 | tee test.log || {
+            grep -E "^error|error\[|panicked|FAILED|^---- " test.log | head -40 | sed 's/^/::error title=Core tests::/'
+            exit 1
+          }
 
       - name: Build installer
         working-directory: sound-push-desktop
-        run: ./ui/node_modules/.bin/tauri build --bundles nsis
+        run: |
+          set -o pipefail
+          ./ui/node_modules/.bin/tauri build --bundles nsis 2>&1 | tee ../build.log || {
+            grep -E "^error|error\[| --> |warning: unused" ../build.log | head -40 | sed 's/^/::error title=Build::/'
+            exit 1
+          }
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

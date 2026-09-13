@@ -39,6 +39,8 @@ pub struct Endpoint {
     cert: CertificateDer<'static>,
     key: Arc<Vec<u8>>,
     transport: Arc<quinn::TransportConfig>,
+    /// True when bound to a dual-stack IPv6 socket (IPv4 targets are then IPv4-mapped).
+    ipv6: bool,
 }
 
 impl Endpoint {
@@ -72,6 +74,7 @@ impl Endpoint {
         server_config.transport_config(transport.clone());
 
         let socket = bind_socket(config.preferred_port)?;
+        let ipv6 = socket.local_addr().is_ok_and(|a| a.is_ipv6());
         let runtime = quinn::default_runtime().ok_or_else(|| TransportError::Tls("no async runtime".into()))?;
         let inner = quinn::Endpoint::new(quinn::EndpointConfig::default(), Some(server_config), socket, runtime)
             .map_err(TransportError::Bind)?;
@@ -82,6 +85,7 @@ impl Endpoint {
             cert: cert_der,
             key,
             transport,
+            ipv6,
         })
     }
 
@@ -109,7 +113,7 @@ impl Endpoint {
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client));
         client_config.transport_config(self.transport.clone());
 
-        let addr = normalize(addr);
+        let addr = if self.ipv6 { normalize(addr) } else { addr };
         debug!(%addr, "dialing peer");
         let connecting = self.inner.connect_with(client_config, addr, SERVER_NAME)?;
         let conn = connecting.await?;
@@ -138,14 +142,23 @@ fn private_key(der: &[u8]) -> PrivateKeyDer<'static> {
     PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(der.to_vec()))
 }
 
+/// Bind a dual-stack IPv6 socket so one socket serves IPv4 and IPv6 peers.
+/// Windows defaults IPV6_V6ONLY to true (Linux/macOS/Android default to false), so it
+/// must be turned off explicitly or every IPv4 peer is unreachable.
+fn bind_dual_stack(port: u16) -> std::io::Result<UdpSocket> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_only_v6(false)?;
+    socket.bind(&SocketAddr::from((Ipv6Addr::UNSPECIFIED, port)).into())?;
+    Ok(socket.into())
+}
+
 fn bind_socket(preferred: u16) -> Result<UdpSocket, TransportError> {
     let candidates = [preferred, 0];
     let mut last_err = None;
     for port in candidates {
-        // Dual-stack IPv6 socket accepts IPv4-mapped addresses on all desktop OSes and Android.
-        match UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, port)))
-            .or_else(|_| UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port))))
-        {
+        // Fall back to IPv4-only where IPv6 is disabled.
+        match bind_dual_stack(port).or_else(|_| UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))) {
             Ok(socket) => {
                 if port != preferred {
                     warn!(preferred, "preferred port busy, using an ephemeral port");
