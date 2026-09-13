@@ -37,7 +37,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Gain 0–20 dB, soft limiter, RNNoise, level meter, mic monitor | ✅ | |
 | "Ask" permission prompt for microphone | ✅ | tested end-to-end |
 | Headset mode (both routes in one action) | 🟡 | desktop + Android home task |
-| SoundPush signed Windows virtual audio driver | ⛔ | needs WDK build machine + EV code-signing cert |
+| SoundPush signed Windows virtual audio driver | ⛔ | Windows loads kernel drivers only when Microsoft-signed, which needs an EV code-signing cert (AudioRelay's driver is signed this way). No free route exists; see [virtual-microphone.md](virtual-microphone.md) §4 |
 | Linux PipeWire virtual source created by the app | ⏳ | |
 | Push-to-talk / mute global hotkey | ⏳ | setting exists; tray mute works |
 
@@ -70,7 +70,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 |---|---|---|
 | Desktop app runs on macOS (speaker, mic, pairing) | 🟡 | runs on this Mac; phone paired and played audio through the Mac speakers |
 | System-audio capture via process taps | 🟡 | `sp-audio-io/src/macos_tap.rs`: tap + aggregate device open and deliver frames; real audio needs the System Audio Recording permission, which macOS grants only to the bundled `SoundPush.app` (unbundled dev binaries receive silence). Minimum macOS raised to 14.2. |
-| AudioServerPlugIn "SoundPush Microphone" | ⛔ | needs Xcode + Apple Developer ID for notarization |
+| AudioServerPlugIn "SoundPush Microphone" | 🟡 | own C driver in `sound-push-desktop/drivers/macos-virtual-mic`, embedded in the app and installed from the Audio page; needs a real install test. Public distribution needs Apple Developer ID notarization |
 
 ## Phase 5 — Hardening & release
 
