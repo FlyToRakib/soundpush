@@ -45,6 +45,15 @@ pub trait PlatformHooks: Send + Sync + 'static {
         configured.map(|d| RenderTarget::Output(d.to_string()))
     }
 
+    /// When `output` is the playback side of a known virtual cable, the name other apps
+    /// select as a microphone (its recording side). `None` for regular speakers.
+    fn virtual_cable_input(&self, _output: &str) -> Option<String> {
+        None
+    }
+
+    /// The OS audio device list may have changed; drop cached device detection.
+    fn audio_devices_changed(&self) {}
+
     /// Mute or unmute this device's physical speakers ("Mute PC"). Returns false if unsupported.
     fn set_speakers_muted(&self, _muted: bool) -> bool {
         false

@@ -85,10 +85,18 @@ let state: EngineState = {
   requests: [],
   notices: [],
   settings,
-  capabilities: { systemAudio: true, appAudio: false, microphone: true, speaker: true, virtualMic: false },
+  capabilities: {
+    systemAudio: true,
+    appAudio: false,
+    microphone: true,
+    speaker: true,
+    virtualMic: false,
+    virtualMicDevice: null,
+    virtualMicInput: null,
+  },
   audioDevices: [
-    { id: "Speakers", name: "Speakers", isInput: false, isDefault: true },
-    { id: "Microphone", name: "Microphone", isInput: true, isDefault: true },
+    { id: "Speakers", name: "Speakers", isInput: false, isDefault: true, virtualCable: false },
+    { id: "Microphone", name: "Microphone", isInput: true, isDefault: true, virtualCable: false },
   ],
   micLevelDb: -120,
 };

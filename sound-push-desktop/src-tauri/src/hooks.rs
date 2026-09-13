@@ -13,15 +13,25 @@ use tracing::warn;
 
 use crate::power::SleepInhibitor;
 
-/// Playback devices that feed a virtual microphone, in preference order.
-const VIRTUAL_MIC_CANDIDATES: &[&str] = &[
-    "SoundPush Microphone",
-    "CABLE Input",
-    "VB-Audio Virtual Cable",
-    "BlackHole 2ch",
-    "BlackHole",
-    "Voicemeeter Input",
+/// Virtual cables in preference order: (part of the playback device name, recording-side
+/// name that apps select as a microphone). `None` when both sides share the device name.
+const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
+    ("SoundPush Microphone", None),
+    ("CABLE Input", Some("CABLE Output (VB-Audio Virtual Cable)")),
+    ("Hi-Fi Cable Input", Some("Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)")),
+    ("BlackHole", None),
+    ("Voicemeeter Input", Some("Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)")),
+    ("Voicemeeter AUX Input", Some("Voicemeeter Out B2 (VB-Audio Voicemeeter AUX VAIO)")),
+    ("Loopback Audio", None),
 ];
+
+/// Recording-side name for a virtual cable's playback device; `None` for real speakers.
+fn cable_input_name(output: &str) -> Option<String> {
+    VIRTUAL_CABLES
+        .iter()
+        .find(|(playback, _)| output.contains(playback))
+        .map(|(_, recording)| recording.map_or_else(|| output.to_string(), str::to_string))
+}
 
 pub fn data_dir() -> PathBuf {
     dirs::data_local_dir()
@@ -67,9 +77,9 @@ impl DesktopHooks {
                 .filter(|d| d.kind == DeviceKind::Output)
                 .map(|d| d.name)
                 .collect();
-            let found = VIRTUAL_MIC_CANDIDATES
+            let found = VIRTUAL_CABLES
                 .iter()
-                .find_map(|c| outputs.iter().find(|o| o.contains(c)).cloned());
+                .find_map(|(playback, _)| outputs.iter().find(|o| o.contains(playback)).cloned());
             *cache = (Some(Instant::now()), found);
         }
         cache.1.clone()
@@ -106,10 +116,23 @@ impl PlatformHooks for DesktopHooks {
     }
 
     fn virtual_mic_target(&self, configured: Option<&str>) -> Option<RenderTarget> {
+        // A chosen device counts only if it is a virtual cable: feeding the phone's microphone
+        // into real speakers plays the user's voice out loud and no app can record it.
         configured
+            .filter(|d| cable_input_name(d).is_some())
             .map(str::to_string)
             .or_else(|| self.detect_virtual_mic())
             .map(RenderTarget::Output)
+    }
+
+    fn virtual_cable_input(&self, output: &str) -> Option<String> {
+        cable_input_name(output)
+    }
+
+    fn audio_devices_changed(&self) {
+        if let Ok(mut cache) = self.virtual_mic_cache.lock() {
+            cache.0 = None;
+        }
     }
 
     fn set_speakers_muted(&self, muted: bool) -> bool {
@@ -204,4 +227,20 @@ fn random_key() -> [u8; 32] {
     let mut key = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut key);
     key
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cable_input_name;
+
+    #[test]
+    fn only_virtual_cables_feed_the_virtual_microphone() {
+        assert_eq!(
+            cable_input_name("CABLE Input (VB-Audio Virtual Cable)").as_deref(),
+            Some("CABLE Output (VB-Audio Virtual Cable)")
+        );
+        assert_eq!(cable_input_name("BlackHole 2ch").as_deref(), Some("BlackHole 2ch"));
+        assert_eq!(cable_input_name("MacBook Air Speakers"), None);
+        assert_eq!(cable_input_name("BenQ EW3270U (NVIDIA High Definition Audio)"), None);
+    }
 }

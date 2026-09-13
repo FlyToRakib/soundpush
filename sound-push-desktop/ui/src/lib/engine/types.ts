@@ -216,6 +216,8 @@ export interface AudioDeviceView {
   name: string;
   isInput: boolean;
   isDefault: boolean;
+  /** Playback side of a virtual cable that other apps can use as a microphone. */
+  virtualCable: boolean;
 }
 
 export interface EngineState {
@@ -233,6 +235,10 @@ export interface EngineState {
     microphone: boolean;
     speaker: boolean;
     virtualMic: boolean;
+    /** Device the phone microphone is fed into. */
+    virtualMicDevice: string | null;
+    /** What other apps select as their microphone. */
+    virtualMicInput: string | null;
   };
   audioDevices: AudioDeviceView[];
   micLevelDb: number;

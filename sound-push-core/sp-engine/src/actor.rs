@@ -390,15 +390,21 @@ impl Actor {
     // ============================================================ helpers
 
     fn local_capabilities(&self) -> LocalCapabilities {
+        let virtual_mic = self
+            .hooks
+            .virtual_mic_target(self.settings.desktop.virtual_mic_device.as_deref());
+        let virtual_mic_device = match &virtual_mic {
+            Some(sp_audio_io::RenderTarget::Output(name)) => Some(name.clone()),
+            _ => None,
+        };
         LocalCapabilities {
             system_audio: self.backend.supports_loopback(),
             app_audio: self.hooks.app_audio_source().is_some(),
             microphone: true,
             speaker: true,
-            virtual_mic: self
-                .hooks
-                .virtual_mic_target(self.settings.desktop.virtual_mic_device.as_deref())
-                .is_some(),
+            virtual_mic: virtual_mic.is_some(),
+            virtual_mic_input: virtual_mic_device.as_deref().and_then(|d| self.hooks.virtual_cable_input(d)),
+            virtual_mic_device,
         }
     }
 
@@ -778,6 +784,7 @@ impl Actor {
     }
 
     fn refresh_audio_devices(&mut self) {
+        self.hooks.audio_devices_changed();
         // A broken audio stack must never stop the engine from starting.
         let backend = self.backend.clone();
         let listed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.list_devices()));
@@ -792,9 +799,11 @@ impl Actor {
                 Vec::new()
             }
         };
+        let hooks = self.hooks.clone();
         self.audio_devices = devices
             .into_iter()
             .map(|d| AudioDeviceView {
+                virtual_cable: d.kind == DeviceKind::Output && hooks.virtual_cable_input(&d.name).is_some(),
                 id: d.id,
                 name: d.name,
                 is_input: d.kind == DeviceKind::Input,

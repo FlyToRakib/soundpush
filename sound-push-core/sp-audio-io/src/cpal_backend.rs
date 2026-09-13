@@ -156,10 +156,15 @@ impl AudioBackend for CpalBackend {
         let host = host();
         let default_in = host.default_input_device().and_then(|d| d.name().ok());
         let default_out = host.default_output_device().and_then(|d| d.name().ok());
+        // SoundPush's own system-audio capture device (macOS) is internal, never a user choice.
+        let internal = |name: &str| name == "SoundPush System Audio";
         let mut out = Vec::new();
         if let Ok(devices) = host.input_devices() {
             for d in devices {
                 let Ok(name) = d.name() else { continue };
+                if internal(&name) {
+                    continue;
+                }
                 let Ok(cfg) = d.default_input_config() else { continue };
                 out.push(DeviceInfo {
                     id: name.clone(),
@@ -174,6 +179,9 @@ impl AudioBackend for CpalBackend {
         if let Ok(devices) = host.output_devices() {
             for d in devices {
                 let Ok(name) = d.name() else { continue };
+                if internal(&name) {
+                    continue;
+                }
                 let Ok(cfg) = d.default_output_config() else { continue };
                 out.push(DeviceInfo {
                     id: name.clone(),

@@ -45,6 +45,10 @@ pub struct LocalCapabilities {
     pub microphone: bool,
     pub speaker: bool,
     pub virtual_mic: bool,
+    /// Playback device the phone microphone is fed into (e.g. "CABLE Input (VB-Audio Virtual Cable)").
+    pub virtual_mic_device: Option<String>,
+    /// What other apps select as their microphone (e.g. "CABLE Output (VB-Audio Virtual Cable)").
+    pub virtual_mic_input: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -269,6 +273,8 @@ pub struct AudioDeviceView {
     pub name: String,
     pub is_input: bool,
     pub is_default: bool,
+    /// Playback side of a virtual cable that can act as a microphone for other apps.
+    pub virtual_cable: bool,
 }
 
 #[cfg(test)]

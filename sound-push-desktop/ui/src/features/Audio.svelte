@@ -1,5 +1,10 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import Banner from "../lib/components/Banner.svelte";
+  import Button from "../lib/components/Button.svelte";
   import Card from "../lib/components/Card.svelte";
+  import { engine } from "../lib/engine/client";
+  import { run } from "../lib/stores/toast.svelte";
   import LevelMeter from "../lib/components/LevelMeter.svelte";
   import Segmented from "../lib/components/Segmented.svelte";
   import Select from "../lib/components/Select.svelte";
@@ -24,10 +29,25 @@
     { value: DEFAULT, label: t("audio.followDefault") },
     ...app.audioDevices.filter((d) => d.isInput).map((d) => ({ value: d.id, label: d.name })),
   ]);
+  // Only virtual cables can act as a microphone for other apps; real speakers would
+  // just play the phone's microphone out loud.
+  const cable = navigator.userAgent.includes("Mac")
+    ? { name: "BlackHole", url: "https://existential.audio/blackhole/" }
+    : { name: "VB-CABLE", url: "https://vb-audio.com/Cable/" };
+  const chosenVm = $derived(s.desktop.virtualMicDevice);
+  const chosenIsCable = $derived(app.audioDevices.some((d) => d.id === chosenVm && d.virtualCable));
+  /** A chosen device SoundPush can't use (a speaker, or a cable that is no longer present). */
+  const ignoredVm = $derived(chosenVm && app.capabilities.virtualMicDevice !== chosenVm ? chosenVm : null);
   const virtualTargets = $derived([
     { value: DEFAULT, label: t("audio.virtualMic.none") },
-    ...app.audioDevices.filter((d) => !d.isInput).map((d) => ({ value: d.id, label: d.name })),
+    ...app.audioDevices.filter((d) => d.virtualCable).map((d) => ({ value: d.id, label: d.name })),
+    ...(chosenVm && !chosenIsCable ? [{ value: chosenVm, label: t("audio.virtualMic.notCableOption", chosenVm) }] : []),
   ]);
+
+  // Pick up virtual cables installed while the app was running.
+  onMount(() => {
+    void engine.refreshAudioDevices().catch(() => {});
+  });
   const bitrates = [10, 24, 32, 64, 96, 128, 192, 256, 320, 450, 510].map((k) => ({
     value: String(k * 1000),
     label: `${k} kb/s`,
@@ -72,6 +92,25 @@
   </Card>
 
   <Card title={t("audio.virtualMic")} description={t("audio.virtualMic.desc")}>
+    {#if ignoredVm}
+      <Banner
+        severity="warning"
+        message={t(app.audioDevices.some((d) => d.id === ignoredVm) ? "audio.virtualMic.notCable" : "audio.virtualMic.notFound", ignoredVm)}
+        actionLabel={t("audio.virtualMic.useAuto")}
+        onaction={() => updateSettings((x) => (x.desktop.virtualMicDevice = null))}
+      />
+    {/if}
+    {#if app.capabilities.virtualMicInput}
+      <p class="vm-ready">{t("audio.virtualMic.ready", app.capabilities.virtualMicInput)}</p>
+    {:else}
+      <div class="vm-setup">
+        <p class="muted">{t("audio.virtualMic.missing", cable.name)}</p>
+        <div class="row">
+          <Button variant="primary" onclick={() => run(engine.openUrl(cable.url))}>{t("audio.virtualMic.get", cable.name)}</Button>
+          <Button onclick={() => run(engine.refreshAudioDevices())}>{t("audio.virtualMic.recheck")}</Button>
+        </div>
+      </div>
+    {/if}
     <SettingRow label={t("audio.virtualMic.device")} description={t("audio.virtualMic.help")}>
       <Select
         value={s.desktop.virtualMicDevice ?? DEFAULT}
@@ -142,6 +181,15 @@
 <style>
   .page {
     max-width: 760px;
+  }
+  .vm-ready,
+  .vm-setup p {
+    margin: 0;
+  }
+  .vm-setup {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
   }
   .disclosure {
     align-self: flex-start;

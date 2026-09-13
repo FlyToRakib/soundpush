@@ -82,7 +82,13 @@
             <span class="task-text">
               <strong>{t(`task.${task.id}`)}</strong>
               <span class="caption">
-                {available ? t(`task.${task.id}.desc`) : t(task.unavailableKey ?? "")}
+                {#if !available}
+                  {t(task.unavailableKey ?? "")}
+                {:else if task.id === "receiveMicToVirtualMic" && app.capabilities.virtualMicInput}
+                  {t("task.receiveMicToVirtualMic.descNamed", app.capabilities.virtualMicInput)}
+                {:else}
+                  {t(`task.${task.id}.desc`)}
+                {/if}
               </span>
             </span>
           </button>
