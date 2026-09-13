@@ -31,7 +31,32 @@ just desktop-dev    # run the desktop app in development mode
 just mobile-build   # build the Android app (debug)
 ```
 
-Requirements: Rust (see `rust-toolchain.toml`), Node 22 + pnpm, JDK 17, Android SDK + NDK, `cargo-ndk`.
+Requirements: Rust (see `rust-toolchain.toml`), Node 22 + npm, JDK 17, Android SDK + NDK, `cargo-ndk`.
+
+### Windows desktop app (build on Windows)
+
+The same steps run in GitHub Actions (`.github/workflows/windows-build.yml`).
+
+1. Install the prerequisites (once):
+   - [Git](https://git-scm.com/download/win)
+   - [Rust](https://rustup.rs) (the default MSVC toolchain)
+   - [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **Desktop development with C++**
+   - [Node.js 22](https://nodejs.org)
+   - WebView2 is already part of Windows 10/11
+2. Build (PowerShell):
+
+   ```powershell
+   git clone https://github.com/FlyToRakib/soundpush.git
+   cd soundpush
+   npm --prefix sound-push-desktop/ui ci
+   cd sound-push-desktop
+   .\ui\node_modules\.bin\tauri build --bundles nsis
+   ```
+
+3. The installer is at `target\release\bundle\nsis\SoundPush_0.1.0_x64-setup.exe` (repository root `target` folder).
+4. For development with live reload, run `.\ui\node_modules\.bin\tauri dev` from `sound-push-desktop`.
+
+Virtual microphone on Windows: open **Audio → Install VB-CABLE** in the app. See [`docs/virtual-microphone.md`](docs/virtual-microphone.md).
 
 ## License
 
