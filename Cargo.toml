@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "sound-push-core/sp-protocol",
+    "sound-push-core/sp-security",
+    "sound-push-core/sp-media",
+    "sound-push-core/sp-transport",
+    "sound-push-core/sp-discovery",
+    "sound-push-core/sp-audio-io",
+    "sound-push-core/sp-engine",
+    "sound-push-core/sp-ffi",
+    "sound-push-desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/soundpush/soundpush"
+rust-version = "1.85"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "unwind"

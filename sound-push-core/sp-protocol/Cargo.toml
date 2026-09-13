@@ -1,0 +1,18 @@
+[package]
+name = "sp-protocol"
+description = "SoundPush wire protocol: control messages, media packet header, version negotiation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prost = "0.13"
+bytes = "1"
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

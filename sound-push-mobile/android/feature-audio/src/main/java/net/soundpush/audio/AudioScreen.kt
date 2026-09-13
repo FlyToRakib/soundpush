@@ -1,0 +1,163 @@
+package net.soundpush.audio
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import kotlin.math.roundToInt
+import net.soundpush.engine.AudioEffects
+import net.soundpush.engine.EngineState
+import net.soundpush.engine.SoundPush
+import net.soundpush.ui.R
+import net.soundpush.ui.components.Choice
+import net.soundpush.ui.components.SectionTitle
+import net.soundpush.ui.components.SettingChoice
+import net.soundpush.ui.components.SettingSlider
+import net.soundpush.ui.components.SettingSwitch
+import net.soundpush.ui.components.SpCard
+import net.soundpush.ui.theme.Tokens
+
+@Composable
+fun AudioScreen(state: EngineState) {
+    val s = state.settings
+    val unavailable = stringResource(R.string.effect_unavailable)
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(start = Tokens.Space.md, end = Tokens.Space.md, bottom = Tokens.Space.lg),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+    ) {
+        SectionTitle(stringResource(R.string.audio_latency))
+        SpCard {
+            SettingChoice(
+                stringResource(R.string.audio_latency),
+                s.stream.latency,
+                listOf(
+                    Choice("lowLatency", stringResource(R.string.latency_lowLatency)),
+                    Choice("balanced", stringResource(R.string.latency_balanced)),
+                    Choice("stable", stringResource(R.string.latency_stable)),
+                ),
+            ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(latency = v)) } }
+            Divider()
+            SettingChoice(
+                stringResource(R.string.audio_quality),
+                s.stream.quality,
+                listOf(
+                    Choice("auto", stringResource(R.string.quality_auto)),
+                    Choice("opus", stringResource(R.string.quality_opus)),
+                    Choice("lossless", stringResource(R.string.quality_lossless)),
+                ),
+            ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(quality = v)) } }
+            if (s.stream.quality == "opus") {
+                Divider()
+                SettingChoice(
+                    stringResource(R.string.audio_bitrate),
+                    s.stream.opusBitrate.toString(),
+                    listOf(10, 24, 32, 64, 96, 128, 192, 256, 320, 450, 510).map { Choice((it * 1000).toString(), "$it kb/s") },
+                ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(opusBitrate = v.toInt())) } }
+            }
+        }
+
+        SectionTitle(stringResource(R.string.audio_playback))
+        SpCard {
+            SettingSlider(
+                label = stringResource(R.string.audio_volume),
+                value = s.output.volume,
+                range = 0f..2f,
+                format = { "${(it * 100).roundToInt()}%" },
+            ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(volume = v)) } }
+            SettingSwitch(stringResource(R.string.audio_mono), s.output.mono) { v ->
+                SoundPush.updateSettings { it.copy(output = it.output.copy(mono = v)) }
+            }
+            Divider()
+            SettingSlider(
+                label = stringResource(R.string.audio_av_offset),
+                value = s.output.avOffsetMs.toFloat(),
+                range = 0f..500f,
+                format = { "${(it / 10).roundToInt() * 10} ms" },
+            ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(avOffsetMs = (v / 10).roundToInt() * 10)) } }
+            Divider()
+            SettingChoice(
+                stringResource(R.string.audio_focus),
+                s.output.audioFocus,
+                listOf(
+                    Choice("pause", stringResource(R.string.focus_pause)),
+                    Choice("duck", stringResource(R.string.focus_duck)),
+                    Choice("mix", stringResource(R.string.focus_mix)),
+                    Choice("mixDuringCalls", stringResource(R.string.focus_mixDuringCalls)),
+                ),
+            ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(audioFocus = v)) } }
+            SettingSwitch(stringResource(R.string.audio_pause_on_disconnect), s.output.pauseOnHeadsetDisconnect) { v ->
+                SoundPush.updateSettings { it.copy(output = it.output.copy(pauseOnHeadsetDisconnect = v)) }
+            }
+        }
+
+        SectionTitle(stringResource(R.string.audio_mic))
+        SpCard {
+            SettingChoice(
+                stringResource(R.string.audio_mic_mode),
+                s.mic.mode,
+                listOf("voiceCommunication", "default", "raw", "voicePerformance", "voiceRecognition", "camcorder", "mic")
+                    .map { mode -> Choice(mode, micModeLabel(mode)) },
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(mode = v)) } }
+            Divider()
+            SettingSlider(
+                label = stringResource(R.string.audio_gain),
+                value = s.mic.gainDb,
+                range = 0f..20f,
+                format = { "+${it.roundToInt()} dB" },
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(gainDb = v.roundToInt().toFloat())) } }
+            SettingSwitch(
+                stringResource(R.string.audio_noise_suppression),
+                s.mic.noiseSuppression,
+                stringResource(R.string.audio_noise_suppression_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(noiseSuppression = v)) } }
+            SettingSwitch(
+                stringResource(R.string.audio_echo),
+                s.mic.systemEchoCancellation && AudioEffects.echoCancellation,
+                if (AudioEffects.echoCancellation) null else unavailable,
+                enabled = AudioEffects.echoCancellation,
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(systemEchoCancellation = v)) } }
+            SettingSwitch(
+                stringResource(R.string.audio_system_ns),
+                s.mic.systemNoiseSuppression && AudioEffects.noiseSuppression,
+                if (AudioEffects.noiseSuppression) null else unavailable,
+                enabled = AudioEffects.noiseSuppression,
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(systemNoiseSuppression = v)) } }
+            SettingSwitch(
+                stringResource(R.string.audio_agc),
+                s.mic.systemAgc && AudioEffects.automaticGain,
+                if (AudioEffects.automaticGain) null else unavailable,
+                enabled = AudioEffects.automaticGain,
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(systemAgc = v)) } }
+            SettingSwitch(
+                stringResource(R.string.audio_monitor),
+                s.mic.monitor,
+                stringResource(R.string.audio_monitor_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(monitor = v)) } }
+        }
+    }
+}
+
+@Composable
+private fun Divider() = HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+@Composable
+private fun micModeLabel(mode: String): String = when (mode) {
+    "default" -> stringResource(R.string.mic_default)
+    "raw" -> stringResource(R.string.mic_raw)
+    "voicePerformance" -> stringResource(R.string.mic_voicePerformance)
+    "voiceRecognition" -> stringResource(R.string.mic_voiceRecognition)
+    "camcorder" -> stringResource(R.string.mic_camcorder)
+    "mic" -> stringResource(R.string.mic_mic)
+    else -> stringResource(R.string.mic_voiceCommunication)
+}

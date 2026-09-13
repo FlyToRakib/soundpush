@@ -1,0 +1,252 @@
+//! SoundPush engine — the only API used by the desktop and mobile apps.
+//!
+//! The engine runs on its own Tokio runtime as a single actor that owns all
+//! mutable state. Apps send commands through [`EngineHandle`] and render the
+//! immutable [`EngineState`] snapshots it publishes.
+
+mod actor;
+pub mod error;
+mod net;
+pub mod pipeline;
+pub mod platform;
+pub mod reconnect;
+mod session;
+pub mod settings;
+pub mod state;
+
+use std::sync::Arc;
+
+use tokio::sync::{mpsc, oneshot, watch};
+
+pub use error::{EngineError, ErrorView, FixAction, Severity};
+pub use platform::{KeepAlive, PlatformHooks};
+pub use settings::Settings;
+pub use sp_audio_io;
+pub use sp_security::{PermissionKind, Permissions, Policy};
+pub use state::{EngineState, RouteKind};
+
+use actor::Command;
+
+/// Engine start-up options.
+#[derive(Debug, Clone)]
+pub struct EngineConfig {
+    pub app_version: String,
+    /// Preferred UDP port (0 = ephemeral).
+    pub port: u16,
+    /// Run mDNS and beacon discovery.
+    pub discovery: bool,
+    /// Include loopback addresses in pairing codes (tests only).
+    pub include_loopback: bool,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            port: sp_transport::DEFAULT_PORT,
+            discovery: true,
+            include_loopback: false,
+        }
+    }
+}
+
+struct Inner {
+    runtime: Option<tokio::runtime::Runtime>,
+    commands: mpsc::UnboundedSender<Command>,
+    state: watch::Receiver<Arc<EngineState>>,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        let _ = self.commands.send(Command::Shutdown);
+        if let Some(rt) = self.runtime.take() {
+            rt.shutdown_background();
+        }
+    }
+}
+
+/// Cheap to clone; the engine stops when the last handle is dropped.
+#[derive(Clone)]
+pub struct EngineHandle {
+    inner: Arc<Inner>,
+}
+
+impl EngineHandle {
+    /// Start the engine. Safe to call from inside or outside another async runtime.
+    pub fn start(hooks: Arc<dyn PlatformHooks>, config: EngineConfig) -> Result<Self, EngineError> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("sp-engine")
+            .enable_all()
+            .build()
+            .map_err(|e| EngineError::Internal(e.to_string()))?;
+
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        runtime.spawn(async move {
+            let _ = ready_tx.send(actor::spawn(hooks, config).await);
+        });
+        let (commands, state) = ready_rx
+            .recv()
+            .map_err(|_| EngineError::Internal("engine failed to start".into()))??;
+
+        Ok(Self {
+            inner: Arc::new(Inner {
+                runtime: Some(runtime),
+                commands,
+                state,
+            }),
+        })
+    }
+
+    /// Latest state snapshot.
+    pub fn state(&self) -> Arc<EngineState> {
+        self.inner.state.borrow().clone()
+    }
+
+    /// Receiver that changes whenever the state changes.
+    pub fn subscribe(&self) -> watch::Receiver<Arc<EngineState>> {
+        self.inner.state.clone()
+    }
+
+    fn send(&self, cmd: Command) -> Result<(), EngineError> {
+        self.inner.commands.send(cmd).map_err(|_| EngineError::Stopped)
+    }
+
+    async fn request<T>(&self, make: impl FnOnce(oneshot::Sender<Result<T, EngineError>>) -> Command) -> Result<T, EngineError> {
+        let (tx, rx) = oneshot::channel();
+        self.send(make(tx))?;
+        rx.await.map_err(|_| EngineError::Stopped)?
+    }
+
+    // ---------------------------------------------------------------- pairing
+
+    /// Open pairing mode and return the QR code URI to display.
+    pub async fn start_pairing(&self) -> Result<String, EngineError> {
+        self.request(Command::StartPairing).await
+    }
+
+    pub fn stop_pairing(&self) -> Result<(), EngineError> {
+        self.send(Command::StopPairing)
+    }
+
+    /// Pair by scanning another device's QR code.
+    pub async fn pair_with_qr(&self, uri: String) -> Result<(), EngineError> {
+        self.request(|reply| Command::PairWithQr { uri, reply }).await
+    }
+
+    /// Start code pairing with a discovered device (the other device must have pairing open).
+    pub async fn pair_with_device(&self, device_id: String) -> Result<(), EngineError> {
+        self.request(|reply| Command::PairWithDevice { device_id, reply }).await
+    }
+
+    /// Start code pairing with a manually entered address (IP, IP:port or hostname).
+    pub async fn pair_with_address(&self, address: String) -> Result<(), EngineError> {
+        self.request(|reply| Command::PairWithAddress { address, reply }).await
+    }
+
+    /// Accept or reject a code comparison prompt.
+    pub fn confirm_pairing(&self, device_id: String, accept: bool) -> Result<(), EngineError> {
+        self.send(Command::ConfirmPairing { device_id, accept })
+    }
+
+    // ---------------------------------------------------------------- devices
+
+    pub fn connect(&self, device_id: String) -> Result<(), EngineError> {
+        self.send(Command::Connect { device_id })
+    }
+
+    pub fn disconnect(&self, device_id: String) -> Result<(), EngineError> {
+        self.send(Command::Disconnect { device_id })
+    }
+
+    pub fn forget_device(&self, device_id: String) -> Result<(), EngineError> {
+        self.send(Command::ForgetDevice { device_id })
+    }
+
+    pub fn set_device_blocked(&self, device_id: String, blocked: bool) -> Result<(), EngineError> {
+        self.send(Command::SetBlocked { device_id, blocked })
+    }
+
+    pub fn rename_device(&self, device_id: String, alias: Option<String>) -> Result<(), EngineError> {
+        self.send(Command::RenameDevice { device_id, alias })
+    }
+
+    pub fn set_auto_connect(&self, device_id: String, enabled: bool) -> Result<(), EngineError> {
+        self.send(Command::SetAutoConnect { device_id, enabled })
+    }
+
+    pub fn set_permission(&self, device_id: String, kind: PermissionKind, policy: Policy) -> Result<(), EngineError> {
+        self.send(Command::SetPermission { device_id, kind, policy })
+    }
+
+    // ---------------------------------------------------------------- routes
+
+    /// Start a route with a connected device. Returns the route id.
+    pub async fn start_route(&self, device_id: String, kind: RouteKind) -> Result<String, EngineError> {
+        self.request(|reply| Command::StartRoute { device_id, kind, reply }).await
+    }
+
+    pub fn stop_route(&self, route_id: String) -> Result<(), EngineError> {
+        self.send(Command::StopRoute { route_id })
+    }
+
+    pub fn set_route_volume(&self, route_id: String, volume: f32) -> Result<(), EngineError> {
+        self.send(Command::SetRouteVolume { route_id, volume })
+    }
+
+    pub fn set_route_muted(&self, route_id: String, muted: bool) -> Result<(), EngineError> {
+        self.send(Command::SetRouteMuted { route_id, muted })
+    }
+
+    pub fn set_route_keep_running(&self, route_id: String, keep: bool) -> Result<(), EngineError> {
+        self.send(Command::SetRouteKeepRunning { route_id, keep })
+    }
+
+    /// Mute the physical speakers of a connected device ("Mute PC").
+    pub fn set_peer_speakers_muted(&self, device_id: String, muted: bool) -> Result<(), EngineError> {
+        self.send(Command::SetPeerSpeakersMuted { device_id, muted })
+    }
+
+    /// Answer an incoming route request. `remember` stores the decision as the device's permission.
+    pub fn respond_route_request(&self, request_id: u64, accept: bool, remember: bool) -> Result<(), EngineError> {
+        self.send(Command::RespondRouteRequest {
+            request_id,
+            accept,
+            remember,
+        })
+    }
+
+    // ---------------------------------------------------------------- local audio
+
+    pub fn set_mic_muted(&self, muted: bool) -> Result<(), EngineError> {
+        self.send(Command::SetMicMuted { muted })
+    }
+
+    pub fn set_mic_monitor(&self, enabled: bool) -> Result<(), EngineError> {
+        self.send(Command::SetMicMonitor { enabled })
+    }
+
+    pub fn refresh_audio_devices(&self) -> Result<(), EngineError> {
+        self.send(Command::RefreshAudioDevices)
+    }
+
+    // ---------------------------------------------------------------- settings & misc
+
+    pub async fn update_settings(&self, settings: Settings) -> Result<Settings, EngineError> {
+        self.request(|reply| Command::UpdateSettings { settings, reply }).await
+    }
+
+    pub fn dismiss_notice(&self, id: u64) -> Result<(), EngineError> {
+        self.send(Command::DismissNotice { id })
+    }
+
+    /// Tell the engine the OS reported a network change (retry connections now).
+    pub fn network_changed(&self) -> Result<(), EngineError> {
+        self.send(Command::NetworkChanged)
+    }
+
+    /// Apps call this when moving between foreground and background (battery policy).
+    pub fn set_foreground(&self, foreground: bool) -> Result<(), EngineError> {
+        self.send(Command::SetForeground { foreground })
+    }
+}

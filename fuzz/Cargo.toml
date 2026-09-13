@@ -1,0 +1,49 @@
+[package]
+name = "soundpush-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Not part of the main workspace (cargo-fuzz needs nightly).
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bytes = "1"
+sp-protocol = { path = "../sound-push-core/sp-protocol" }
+sp-security = { path = "../sound-push-core/sp-security" }
+sp-discovery = { path = "../sound-push-core/sp-discovery" }
+
+[[bin]]
+name = "media_packet"
+path = "fuzz_targets/media_packet.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "control_msg"
+path = "fuzz_targets/control_msg.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "frame_decoder"
+path = "fuzz_targets/frame_decoder.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "qr_payload"
+path = "fuzz_targets/qr_payload.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "beacon"
+path = "fuzz_targets/beacon.rs"
+test = false
+doc = false

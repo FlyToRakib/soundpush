@@ -1,0 +1,2 @@
+-keep class net.soundpush.engine.** { *; }
+-keepclassmembers class kotlinx.serialization.json.** { *; }

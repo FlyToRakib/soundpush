@@ -1,0 +1,22 @@
+[package]
+name = "sp-discovery"
+description = "SoundPush device discovery: mDNS/DNS-SD, signed UDP beacons, candidate ranking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sp-protocol = { path = "../sp-protocol" }
+sp-security = { path = "../sp-security" }
+mdns-sd = "0.13"
+socket2 = { version = "0.5", features = ["all"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+
+[lints]
+workspace = true

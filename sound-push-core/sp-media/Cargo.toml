@@ -1,0 +1,20 @@
+[package]
+name = "sp-media"
+description = "SoundPush audio processing: codecs, jitter buffer, drift compensation, DSP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sp-protocol = { path = "../sp-protocol" }
+bytes = "1"
+thiserror = "2"
+nnnoiseless = { version = "0.5", default-features = false }
+unsafe-libopus = "0.2"
+
+[dev-dependencies]
+rand = "0.8"
+
+[lints]
+workspace = true

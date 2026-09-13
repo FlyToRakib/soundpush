@@ -1,0 +1,105 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", Cantarell,
+    "Noto Sans", Roboto, system-ui, sans-serif;
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line);
+  color: var(--color-text-primary);
+  background: var(--color-background);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+#app {
+  height: 100%;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: var(--font-title-weight);
+}
+
+h1 {
+  font-size: var(--font-title-size);
+  line-height: var(--font-title-line);
+}
+
+h2 {
+  font-size: 15px;
+  line-height: 22px;
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+.caption {
+  font-size: var(--font-caption-size);
+  line-height: var(--font-caption-line);
+  color: var(--color-text-secondary);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.spacer {
+  flex: 1;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 10px;
+  border: 3px solid var(--color-background);
+}

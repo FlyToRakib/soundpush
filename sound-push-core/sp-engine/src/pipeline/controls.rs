@@ -1,0 +1,113 @@
+//! Lock-free controls and statistics shared between the engine and audio threads.
+
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
+
+/// `f32` stored in an `AtomicU32`.
+#[derive(Debug, Default)]
+pub struct AtomicF32(AtomicU32);
+
+impl AtomicF32 {
+    pub fn new(v: f32) -> Self {
+        Self(AtomicU32::new(v.to_bits()))
+    }
+
+    pub fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+
+    pub fn set(&self, v: f32) {
+        self.0.store(v.to_bits(), Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug)]
+pub struct SenderControls {
+    pub muted: AtomicBool,
+    pub gain_db: AtomicF32,
+    pub noise_suppression: AtomicBool,
+    /// Requested Opus bitrate (bits/s); applied by the encoder thread when it changes.
+    pub bitrate: AtomicU32,
+    pub expected_loss_pct: AtomicU32,
+    /// Append the previous frame to each packet so single losses can be recovered.
+    pub redundancy: AtomicBool,
+    // statistics
+    pub frames_sent: AtomicU64,
+    pub send_errors: AtomicU64,
+    pub capture_overruns: AtomicU64,
+    pub level_db: AtomicF32,
+    pub clipping: AtomicBool,
+    pub bytes_sent: AtomicU64,
+}
+
+impl SenderControls {
+    pub fn new(gain_db: f32, noise_suppression: bool, bitrate: u32) -> Self {
+        Self {
+            muted: AtomicBool::new(false),
+            gain_db: AtomicF32::new(gain_db),
+            noise_suppression: AtomicBool::new(noise_suppression),
+            bitrate: AtomicU32::new(bitrate),
+            expected_loss_pct: AtomicU32::new(0),
+            redundancy: AtomicBool::new(false),
+            frames_sent: AtomicU64::new(0),
+            send_errors: AtomicU64::new(0),
+            capture_overruns: AtomicU64::new(0),
+            level_db: AtomicF32::new(-120.0),
+            clipping: AtomicBool::new(false),
+            bytes_sent: AtomicU64::new(0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ReceiverControls {
+    pub muted: AtomicBool,
+    pub volume: AtomicF32,
+    pub balance: AtomicF32,
+    pub mono: AtomicBool,
+    pub av_offset_ms: AtomicI32,
+    /// Jitter-buffer bounds (live profile changes).
+    pub jitter_min_ms: AtomicU32,
+    pub jitter_max_ms: AtomicU32,
+    // statistics
+    pub packets_received: AtomicU64,
+    pub packets_missing: AtomicU64,
+    pub packets_late: AtomicU64,
+    /// Frames rebuilt from redundant copies.
+    pub packets_recovered: AtomicU64,
+    pub decode_errors: AtomicU64,
+    pub underruns: AtomicU64,
+    pub buffer_ms: AtomicF32,
+    pub target_ms: AtomicF32,
+    pub jitter_ms: AtomicF32,
+    pub drift_ppm: AtomicI32,
+    pub level_db: AtomicF32,
+    pub device_latency_ms: AtomicU32,
+    pub bytes_received: AtomicU64,
+}
+
+impl ReceiverControls {
+    pub fn new(volume: f32, jitter_min_ms: u32, jitter_max_ms: u32) -> Self {
+        Self {
+            muted: AtomicBool::new(false),
+            volume: AtomicF32::new(volume),
+            balance: AtomicF32::new(0.0),
+            mono: AtomicBool::new(false),
+            av_offset_ms: AtomicI32::new(0),
+            jitter_min_ms: AtomicU32::new(jitter_min_ms),
+            jitter_max_ms: AtomicU32::new(jitter_max_ms),
+            packets_received: AtomicU64::new(0),
+            packets_missing: AtomicU64::new(0),
+            packets_late: AtomicU64::new(0),
+            packets_recovered: AtomicU64::new(0),
+            decode_errors: AtomicU64::new(0),
+            underruns: AtomicU64::new(0),
+            buffer_ms: AtomicF32::new(0.0),
+            target_ms: AtomicF32::new(0.0),
+            jitter_ms: AtomicF32::new(0.0),
+            drift_ppm: AtomicI32::new(0),
+            level_db: AtomicF32::new(-120.0),
+            device_latency_ms: AtomicU32::new(0),
+            bytes_received: AtomicU64::new(0),
+        }
+    }
+}

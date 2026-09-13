@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Never back up the device identity or trust store: a restored backup must not clone this device. -->
+<full-backup-content>
+    <exclude domain="file" path="identity.bin" />
+    <exclude domain="file" path="trust.bin" />
+    <exclude domain="file" path="storage.key.enc" />
+</full-backup-content>

@@ -1,0 +1,43 @@
+name: Windows build
+
+# Builds the SoundPush desktop installer for Windows (x64) and uploads it as an artifact.
+# Run it from the Actions tab ("Run workflow"), or push a tag like v0.1.0.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+
+jobs:
+  windows:
+    name: Windows installer (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sound-push-desktop/ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: npm --prefix sound-push-desktop/ui ci
+
+      - name: Check core on Windows
+        run: cargo test -p sp-protocol -p sp-security -p sp-media -p sp-transport -p sp-engine
+
+      - name: Build installer
+        working-directory: sound-push-desktop
+        run: ./ui/node_modules/.bin/tauri build --bundles nsis
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundPush-Windows-x64
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error

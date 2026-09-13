@@ -1,0 +1,40 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+/target/
+**/target/
+
+# Node / desktop UI
+node_modules/
+dist/
+.svelte-kit/
+*.log
+
+# Android
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+sound-push-mobile/android/core-engine/src/main/jniLibs/
+
+# Generated
+sound-push-desktop/ui/src/lib/engine/bindings.ts
+sound-push-mobile/android/core-engine/src/main/java/uniffi/
+
+# Secrets / signing
+*.jks
+*.keystore
+*.pfx
+*.p12
+.env
+
+# Local tool config
+.claude/
