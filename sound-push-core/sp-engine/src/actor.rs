@@ -215,6 +215,8 @@ pub(crate) struct Actor {
     keep_alive: KeepAlive,
     foreground: bool,
     peer_speakers_muted: HashMap<DeviceId, bool>,
+    /// Capability bits last announced to peers; a change is re-announced mid-session.
+    announced_caps: u64,
 }
 
 pub(crate) async fn spawn(
@@ -281,6 +283,7 @@ pub(crate) async fn spawn(
         keep_alive: KeepAlive::default(),
         foreground: true,
         peer_speakers_muted: HashMap::new(),
+        announced_caps: 0,
     };
     if trust_recovered {
         actor.notice("notice.trustStoreRecovered", vec![], Severity::Warning, None);
@@ -318,6 +321,7 @@ pub(crate) async fn spawn(
         });
     }
 
+    actor.announced_caps = actor.capability_bits().0;
     actor.publish();
 
     tokio::spawn(async move {
@@ -1254,7 +1258,17 @@ impl Actor {
             Body::MuteSet(m) => self.on_remote_mute(peer, m),
             Body::StatsReport(stats) => self.on_stats(peer, stats),
             Body::Ping(_) | Body::Pong(_) | Body::Notice(_) | Body::PermissionChanged(_) => {}
-            Body::Hello(_) | Body::Goodbye(_) | Body::PairRequest(_) | Body::PairResult(_) => {}
+            Body::Hello(hello) => {
+                // Mid-session Hello only updates what the peer can do; identity and
+                // protocol versions were fixed by the authenticated handshake.
+                if let Some(s) = self.sessions.get_mut(&peer) {
+                    if s.conn_id == conn_id && hello.device_id == s.hello.device_id {
+                        s.hello.capabilities = hello.capabilities;
+                        s.hello.endpoints = hello.endpoints;
+                    }
+                }
+            }
+            Body::Goodbye(_) | Body::PairRequest(_) | Body::PairResult(_) => {}
         }
     }
 
@@ -1825,6 +1839,18 @@ impl Actor {
                 r.bitrate_kbps = (bytes.saturating_sub(r.last_bytes) * 8 / 1000) as u32;
                 r.last_bytes = bytes;
             }
+        }
+
+        // Capabilities can change while connected (e.g. a virtual microphone was installed).
+        // Re-send Hello so peers enable or disable the matching tasks without reconnecting.
+        let caps = self.capability_bits().0;
+        if caps != self.announced_caps {
+            self.announced_caps = caps;
+            let hello = self.local_hello();
+            for s in self.sessions.values() {
+                s.send(Body::Hello(hello.clone()));
+            }
+            self.update_discovery();
         }
 
         // Pending prompts expire.

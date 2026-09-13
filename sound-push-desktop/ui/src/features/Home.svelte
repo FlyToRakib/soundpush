@@ -17,7 +17,10 @@
   const app = $derived(store.state!);
   const active = $derived(app.routes);
   let pairing = $state(false);
-  let picking = $state<{ task: Task; peers: PeerView[] } | null>(null);
+  let picking = $state<Task | null>(null);
+  // Follows live state: devices that disconnect disappear, and the dialog closes when none are left.
+  const pickable = $derived(picking ? store.connectedPeers : []);
+  const capableIds = $derived(new Set(picking ? peersForTask(picking).map((p) => p.deviceId) : []));
 
   function peersForTask(task: Task): PeerView[] {
     return task.kinds
@@ -37,11 +40,18 @@
       onnavigate("audio");
       return;
     }
+    const connected = store.connectedPeers;
     const peers = peersForTask(task);
-    if (peers.length === 0) toasts.show(t("home.noConnected"), "warning");
-    else if (peers.length === 1 && peers[0]) void startTask(task, peers[0]);
-    else picking = { task, peers };
+    if (connected.length === 0) toasts.show(t("home.noConnected"), "warning");
+    else if (peers.length === 0) toasts.show(t("home.noCapable"), "warning");
+    // With one connected device there is nothing to choose; with several, always ask.
+    else if (connected.length === 1 && peers[0]) void startTask(task, peers[0]);
+    else picking = task;
   }
+
+  $effect(() => {
+    if (picking && pickable.length === 0) picking = null;
+  });
 </script>
 
 <div class="page stack">
@@ -104,13 +114,17 @@
 
 {#if pairing}<PairDialog onclose={() => (pairing = false)} />{/if}
 
-{#if picking}
+{#if picking && pickable.length > 0}
   <Dialog title={t("task.pickDevice")} onclose={() => (picking = null)}>
-    {#each picking.peers as peer (peer.deviceId)}
-      <button class="peer" onclick={() => picking && startTask(picking.task, peer)}>
+    {#each pickable as peer (peer.deviceId)}
+      {@const supported = capableIds.has(peer.deviceId)}
+      <button class="peer" disabled={!supported} onclick={() => picking && startTask(picking, peer)}>
         <Icon name={platformIcon(peer.platform)} />
-        <span class="peer-name">{peer.name}</span>
-        <Icon name="chevron" size={16} />
+        <span class="peer-name">
+          {peer.name}
+          {#if !supported}<span class="caption">{t("task.peerUnsupported")}</span>{/if}
+        </span>
+        {#if supported}<Icon name="chevron" size={16} />{/if}
       </button>
     {/each}
   </Dialog>
@@ -191,11 +205,17 @@
     cursor: pointer;
     text-align: left;
   }
-  .peer:hover {
+  .peer:hover:not(:disabled) {
     background: var(--color-surface-muted);
+  }
+  .peer:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .peer-name {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     font-weight: 500;
   }
 </style>

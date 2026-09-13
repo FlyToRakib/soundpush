@@ -5,9 +5,13 @@
 //!   platform effects (echo cancellation, noise suppression, AGC), pushed in as PCM.
 //! - App audio (Android 10+): Kotlin playback-capture `AudioRecord`, pushed in as PCM.
 //!
+//! One recorder can feed several routes at once (e.g. the microphone sent to two
+//! computers), so each source fans its PCM out to every open stream.
+//!
 //! Kotlin learns when to run each recorder from `mic_capture_active` /
 //! `app_audio_active` (and the engine's keep-alive callback).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use sp_audio_io::cpal_backend::CpalBackend;
@@ -20,26 +24,32 @@ use sp_audio_io::{
 pub const APP_AUDIO_DEVICE: &str = "android-app-audio";
 
 struct Feed {
+    id: u64,
     callback: CaptureCallback,
     converter: CaptureConverter,
+}
+
+#[derive(Default)]
+struct Source {
+    feeds: Vec<Feed>,
     scratch: Vec<f32>,
 }
 
-type Slot = Arc<Mutex<Option<Feed>>>;
+type Slot = Arc<Mutex<Source>>;
+
+static NEXT_FEED: AtomicU64 = AtomicU64::new(1);
 
 fn push_pcm16(slot: &Slot, pcm: &[u8]) {
     if let Ok(mut guard) = slot.lock() {
-        if let Some(feed) = guard.as_mut() {
-            feed.scratch.clear();
-            feed.scratch
-                .extend(pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0));
-            let Feed {
-                callback,
-                converter,
-                scratch,
-            } = feed;
-            let converted = converter.process(scratch);
-            callback(converted);
+        let Source { feeds, scratch } = &mut *guard;
+        if feeds.is_empty() {
+            return;
+        }
+        scratch.clear();
+        scratch.extend(pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0));
+        for feed in feeds.iter_mut() {
+            let converted = feed.converter.process(scratch);
+            (feed.callback)(converted);
         }
     }
 }
@@ -54,8 +64,8 @@ impl MobileAudioBackend {
     pub fn new() -> Self {
         Self {
             inner: CpalBackend::new(),
-            app_audio: Arc::new(Mutex::new(None)),
-            mic: Arc::new(Mutex::new(None)),
+            app_audio: Slot::default(),
+            mic: Slot::default(),
         }
     }
 
@@ -70,25 +80,24 @@ impl MobileAudioBackend {
     }
 
     pub fn app_audio_active(&self) -> bool {
-        self.app_audio.lock().map(|g| g.is_some()).unwrap_or(false)
+        self.app_audio.lock().map(|g| !g.feeds.is_empty()).unwrap_or(false)
     }
 
     pub fn mic_capture_active(&self) -> bool {
-        self.mic.lock().map(|g| g.is_some()).unwrap_or(false)
+        self.mic.lock().map(|g| !g.feeds.is_empty()).unwrap_or(false)
     }
 
     fn open_feed(slot: &Slot, device_channels: u16, channels: u16, on_audio: CaptureCallback) -> Result<Box<dyn AudioStream>, AudioError> {
         let mut guard = slot.lock().map_err(|_| AudioError::Backend("poisoned".into()))?;
-        if guard.is_some() {
-            return Err(AudioError::DeviceBusy);
-        }
-        *guard = Some(Feed {
+        let id = NEXT_FEED.fetch_add(1, Ordering::Relaxed);
+        guard.feeds.push(Feed {
+            id,
             callback: on_audio,
             converter: CaptureConverter::new(48_000, device_channels, channels),
-            scratch: Vec::with_capacity(8192),
         });
         Ok(Box::new(FeedStream {
             slot: slot.clone(),
+            id,
             device_channels,
             channels,
         }))
@@ -103,6 +112,7 @@ impl Default for MobileAudioBackend {
 
 struct FeedStream {
     slot: Slot,
+    id: u64,
     device_channels: u16,
     channels: u16,
 }
@@ -121,7 +131,7 @@ impl AudioStream for FeedStream {
 impl Drop for FeedStream {
     fn drop(&mut self) {
         if let Ok(mut guard) = self.slot.lock() {
-            *guard = None;
+            guard.feeds.retain(|f| f.id != self.id);
         }
     }
 }
@@ -170,22 +180,21 @@ impl AudioBackend for MobileAudioBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
+
+    fn counting(counter: &Arc<AtomicUsize>) -> CaptureCallback {
+        let c = counter.clone();
+        Box::new(move |s: &[f32]| {
+            c.fetch_add(s.len(), Ordering::Relaxed);
+        })
+    }
 
     #[test]
     fn app_audio_feed_converts_and_releases() {
         let backend = MobileAudioBackend::new();
         let received = Arc::new(AtomicUsize::new(0));
-        let r = received.clone();
         let stream = backend
-            .open_capture(
-                &CaptureSource::Input(APP_AUDIO_DEVICE.into()),
-                1,
-                Box::new(move |s: &[f32]| {
-                    r.fetch_add(s.len(), Ordering::Relaxed);
-                }),
-                Box::new(|_| {}),
-            )
+            .open_capture(&CaptureSource::Input(APP_AUDIO_DEVICE.into()), 1, counting(&received), Box::new(|_| {}))
             .unwrap();
         assert!(backend.app_audio_active());
         // 10 ms stereo s16le = 1920 bytes → 480 mono samples.
@@ -195,5 +204,26 @@ mod tests {
         assert!(!backend.app_audio_active());
         backend.push_app_audio_pcm16(&vec![0u8; 1920]);
         assert_eq!(received.load(Ordering::Relaxed), 480);
+    }
+
+    #[test]
+    fn one_source_feeds_several_routes() {
+        let backend = MobileAudioBackend::new();
+        let (a, b) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let source = CaptureSource::Input(APP_AUDIO_DEVICE.into());
+        let first = backend.open_capture(&source, 1, counting(&a), Box::new(|_| {})).unwrap();
+        let second = backend.open_capture(&source, 2, counting(&b), Box::new(|_| {})).unwrap();
+        backend.push_app_audio_pcm16(&vec![0u8; 1920]);
+        assert_eq!(a.load(Ordering::Relaxed), 480);
+        assert_eq!(b.load(Ordering::Relaxed), 960);
+
+        // Stopping one route leaves the other running.
+        drop(first);
+        assert!(backend.app_audio_active());
+        backend.push_app_audio_pcm16(&vec![0u8; 1920]);
+        assert_eq!(a.load(Ordering::Relaxed), 480);
+        assert_eq!(b.load(Ordering::Relaxed), 1920);
+        drop(second);
+        assert!(!backend.app_audio_active());
     }
 }

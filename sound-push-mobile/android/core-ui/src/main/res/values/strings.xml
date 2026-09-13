@@ -193,7 +193,11 @@
     <string name="home_banner_hint">Keep both devices on the same Wi-Fi with SoundPush open.</string>
     <string name="home_reason_offline">Connect to a paired device first</string>
     <string name="home_reason_listen">This computer can\'t send its sound yet</string>
-    <string name="home_reason_mic">Set up the virtual microphone on your computer first</string>
+    <string name="home_reason_mic">Your computer needs a virtual microphone (VB-CABLE on Windows, BlackHole on Mac)</string>
+    <string name="home_reason_play">The connected device can\'t play audio right now</string>
+    <string name="home_peer_reason_listen">Can\'t send its sound yet</string>
+    <string name="home_peer_reason_mic">Needs a virtual microphone (VB-CABLE or BlackHole)</string>
+    <string name="home_peer_reason_play">Can\'t play audio right now</string>
     <string name="home_pair_address">Enter address instead</string>
     <string name="route_starting">Starting…</string>
 

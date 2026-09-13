@@ -32,6 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,10 +61,17 @@ private data class Task(
     val descRes: Int,
     val icon: ImageVector,
     val kinds: List<String>,
-    /** Shown when a device is connected but can't do this. */
+    /** Shown when no connected device can do this. */
     val reasonRes: Int,
     val supports: (PeerView) -> Boolean,
 )
+
+/** Why one device in the picker can't do [task]. */
+private fun peerReasonRes(task: Task, peer: PeerView): Int = when {
+    task.kinds.contains("receiveSystemAudio") && !peer.canSendSystemAudio -> R.string.home_peer_reason_listen
+    task.kinds.contains("sendMicToVirtualMic") && !peer.hasVirtualMic -> R.string.home_peer_reason_mic
+    else -> R.string.home_peer_reason_play
+}
 
 private val TASKS = listOf(
     Task(R.string.task_listen, R.string.task_listen_desc, SpIcons.Speaker, listOf("receiveSystemAudio"), R.string.home_reason_listen) {
@@ -79,7 +87,7 @@ private val TASKS = listOf(
         listOf("receiveSystemAudio", "sendMicToVirtualMic"),
         R.string.home_reason_mic,
     ) { it.canSendSystemAudio && it.hasVirtualMic },
-    Task(R.string.task_send_apps, R.string.task_send_apps_desc, SpIcons.Apps, listOf("sendAppAudio"), R.string.home_reason_offline) {
+    Task(R.string.task_send_apps, R.string.task_send_apps_desc, SpIcons.Apps, listOf("sendAppAudio"), R.string.home_reason_play) {
         it.canPlay
     },
 )
@@ -96,7 +104,7 @@ fun HomeScreen(
     onOpenDevices: () -> Unit,
     onShowMessage: (String) -> Unit,
 ) {
-    var picking by remember { mutableStateOf<Pair<List<String>, List<PeerView>>?>(null) }
+    var picking by remember { mutableStateOf<Task?>(null) }
 
     if (state.trustedPeers.isEmpty()) {
         EmptyState(
@@ -160,8 +168,10 @@ fun HomeScreen(
             ) {
                 when {
                     reason != null -> onShowMessage(reason)
-                    capable.size == 1 -> onStartRoutes(capable[0].deviceId, task.kinds)
-                    else -> picking = task.kinds to capable
+                    // With one connected device there is nothing to choose.
+                    connected.size == 1 -> onStartRoutes(capable[0].deviceId, task.kinds)
+                    // With several, always ask, so audio never goes to a device the user didn't pick.
+                    else -> picking = task
                 }
             }
         }
@@ -170,26 +180,38 @@ fun HomeScreen(
         items(state.trustedPeers, key = { "peer-${it.deviceId}" }) { peer -> PeerRow(peer, onOpenDevices) }
     }
 
-    picking?.let { (kinds, peers) ->
+    // The list follows live state: devices that disconnect disappear, the dialog closes when none are left.
+    picking?.takeIf { connected.isNotEmpty() }?.let { task ->
         AlertDialog(
             onDismissRequest = { picking = null },
             title = { Text(stringResource(R.string.home_pick_device)) },
             text = {
                 Column {
-                    peers.forEach { peer ->
+                    connected.forEach { peer ->
+                        val supported = task.supports(peer)
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 56.dp)
-                                .clickable {
+                                .clickable(enabled = supported) {
                                     picking = null
-                                    onStartRoutes(peer.deviceId, kinds)
-                                },
+                                    onStartRoutes(peer.deviceId, task.kinds)
+                                }
+                                .alpha(if (supported) 1f else 0.5f),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(SpIcons.forPlatform(peer.platform), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.width(Tokens.Space.md))
-                            Text(peer.name, style = MaterialTheme.typography.bodyLarge)
+                            Column(Modifier.weight(1f)) {
+                                Text(peer.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (!supported) {
+                                    Text(
+                                        stringResource(peerReasonRes(task, peer)),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
                     }
                 }

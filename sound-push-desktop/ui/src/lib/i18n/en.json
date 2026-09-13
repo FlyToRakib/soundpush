@@ -13,6 +13,7 @@
   "home.empty.body": "Scan a code with the SoundPush app on your phone. It takes a few seconds.",
   "home.pair": "Pair a device",
   "home.noConnected": "No paired device is connected right now.",
+  "home.noCapable": "None of the connected devices can do this.",
 
   "task.sendSystemAudio": "Listen on phone",
   "task.sendSystemAudio.desc": "Play this computer's sound on your phone",
@@ -23,8 +24,9 @@
   "task.receiveAppAudio": "Hear phone audio",
   "task.receiveAppAudio.desc": "Play your phone's apps on this computer",
   "task.unavailable.loopback": "Not available on this computer yet",
-  "task.unavailable.virtualMic": "Set up the virtual microphone first",
+  "task.unavailable.virtualMic": "Needs a virtual microphone (VB-CABLE or BlackHole)",
   "task.pickDevice": "Choose a device",
+  "task.peerUnsupported": "Can't do this",
 
   "route.sendSystemAudio": "Computer audio → {0}",
   "route.sendAppAudio": "App audio → {0}",
