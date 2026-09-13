@@ -75,7 +75,10 @@ Microsoft signed it.
   with a link to vb-audio.com. Only the standard VB-CABLE may be bundled, not A+B or C+D.
 - **No engine change needed.** SoundPush already detects "CABLE Input" and feeds the
   phone microphone into it. Apps choose **"CABLE Output"**.
-- **Until the bundled installer ships,** users install VB-CABLE themselves (§5).
+- **Available now, until VB-Audio agrees to bundling:** Audio page → **Install VB-CABLE**.
+  SoundPush downloads the official, SHA-256-pinned package, opens VB-Audio's own setup
+  (UAC, then "Install Driver") and offers **Restart now** (`src-tauri/src/virtual_mic.rs`).
+  The user never visits a website or unzips anything.
 
 ### Linux 🟡
 
@@ -127,7 +130,8 @@ before the signed driver exists, and SoundPush Microphone after.
 ## 5. Testing on Windows today
 
 1. Install SoundPush (GitHub → Actions → "Windows build" → artifact `SoundPush-Windows-x64`).
-2. Install VB-CABLE (https://vb-audio.com/Cable/) and restart the PC.
+2. SoundPush → Audio → Virtual microphone → **Install VB-CABLE**. Accept the Windows prompt,
+   click **Install Driver** in VB-Audio's setup window, close it, then click **Restart now**.
 3. SoundPush → Audio → Virtual microphone. It should say
    *Ready… choose "CABLE Output (VB-Audio Virtual Cable)"*. If it warns that a speaker was
    chosen, click **Use automatic**.

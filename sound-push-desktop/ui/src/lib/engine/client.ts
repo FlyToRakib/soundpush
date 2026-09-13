@@ -5,6 +5,15 @@ import { mockEngine } from "./mock";
 
 type Unlisten = () => void;
 
+/** Virtual microphone driver state (see src-tauri/src/virtual_mic.rs). */
+export interface VirtualMicStatus {
+  supported: boolean;
+  /** Driver files installed; the device may still need a restart (Windows) to appear. */
+  installed: boolean;
+  /** "soundpush" = our own driver (macOS), "vbcable" = VB-Audio's VB-CABLE (Windows). */
+  provider: "soundpush" | "vbcable" | "none";
+}
+
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -56,9 +65,10 @@ export const engine = {
   setMicMuted: (muted: boolean) => call<void>("set_mic_muted", { muted }),
   setMicMonitor: (enabled: boolean) => call<void>("set_mic_monitor", { enabled }),
   refreshAudioDevices: () => call<void>("refresh_audio_devices"),
-  virtualMicStatus: () => call<{ supported: boolean; installed: boolean }>("virtual_mic_status"),
+  virtualMicStatus: () => call<VirtualMicStatus>("virtual_mic_status"),
   installVirtualMic: () => call<void>("install_virtual_mic"),
   uninstallVirtualMic: () => call<void>("uninstall_virtual_mic"),
+  restartComputer: () => call<void>("restart_computer"),
 
   // settings & app
   updateSettings: (settings: Settings) => call<Settings>("update_settings", { settings }),

@@ -246,6 +246,12 @@ pub async fn uninstall_virtual_mic(state: State<'_, AppState>) -> CmdResult<()> 
     Ok(())
 }
 
+/// Restart the computer to finish installing VB-CABLE (Windows). The UI confirms first.
+#[tauri::command]
+pub fn restart_computer() -> CmdResult<()> {
+    crate::virtual_mic::restart_computer().map_err(|e| EngineError::Internal(e).into())
+}
+
 async fn change_virtual_mic(f: impl FnOnce() -> Result<(), String> + Send + 'static) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         let result = f();

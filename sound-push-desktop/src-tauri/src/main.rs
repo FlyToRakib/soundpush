@@ -170,6 +170,7 @@ fn main() {
             commands::virtual_mic_status,
             commands::install_virtual_mic,
             commands::uninstall_virtual_mic,
+            commands::restart_computer,
         ])
         .build(tauri::generate_context!());
 

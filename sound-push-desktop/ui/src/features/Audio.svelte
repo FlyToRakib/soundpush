@@ -3,7 +3,8 @@
   import Banner from "../lib/components/Banner.svelte";
   import Button from "../lib/components/Button.svelte";
   import Card from "../lib/components/Card.svelte";
-  import { engine } from "../lib/engine/client";
+  import Dialog from "../lib/components/Dialog.svelte";
+  import { engine, type VirtualMicStatus } from "../lib/engine/client";
   import { run, toasts } from "../lib/stores/toast.svelte";
   import LevelMeter from "../lib/components/LevelMeter.svelte";
   import Segmented from "../lib/components/Segmented.svelte";
@@ -45,9 +46,12 @@
     ...(chosenVm && !chosenIsCable ? [{ value: chosenVm, label: t("audio.virtualMic.notCableOption", chosenVm) }] : []),
   ]);
 
-  /** SoundPush's own virtual microphone driver (built in on macOS). */
-  let driver = $state<{ supported: boolean; installed: boolean } | null>(null);
+  /** Virtual microphone driver: our own on macOS, VB-CABLE on Windows. */
+  let driver = $state<VirtualMicStatus | null>(null);
+  /** i18n key prefix for the driver's texts. */
+  const driverKey = $derived(driver?.provider === "vbcable" ? "audio.virtualMic.vb" : "audio.virtualMic.sp");
   let installing = $state(false);
+  let confirmRestart = $state(false);
 
   async function loadDriver() {
     try {
@@ -67,7 +71,7 @@
     installing = true;
     try {
       await (install ? engine.installVirtualMic() : engine.uninstallVirtualMic());
-      if (install) toasts.show(t("audio.virtualMic.installed"), "info");
+      if (install) toasts.show(t(`${driverKey}.installed`), "info");
     } catch (e) {
       const message = (e as { message?: string }).message ?? String(e);
       // Closing the password prompt is a choice, not an error.
@@ -137,22 +141,33 @@
     {/if}
     {#if app.capabilities.virtualMicInput}
       <p class="vm-ready">{t("audio.virtualMic.ready", app.capabilities.virtualMicInput)}</p>
-      {#if driver?.installed}
+      {#if app.capabilities.virtualMicInput.includes("CABLE")}
+        <!-- Credit required by VB-Audio's donationware licence. -->
+        <p class="caption">
+          {t("audio.virtualMic.vbCredit")}
+          <button class="link" onclick={() => run(engine.openUrl("https://vb-audio.com/Cable/"))}>vb-audio.com</button>
+        </p>
+      {/if}
+      {#if driver?.installed && driver.provider === "soundpush"}
         <div class="row">
           <Button variant="ghost" onclick={() => changeDriver(false)}>{t("audio.virtualMic.remove")}</Button>
         </div>
       {/if}
     {:else if driver?.supported}
       <div class="vm-setup">
-        <p class="muted">{t(driver.installed ? "audio.virtualMic.installedPending" : "audio.virtualMic.installHint")}</p>
+        <!-- Installed but not detected: Windows needs a restart; macOS usually just a re-check. -->
+        <p class="muted">{t(`${driverKey}.${driver.installed ? "pending" : "hint"}`)}</p>
         <div class="row">
           {#if !driver.installed}
             <Button variant="primary" onclick={() => changeDriver(true)}>
-              {t(installing ? "audio.virtualMic.installing" : "audio.virtualMic.install")}
+              {t(installing ? "audio.virtualMic.installing" : `${driverKey}.install`)}
             </Button>
+          {:else if driver.provider === "vbcable"}
+            <Button variant="primary" onclick={() => (confirmRestart = true)}>{t("audio.virtualMic.restart")}</Button>
           {/if}
           <Button onclick={recheck}>{t("audio.virtualMic.recheck")}</Button>
         </div>
+        {#if driver.provider === "vbcable"}<p class="caption">{t("audio.virtualMic.vbCredit")}</p>{/if}
       </div>
     {:else}
       <div class="vm-setup">
@@ -230,7 +245,31 @@
   </Card>
 </div>
 
+{#if confirmRestart}
+  <Dialog title={t("audio.virtualMic.restartTitle")} onclose={() => (confirmRestart = false)}>
+    <p class="muted">{t("audio.virtualMic.restartBody")}</p>
+    {#snippet actions()}
+      <Button onclick={() => (confirmRestart = false)}>{t("audio.virtualMic.notNow")}</Button>
+      <Button
+        variant="primary"
+        onclick={() => {
+          confirmRestart = false;
+          void run(engine.restartComputer());
+        }}>{t("audio.virtualMic.restart")}</Button
+      >
+    {/snippet}
+  </Dialog>
+{/if}
+
 <style>
+  .link {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--color-accent);
+    cursor: pointer;
+    font: inherit;
+  }
   .page {
     max-width: 760px;
   }

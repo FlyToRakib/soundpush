@@ -168,7 +168,7 @@ export const mockEngine = {
       case "export_diagnostics":
         return "/tmp/soundpush-diagnostics.zip" as T;
       case "virtual_mic_status":
-        return { supported: true, installed: mockDriverInstalled } as T;
+        return { supported: true, installed: mockDriverInstalled, provider: "soundpush" } as T;
       case "install_virtual_mic":
       case "uninstall_virtual_mic": {
         mockDriverInstalled = cmd === "install_virtual_mic";
