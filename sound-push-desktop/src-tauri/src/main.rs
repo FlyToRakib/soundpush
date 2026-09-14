@@ -9,6 +9,7 @@ mod hotkeys;
 #[cfg(target_os = "macos")]
 mod macos;
 mod network;
+mod os_events;
 mod power;
 mod system;
 mod tray;
@@ -133,6 +134,8 @@ fn main() {
             tray::create(app)?;
             device_watch::start(handle.clone());
             watch_network(hooks.clone());
+            os_events::start(handle.clone(), hooks.clone());
+            os_events::register_restart();
             virtual_mic::restore();
 
             // Show the window right away; the UI displays "Starting…" until the engine is ready.

@@ -36,14 +36,20 @@ windows = { version = "0.58", features = [
     "implement",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
     "Win32_NetworkManagement_WindowsFirewall",
     "Win32_Networking_NetworkListManager",
+    "Win32_Networking_WinSock",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
     "Win32_System_Ole",
     "Win32_System_Power",
+    "Win32_System_Recovery",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_System_Variant",
@@ -51,6 +57,11 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Network changes (rtnetlink), sleep and wake (logind) and tray detection (StatusNotifierWatcher).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+dbus = "0.9"
 
 # macOS permission checks (AVFoundation, TCC) and Core Audio device notifications.
 [target.'cfg(target_os = "macos")'.dependencies]
