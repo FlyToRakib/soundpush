@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // Open-source licences screen, generated from the resolved dependencies at build time.
+    alias(libs.plugins.aboutlibraries)
 }
 
 android {
@@ -68,6 +70,11 @@ android {
 
 kotlin { jvmToolchain(17) }
 
+aboutLibraries {
+    // Licence data from the dependencies' POM files only, never fetched from the network: same inputs, same list.
+    offlineMode = true
+}
+
 dependencies {
     implementation(project(":core-ui"))
     implementation(project(":feature-home"))
@@ -78,6 +85,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     // Per-app language on Android 8–12 (AppCompatDelegate.setApplicationLocales).
     implementation(libs.androidx.appcompat)
+    implementation(libs.aboutlibraries.compose.m3)
     implementation(libs.androidx.core.ktx)
     implementation(libs.navigation.compose)
     implementation(libs.androidx.lifecycle.process)

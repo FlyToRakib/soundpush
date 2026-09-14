@@ -64,12 +64,15 @@ object SoundPush {
     }
 
     /**
-     * Compatibility output or output audio effects move playback to the platform player
-     * (AudioTrack) so the device's own effects apply; otherwise the low-latency path is used.
-     * Runs on the state thread, so the native call never blocks the UI.
+     * Compatibility output, output audio effects or a chosen output device move playback to the
+     * platform player (AudioTrack), where the device's own effects and preferred-device routing
+     * apply; otherwise the low-latency path is used. Runs off the main thread, so the native call
+     * never blocks the UI.
      */
+    @Synchronized
     private fun applyPlatformOutput(state: EngineState) {
-        val wanted = state.settings.output.compatibilityOutput || state.settings.output.outputEffects
+        val wanted = state.settings.output.compatibilityOutput || state.settings.output.outputEffects ||
+            OutputPreference.target.value != OutputPreference.Target.Automatic
         if (platformOutput == wanted) return
         platformOutput = wanted
         runCatching { engine.setPlatformOutput(wanted) }.onFailure { Log.w(TAG, "could not switch playback path", it) }
@@ -91,6 +94,7 @@ object SoundPush {
         _startError.value = null
         try {
             NativeContext.init(app)
+            OutputPreference.load(app)
             engine = SoundPushEngine(AndroidPlatform(app), appVersion)
             engine.setListener(object : StateListener {
                 override fun onState(stateJson: String) {
@@ -104,6 +108,8 @@ object SoundPush {
             })
             // Reconnect at once when the network changes, whether or not a stream is running.
             NetworkWatcher.start(app) { command { networkChanged() } }
+            // Picking or clearing an output device (Settings → Audio) switches the playback path live.
+            scope.launch { OutputPreference.target.collect { _state.value?.let(::applyPlatformOutput) } }
         } catch (e: FfiException.Engine) {
             Log.e(TAG, "engine start failed: ${e.key}: ${e.detail}", e)
             _startError.value = e.detail.ifBlank { e.key }

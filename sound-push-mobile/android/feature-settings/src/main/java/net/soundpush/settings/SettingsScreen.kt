@@ -52,6 +52,7 @@ fun SettingsScreen(
     onOpenTroubleshooter: () -> Unit = {},
     onOpenBatteryGuide: () -> Unit = {},
     onExportDiagnostics: () -> Unit = {},
+    onOpenLicenses: () -> Unit = {},
     /** Microphone, camera and notifications, with their denied or blocked state (plan §26.1). */
     permissions: List<PermissionRow> = emptyList(),
     /** "System language" first, then the languages this build has; empty hides the setting. */
@@ -191,7 +192,7 @@ fun SettingsScreen(
         }
 
         SectionTitle(stringResource(R.string.settings_about))
-        AboutSection(state)
+        AboutSection(state, onOpenLicenses)
     }
 }
 

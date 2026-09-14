@@ -1,5 +1,6 @@
 package net.soundpush.audio
 
+import android.media.AudioManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,12 +13,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import kotlin.math.roundToInt
 import net.soundpush.engine.AudioEffects
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
+import net.soundpush.engine.OutputPreference
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
 import net.soundpush.ui.components.Choice
@@ -54,8 +58,30 @@ fun AudioScreen(state: EngineState) {
                     Choice("lowLatency", stringResource(R.string.latency_lowLatency)),
                     Choice("balanced", stringResource(R.string.latency_balanced)),
                     Choice("stable", stringResource(R.string.latency_stable)),
+                    Choice("custom", stringResource(R.string.latency_custom)),
                 ),
             ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(latency = v)) } }
+            if (s.stream.latency == "custom") {
+                // Same bounds as the desktop: minimum 5–500 ms, maximum from the minimum up to 1000 ms, in 5 ms steps.
+                val minMs = s.stream.customMinMs.coerceIn(5, 500)
+                SettingSlider(
+                    label = stringResource(R.string.latency_custom_min),
+                    value = minMs.toFloat(),
+                    range = 5f..500f,
+                    steps = 98,
+                    format = { ms(snap5(it)) },
+                ) { v ->
+                    val min = snap5(v)
+                    SoundPush.updateSettings { it.copy(stream = it.stream.copy(customMinMs = min, customMaxMs = maxOf(min, it.stream.customMaxMs))) }
+                }
+                SettingSlider(
+                    label = stringResource(R.string.latency_custom_max),
+                    value = s.stream.customMaxMs.coerceIn(minMs, 1000).toFloat(),
+                    range = minMs.toFloat()..1000f,
+                    steps = ((1000 - minMs) / 5 - 1).coerceAtLeast(0),
+                    format = { ms(snap5(it)) },
+                ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(customMaxMs = maxOf(snap5(v), it.stream.customMinMs))) } }
+            }
             if (output == DeviceStatus.Output.Bluetooth) {
                 Text(
                     stringResource(R.string.audio_bluetooth_note),
@@ -86,6 +112,8 @@ fun AudioScreen(state: EngineState) {
 
         SectionTitle(stringResource(R.string.audio_playback))
         SpCard {
+            OutputDeviceChoice(output)
+            Divider()
             SettingSlider(
                 label = stringResource(R.string.audio_volume),
                 value = s.output.volume,
@@ -182,6 +210,50 @@ fun AudioScreen(state: EngineState) {
 
 @Composable
 private fun Divider() = HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+private fun snap5(value: Float) = (value / 5).roundToInt() * 5
+
+/**
+ * Where this phone plays (plan §23.1 "output", where Android allows): Automatic, or one of the
+ * outputs connected now. The list is re-read when the output changes (a headset plugged in).
+ */
+@Composable
+private fun OutputDeviceChoice(output: DeviceStatus.Output) {
+    val context = LocalContext.current
+    val target by OutputPreference.target.collectAsState()
+    val connected = remember(output) {
+        context.getSystemService(AudioManager::class.java)?.let(OutputPreference::available).orEmpty()
+    }
+    val choices = (listOf(OutputPreference.Target.Automatic) + connected + target).distinct()
+    SettingChoice(
+        stringResource(R.string.audio_output_device),
+        target.key,
+        choices.map { Choice(it.key, outputTargetLabel(it)) },
+    ) { key -> OutputPreference.set(context, OutputPreference.fromKey(key)) }
+    Text(
+        stringResource(
+            when {
+                target == OutputPreference.Target.Automatic -> R.string.audio_output_device_auto_desc
+                target !in connected -> R.string.audio_output_device_missing
+                else -> R.string.audio_output_device_desc
+            },
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = Tokens.Space.sm),
+    )
+}
+
+@Composable
+private fun outputTargetLabel(target: OutputPreference.Target): String = stringResource(
+    when (target) {
+        OutputPreference.Target.Automatic -> R.string.audio_output_auto
+        OutputPreference.Target.Speaker -> R.string.output_speaker
+        OutputPreference.Target.Wired -> R.string.output_wired
+        OutputPreference.Target.Bluetooth -> R.string.output_bluetooth
+        OutputPreference.Target.Usb -> R.string.output_usb
+    },
+)
 
 @Composable
 private fun micModeLabel(mode: String): String = when (mode) {

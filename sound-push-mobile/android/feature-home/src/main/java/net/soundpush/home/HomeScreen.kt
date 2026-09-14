@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +44,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.PeerView
 import net.soundpush.engine.RouteView
@@ -302,7 +304,6 @@ private fun RouteControls(route: RouteView) {
 @Composable
 private fun RouteCard(route: RouteView, peer: PeerView?) {
     var expanded by rememberSaveable(route.routeId) { mutableStateOf(false) }
-    var pcMuted by rememberSaveable(route.routeId) { mutableStateOf(false) }
     val quality = peer?.quality ?: "unknown"
     val qualityLabel = Labels.quality(quality)?.let { stringResource(it) } ?: ""
     val icon = when {
@@ -366,18 +367,15 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
                     ) { v -> SoundPush.command { setRouteVolume(route.routeId, v) } }
                 }
                 if (route.kind == "receiveSystemAudio") {
-                    SettingSwitch(stringResource(R.string.route_mute_pc), pcMuted) { v ->
-                        pcMuted = v
+                    // The engine's state, not a local flag: survives rotation, reconnects and changes from elsewhere.
+                    SettingSwitch(stringResource(R.string.route_mute_pc), peer?.speakersMuted == true) { v ->
                         SoundPush.command { setPeerSpeakersMuted(route.peerId, v) }
                     }
                 }
-                Text(
-                    "${route.stats.codec} · ${route.stats.bitrateKbps} kb/s · ${route.stats.latencyMs.roundToInt()} ms · " +
-                        "buffer ${route.stats.bufferMs.roundToInt()} ms · loss ${"%.1f".format(route.stats.lossPct)} %",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = Tokens.Space.xs),
-                )
+                // Collected only while the details are open.
+                val output by DeviceStatus.output.collectAsState()
+                val outputLatencyMs by DeviceStatus.outputLatencyMs.collectAsState()
+                ConnectionDetails(route, peer, output, outputLatencyMs)
             }
         }
     }

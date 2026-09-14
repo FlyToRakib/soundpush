@@ -32,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -39,6 +40,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.MicSettings
+import net.soundpush.engine.OutputPreference
 import net.soundpush.engine.PlatformDelegate
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
@@ -107,6 +109,13 @@ class StreamingService : Service() {
         }
         // The notification names the current output (speaker, headphones, Bluetooth).
         scope.launch { DeviceStatus.output.collect { updateNotification() } }
+        // A chosen output (Settings → Audio) follows its device as it connects and disconnects.
+        scope.launch {
+            combine(OutputPreference.target, DeviceStatus.output) { _, _ -> }.collect {
+                syncPlatformPlayback(SoundPush.state.value)
+                playback?.setPreferredDevice(preferredOutput())
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -224,13 +233,17 @@ class StreamingService : Service() {
         val legacy = state?.settings?.output?.compatibilityOutput == true
         if (wanted && (playback == null || playbackLegacy != legacy)) {
             playback?.stop()
-            playback = PlatformPlayback.start(this, legacy)
+            playback = PlatformPlayback.start(this, legacy, preferredOutput())
             playbackLegacy = legacy
         } else if (!wanted && playback != null) {
             playback?.stop()
             playback = null
         }
     }
+
+    /** The connected device for the output the user chose, or null to follow Android's routing. */
+    private fun preferredOutput() =
+        getSystemService(AudioManager::class.java)?.let { OutputPreference.device(it, OutputPreference.target.value) }
 
     private fun appVisible() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 

@@ -497,6 +497,7 @@ class MainActivity : AppCompatActivity() {
                         onOpenTroubleshooter = { nav.navigate("troubleshoot") },
                         onOpenBatteryGuide = { nav.navigate("battery") },
                         onExportDiagnostics = exportDiagnostics,
+                        onOpenLicenses = { nav.navigate("licenses") },
                         permissions = permissionRows(),
                         languages = languageChoices,
                         language = AppLanguages.current(),
@@ -518,6 +519,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 composable("battery") { BatteryGuideScreen() }
+                composable("licenses") { LicensesScreen() }
                 composable("scan") {
                     QrScanner(
                         onResult = { uri ->
