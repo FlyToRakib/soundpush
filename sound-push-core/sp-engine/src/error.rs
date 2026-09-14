@@ -66,6 +66,8 @@ pub enum EngineError {
     Stopped,
     #[error("engine is starting")]
     Starting,
+    #[error("cancelled")]
+    Cancelled,
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -92,13 +94,14 @@ impl EngineError {
             Self::Storage(_) => "error.storage",
             Self::Stopped => "error.engine.stopped",
             Self::Starting => "error.engine.starting",
+            Self::Cancelled => "error.cancelled",
             Self::Internal(_) => "error.internal",
         }
     }
 
     pub fn severity(&self) -> Severity {
         match self {
-            Self::DeviceNotFound | Self::RouteNotFound | Self::InvalidInput(_) => Severity::Warning,
+            Self::DeviceNotFound | Self::RouteNotFound | Self::InvalidInput(_) | Self::Cancelled => Severity::Warning,
             _ => Severity::Error,
         }
     }

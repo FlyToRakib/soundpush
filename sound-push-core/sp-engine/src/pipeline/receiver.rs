@@ -282,7 +282,32 @@ mod tests {
 
     use super::*;
     use crate::pipeline::controls::SenderControls;
-    use crate::pipeline::sender::{DatagramSink, Sender, SenderConfig};
+    use crate::pipeline::sender::{DatagramSink, Sender, SenderConfig, Subscriber, Subscription};
+
+    fn start_sender(
+        backend: &NullBackend,
+        profile: StreamProfile,
+        controls: Arc<SenderControls>,
+        sink: Arc<dyn DatagramSink>,
+    ) -> (Sender, Subscription) {
+        let sender = Sender::start(
+            backend,
+            SenderConfig {
+                profile: profile.clone(),
+                application: OpusApplication::LowDelay,
+                source: CaptureSource::DefaultInput,
+            },
+            Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        let subscription = sender.subscribe(Subscriber {
+            route: 1,
+            sink,
+            controls,
+        });
+        (sender, subscription)
+    }
 
     /// Loops sender datagrams straight into a receiver's packet sink, optionally dropping every Nth.
     struct Loopback(Mutex<Option<PacketSink>>, u64, std::sync::atomic::AtomicU64);
@@ -325,19 +350,7 @@ mod tests {
         let loopback = Arc::new(Loopback(Mutex::new(Some(sink)), 5, std::sync::atomic::AtomicU64::new(0)));
         let tx_controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
         tx_controls.redundancy.store(true, Ordering::Relaxed);
-        let _sender = Sender::start(
-            &backend,
-            SenderConfig {
-                route: 1,
-                profile,
-                application: OpusApplication::LowDelay,
-                source: CaptureSource::DefaultInput,
-            },
-            tx_controls,
-            loopback,
-            Box::new(|_| {}),
-        )
-        .unwrap();
+        let _sender = start_sender(&backend, profile, tx_controls, loopback);
 
         std::thread::sleep(Duration::from_millis(2000));
         let recovered = rx_controls.packets_recovered.load(Ordering::Relaxed);
@@ -367,19 +380,7 @@ mod tests {
 
         let loopback = Arc::new(Loopback(Mutex::new(Some(sink)), 0, std::sync::atomic::AtomicU64::new(0)));
         let tx_controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
-        let _sender = Sender::start(
-            &backend,
-            SenderConfig {
-                route: 1,
-                profile,
-                application: OpusApplication::LowDelay,
-                source: CaptureSource::DefaultInput,
-            },
-            tx_controls.clone(),
-            loopback,
-            Box::new(|_| {}),
-        )
-        .unwrap();
+        let _sender = start_sender(&backend, profile, tx_controls.clone(), loopback);
 
         std::thread::sleep(Duration::from_millis(1500));
 

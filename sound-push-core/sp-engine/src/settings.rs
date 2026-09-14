@@ -229,12 +229,89 @@ pub struct MobileSettings {
     pub remind_after_restart: bool,
 }
 
-/// A route the user asked to keep running across restarts.
+/// A route restored when its device connects after a restart.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedRoute {
     pub peer_id: String,
     pub kind: crate::state::RouteKind,
+    /// True when the user chose "Keep running after restart" for this route. False when it was
+    /// saved because "Resume streams after restart" is on; such entries go away when the route stops.
+    #[serde(default = "default_true")]
+    pub keep: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl SavedRoute {
+    pub fn matches(&self, peer_id: &str, kind: crate::state::RouteKind) -> bool {
+        self.peer_id == peer_id && self.kind == kind
+    }
+}
+
+/// Per-device overrides of the stream settings. `None` follows the global setting.
+///
+/// Latency applies to audio this device receives from the peer; quality and redundancy apply to
+/// routes this device starts (the requester proposes the codec, the receiver picks its buffer).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeviceProfile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency: Option<LatencyMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_min_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_max_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<QualityMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opus_bitrate: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redundancy: Option<bool>,
+}
+
+/// Paired devices can each have a profile; more than this is a hand-edited file.
+pub const MAX_DEVICE_PROFILES: usize = 64;
+
+impl DeviceProfile {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The global stream settings with this profile's overrides applied.
+    pub fn apply(&self, base: &StreamSettings) -> StreamSettings {
+        let mut s = base.clone();
+        if let Some(v) = self.latency {
+            s.latency = v;
+        }
+        if let Some(v) = self.custom_min_ms {
+            s.custom_min_ms = v;
+        }
+        if let Some(v) = self.custom_max_ms {
+            s.custom_max_ms = v;
+        }
+        if let Some(v) = self.quality {
+            s.quality = v;
+        }
+        if let Some(v) = self.opus_bitrate {
+            s.opus_bitrate = v;
+        }
+        if let Some(v) = self.redundancy {
+            s.redundancy = v;
+        }
+        s.custom_min_ms = s.custom_min_ms.clamp(5, 500);
+        s.custom_max_ms = s.custom_max_ms.clamp(s.custom_min_ms, 1000);
+        s.opus_bitrate = s.opus_bitrate.clamp(6_000, 510_000);
+        s
+    }
+
+    fn sanitize(&mut self) {
+        self.opus_bitrate = self.opus_bitrate.map(|b| b.clamp(6_000, 510_000));
+        self.custom_min_ms = self.custom_min_ms.map(|v| v.clamp(5, 500));
+        self.custom_max_ms = self.custom_max_ms.map(|v| v.clamp(5, 1000));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -257,6 +334,8 @@ pub struct Settings {
     pub saved_routes: Vec<SavedRoute>,
     pub dismissed_tips: Vec<String>,
     pub audio_cues: bool,
+    /// Per-device stream overrides, keyed by device id (hex).
+    pub device_profiles: std::collections::BTreeMap<String, DeviceProfile>,
 }
 
 impl Default for Settings {
@@ -278,6 +357,7 @@ impl Default for Settings {
             saved_routes: Vec::new(),
             dismissed_tips: Vec::new(),
             audio_cues: false,
+            device_profiles: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -295,7 +375,23 @@ impl Settings {
         self.stream.custom_max_ms = self.stream.custom_max_ms.clamp(self.stream.custom_min_ms, 1000);
         self.dismissed_tips.truncate(256);
         self.saved_routes.truncate(32);
+        self.device_profiles
+            .retain(|id, p| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) && !p.is_empty());
+        for p in self.device_profiles.values_mut() {
+            p.sanitize();
+        }
+        while self.device_profiles.len() > MAX_DEVICE_PROFILES {
+            self.device_profiles.pop_last();
+        }
         self.version = SETTINGS_VERSION;
+    }
+
+    /// Stream settings for routes with `peer_id` (hex): the global settings plus the device's profile.
+    pub fn stream_for(&self, peer_id: &str) -> StreamSettings {
+        match self.device_profiles.get(peer_id) {
+            Some(profile) => profile.apply(&self.stream),
+            None => self.stream.clone(),
+        }
     }
 }
 
@@ -374,5 +470,39 @@ mod tests {
         assert_eq!(s.mic.gain_db, 20.0);
         assert_eq!(s.output.volume, 0.0);
         assert!(s.stream.custom_max_ms >= s.stream.custom_min_ms);
+    }
+
+    #[test]
+    fn device_profiles_override_and_sanitize() {
+        let peer = "0123456789abcdef0123456789abcdef".to_string();
+        let mut s = Settings::default();
+        s.device_profiles.insert(
+            peer.clone(),
+            DeviceProfile {
+                latency: Some(LatencyMode::Stable),
+                opus_bitrate: Some(1),
+                ..DeviceProfile::default()
+            },
+        );
+        s.device_profiles.insert("not-a-device".into(), DeviceProfile {
+            redundancy: Some(true),
+            ..DeviceProfile::default()
+        });
+        s.device_profiles.insert("fedcba9876543210fedcba9876543210".into(), DeviceProfile::default());
+        s.sanitize();
+        assert_eq!(s.device_profiles.len(), 1, "invalid ids and empty profiles are dropped");
+        let stream = s.stream_for(&peer);
+        assert_eq!(stream.latency, LatencyMode::Stable);
+        assert_eq!(stream.opus_bitrate, 6_000);
+        assert_eq!(stream.quality, s.stream.quality, "unset fields follow the global setting");
+        assert_eq!(s.stream_for("other"), s.stream);
+
+        // Round trip, and files from before profiles/keep existed still load.
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"deviceProfiles\"") && !json.contains("\"customMinMs\":null"));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, s);
+        let old: Settings = serde_json::from_str(r#"{"savedRoutes":[{"peerId":"ab","kind":"sendSystemAudio"}]}"#).unwrap();
+        assert!(old.saved_routes[0].keep, "routes saved by older versions were explicit");
     }
 }

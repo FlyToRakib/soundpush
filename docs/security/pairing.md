@@ -45,3 +45,26 @@ route request and re-checked when changed (revocation stops routes immediately).
 
 A connection from an untrusted key is closed unless it is completing a pairing flow.
 Forgetting or blocking a device terminates its sessions.
+
+## Session resume tokens (protocol 1.1)
+
+After a trusted session is established each side sends the other a `SessionTicket`: 32 random bytes from the OS
+RNG, held only in memory. On the next connection the peer returns it in `Hello.resume_token`.
+
+- **Checked after authentication and trust.** The token is looked at only once the TLS handshake succeeded and the
+  peer's full public key matched the trust store. It never replaces pinning, SAS or trust checks.
+- **Bound to the peer's key.** The issuer stores the key it issued the token to; any other key is refused.
+- **Single use, 10 minutes.** A token is removed the first time it is presented, valid or not. Issuing a new token
+  replaces the previous one for that peer. Forgetting or blocking a device drops its tokens.
+- **Bounded.** At most 64 issued and 64 held tokens.
+- **What it allows.** For 30 seconds after a successful redemption, a route request for a route that was running and
+  paused by the interruption is accepted without a second "Ask" prompt. "Deny" still refuses, permission changes
+  still apply, and a new kind of route still asks.
+
+## USB (TLS over TCP)
+
+`adb reverse` makes the phone's loopback port reach the computer's loopback listener. The TLS handshake over it is
+the same mutually authenticated handshake as over QUIC (same certificates, verifiers and trust checks), and the
+phone pins the computer's device ID when it dials a trusted computer or scans a QR code. Anything on the phone that
+can open a loopback socket can reach the listener, which is why it grants nothing without that handshake. The
+pairing SAS is derived from the TCP TLS session's exporter exactly as for QUIC.

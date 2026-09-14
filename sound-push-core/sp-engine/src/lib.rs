@@ -5,11 +5,14 @@
 //! immutable [`EngineState`] snapshots it publishes.
 
 mod actor;
+pub mod crash;
 pub mod error;
 mod net;
+pub mod nettest;
 pub mod pipeline;
 pub mod platform;
 pub mod reconnect;
+mod resume;
 mod session;
 pub mod settings;
 pub mod state;
@@ -19,8 +22,9 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 
 pub use error::{EngineError, ErrorView, FixAction, Severity};
+pub use nettest::{NetworkReport, NetworkTestStatus, NetworkTestView, Recommendation};
 pub use platform::{KeepAlive, PlatformHooks};
-pub use settings::Settings;
+pub use settings::{DeviceProfile, Settings};
 pub use sp_audio_io;
 pub use sp_security::{PermissionKind, Permissions, Policy};
 pub use state::{EngineState, RouteKind};
@@ -37,6 +41,9 @@ pub struct EngineConfig {
     pub discovery: bool,
     /// Include loopback addresses in pairing codes (tests only).
     pub include_loopback: bool,
+    /// Accept TLS-over-TCP connections on loopback, where `adb reverse` delivers a phone's USB
+    /// connection. Desktop builds; phones only dial.
+    pub tcp_listener: bool,
 }
 
 impl Default for EngineConfig {
@@ -46,6 +53,7 @@ impl Default for EngineConfig {
             port: sp_transport::DEFAULT_PORT,
             discovery: true,
             include_loopback: false,
+            tcp_listener: true,
         }
     }
 }
@@ -191,6 +199,23 @@ impl EngineHandle {
         self.send(Command::SetPermission { device_id, kind, policy })
     }
 
+    /// Set a device's stream profile (`None` clears it). Running routes pick it up immediately.
+    pub fn set_device_profile(&self, device_id: String, profile: Option<DeviceProfile>) -> Result<(), EngineError> {
+        self.send(Command::SetDeviceProfile { device_id, profile })
+    }
+
+    // ---------------------------------------------------------------- diagnostics
+
+    /// Measure RTT, jitter, loss and achievable bitrate to a connected device over the media path
+    /// (about ten seconds). Progress and the last result also appear in `EngineState::network_tests`.
+    pub async fn run_network_test(&self, device_id: String) -> Result<NetworkReport, EngineError> {
+        self.request(|reply| Command::RunNetworkTest { device_id, reply }).await
+    }
+
+    pub fn cancel_network_test(&self, device_id: String) -> Result<(), EngineError> {
+        self.send(Command::CancelNetworkTest { device_id })
+    }
+
     // ---------------------------------------------------------------- routes
 
     /// Start a route with a connected device. Returns the route id.
@@ -255,6 +280,13 @@ impl EngineHandle {
     /// Tell the engine the OS reported a network change (retry connections now).
     pub fn network_changed(&self) -> Result<(), EngineError> {
         self.send(Command::NetworkChanged)
+    }
+
+    /// Drop the connection to a device without a goodbye, as a network failure would. The engine
+    /// then reconnects and resumes as usual. For tests and troubleshooting.
+    #[doc(hidden)]
+    pub fn simulate_connection_loss(&self, device_id: String) -> Result<(), EngineError> {
+        self.send(Command::SimulateConnectionLoss { device_id })
     }
 
     /// Apps call this when moving between foreground and background (battery policy).

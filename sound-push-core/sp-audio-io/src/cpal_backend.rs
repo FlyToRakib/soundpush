@@ -107,10 +107,13 @@ impl Drop for ThreadStream {
     }
 }
 
-/// Run `build` on a dedicated thread that owns the resulting cpal stream.
 /// Resources that must outlive a stream (e.g. the macOS tap device it reads from).
 type StreamGuard = Option<Box<dyn std::any::Any>>;
 
+/// Longest wait for a device to open and start (Bluetooth and some USB devices are slow).
+const STREAM_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Run `build` on a dedicated thread that owns the resulting cpal stream.
 fn spawn_stream<F>(build: F) -> Result<Box<dyn AudioStream>, AudioError>
 where
     F: FnOnce() -> Result<(cpal::Stream, StreamInfo, StreamGuard), AudioError> + Send + 'static,
@@ -137,9 +140,16 @@ where
             }
         })
         .map_err(|e| AudioError::Backend(e.to_string()))?;
-    let info = ready_rx
-        .recv()
-        .map_err(|_| AudioError::Backend("audio thread exited".into()))??;
+    // A driver that never answers must not hang the caller. On timeout the thread is detached:
+    // if the stream opens later it sees the stop channel closed and releases the device.
+    let info = match ready_rx.recv_timeout(STREAM_START_TIMEOUT) {
+        Ok(result) => result?,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            warn!("audio device did not start in time");
+            return Err(AudioError::Backend("audio device did not start in time".into()));
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => return Err(AudioError::Backend("audio thread exited".into())),
+    };
     Ok(Box::new(ThreadStream {
         stop: Some(stop_tx),
         thread: Some(thread),

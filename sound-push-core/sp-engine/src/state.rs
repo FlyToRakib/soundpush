@@ -23,6 +23,8 @@ pub struct EngineState {
     pub capabilities: LocalCapabilities,
     pub audio_devices: Vec<AudioDeviceView>,
     pub mic_level_db: f32,
+    /// Running or last network self-test per device.
+    pub network_tests: Vec<crate::nettest::NetworkTestView>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -33,6 +35,8 @@ pub struct LocalDevice {
     pub name: String,
     pub platform: String,
     pub port: u16,
+    /// Loopback TLS-over-TCP port for USB via `adb reverse` (0 = not listening).
+    pub tcp_port: u16,
     pub addresses: Vec<String>,
     pub app_version: String,
 }
@@ -108,6 +112,8 @@ pub struct PeerView {
     pub can_send_mic: bool,
     pub can_play: bool,
     pub has_virtual_mic: bool,
+    /// "quic" or "tcp" (USB via adb) while connected, empty otherwise.
+    pub transport: String,
 }
 
 /// User-level route type. Named from the local device's perspective.

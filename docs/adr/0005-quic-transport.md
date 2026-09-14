@@ -19,6 +19,9 @@ it knows the peer.
 
 ## Consequences
 
-- `adb reverse` forwards TCP only, so USB-via-ADB needs a TLS-over-TCP transport behind the same
-  interface (planned; USB tethering works today because it is plain IP).
-- Two-engine integration tests exercise the real QUIC stack on loopback.
+- `adb reverse` forwards TCP only, so USB-via-ADB uses a TLS-over-TCP transport behind the same
+  `SecureConnection` API (`sp-transport/src/tcp.rs`, protocol 1.1): the same certificates and verifiers,
+  one stream multiplexing control, datagram and keep-alive frames, and media dropped rather than delayed
+  when the socket backs up. Desktops listen on loopback only; phones try the loopback candidate after
+  the network candidates (USB tethering works as plain IP).
+- Two-engine integration tests exercise the real QUIC and TCP stacks on loopback.

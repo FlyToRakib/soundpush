@@ -53,6 +53,8 @@ pub struct TrustStore {
     path: PathBuf,
     key: [u8; 32],
     devices: BTreeMap<String, TrustedDevice>,
+    /// Hint fields changed in memory and not written yet (see [`TrustStore::update_hints`]).
+    dirty: bool,
 }
 
 impl TrustStore {
@@ -75,7 +77,15 @@ impl TrustStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(e.into()),
         };
-        Ok((Self { path, key, devices }, recovered))
+        Ok((
+            Self {
+                path,
+                key,
+                devices,
+                dirty: false,
+            },
+            recovered,
+        ))
     }
 
     pub fn get(&self, id: &DeviceId) -> Option<&TrustedDevice> {
@@ -114,13 +124,39 @@ impl TrustStore {
         Ok(existed)
     }
 
-    fn save(&self) -> Result<(), SecurityError> {
+    /// Change fields that are only hints (last seen time, last addresses, reported name) without
+    /// writing to disk; [`TrustStore::flush`] persists them later. Never use this for keys,
+    /// permissions or block state: those must be durable immediately.
+    pub fn update_hints<F: FnOnce(&mut TrustedDevice)>(&mut self, id: &DeviceId, f: F) -> bool {
+        let Some(device) = self.devices.get_mut(&id.to_hex()) else {
+            return false;
+        };
+        let key = device.public_key;
+        let blocked = device.blocked;
+        let permissions = device.permissions;
+        f(device);
+        // Guard the contract: security fields are restored if a caller touched them.
+        device.public_key = key;
+        device.blocked = blocked;
+        device.permissions = permissions;
+        self.dirty = true;
+        true
+    }
+
+    /// Write pending hint changes, if any.
+    pub fn flush(&mut self) -> Result<(), SecurityError> {
+        if self.dirty { self.save() } else { Ok(()) }
+    }
+
+    fn save(&mut self) -> Result<(), SecurityError> {
         let file = TrustFile {
             version: 1,
             devices: self.devices.clone(),
         };
         let plain = serde_json::to_vec(&file)?;
-        write_atomic(&self.path, &seal(&self.key, TRUST_AD, &plain))
+        write_atomic(&self.path, &seal(&self.key, TRUST_AD, &plain))?;
+        self.dirty = false;
+        Ok(())
     }
 }
 
@@ -194,6 +230,31 @@ mod tests {
         assert!(store.remove(&peer.device_id()).unwrap());
         let (store, _) = TrustStore::load(&path, key).unwrap();
         assert_eq!(store.list().count(), 0);
+    }
+
+    #[test]
+    fn hint_updates_are_deferred_until_flush_and_cannot_touch_security_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trust.bin");
+        let key = [9u8; 32];
+        let peer = DeviceIdentity::generate();
+        let (mut store, _) = TrustStore::load(&path, key).unwrap();
+        store.upsert(device(&peer)).unwrap();
+
+        assert!(store.update_hints(&peer.device_id(), |d| {
+            d.last_seen_unix = 99;
+            d.blocked = true;
+            d.public_key = [0; 32];
+        }));
+        assert_eq!(store.get(&peer.device_id()).unwrap().public_key, peer.public_key());
+        assert!(!store.get(&peer.device_id()).unwrap().blocked);
+        let (reloaded, _) = TrustStore::load(&path, key).unwrap();
+        assert_eq!(reloaded.get(&peer.device_id()).unwrap().last_seen_unix, 1, "not written yet");
+
+        store.flush().unwrap();
+        let (reloaded, _) = TrustStore::load(&path, key).unwrap();
+        assert_eq!(reloaded.get(&peer.device_id()).unwrap().last_seen_unix, 99);
+        assert!(!store.update_hints(&DeviceIdentity::generate().device_id(), |_| {}));
     }
 
     #[test]
