@@ -8,7 +8,7 @@
   import { engine } from "../lib/engine/client";
   import type { Theme, UpdateChannel, Visibility } from "../lib/engine/types";
   import { PSEUDO_LONG, PSEUDO_RTL, availableLanguages, languageName, t } from "../lib/i18n";
-  import { LINKS } from "../lib/links";
+  import { LINKS, docsUrl, type DocsPage } from "../lib/links";
   import { store } from "../lib/stores/engine.svelte";
   import { updateSettings } from "../lib/stores/settings";
   import { run, toasts } from "../lib/stores/toast.svelte";
@@ -54,6 +54,8 @@
   }
 
   const open = (url: string) => run(engine.openUrl(url));
+  /** Help pages open on the documentation site, or on GitHub when the site can't be reached. */
+  const openDocs = (page: DocsPage) => run(docsUrl(page).then((url) => engine.openUrl(url)));
 </script>
 
 <div class="page stack">
@@ -135,7 +137,7 @@
     <div class="row wrap">
       <Button onclick={exportDiagnostics}>{t("settings.export")}</Button>
       <Button variant="ghost" onclick={() => run(engine.openLogsFolder())}>{t("settings.openLogs")}</Button>
-      <Button variant="ghost" onclick={() => open(LINKS.userGuide)}>{t("settings.userGuide")}</Button>
+      <Button variant="ghost" onclick={() => openDocs("userGuide")}>{t("settings.userGuide")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.reportBug)}>{t("settings.reportBug")}</Button>
     </div>
     <p class="caption">{t("settings.shortcuts", isMac ? "⌘" : "Ctrl")}</p>
@@ -174,7 +176,7 @@
     </div>
 
     <div class="row wrap">
-      <Button variant="ghost" onclick={() => open(LINKS.privacy)}>{t("settings.privacyPolicy")}</Button>
+      <Button variant="ghost" onclick={() => openDocs("privacy")}>{t("settings.privacyPolicy")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.license)}>{t("settings.viewLicense")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.source)}>{t("settings.source")}</Button>
     </div>

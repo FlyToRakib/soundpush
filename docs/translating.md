@@ -1,8 +1,38 @@
 # Translating SoundPush
 
 SoundPush ships in English today. The apps are ready for more languages: every string is externalised, plural
-forms and number formats follow the language, and layouts work right to left. Community translation through
-Weblate is planned (docs/soundpush-final.md §23.6, Phase 3); until then, translations arrive as pull requests.
+forms and number formats follow the language, and layouts work right to left.
+
+**Translate in your browser on Weblate:** [hosted.weblate.org/projects/soundpush](https://hosted.weblate.org/projects/soundpush/)
+(docs/soundpush-final.md §23.6). Weblate turns translations into pull requests, and suggestions can be reviewed by
+other speakers of the language. Pull requests that edit the files directly are welcome too; the formats are below.
+
+## Weblate setup
+
+For maintainers: the project on Hosted Weblate (libre plan for open-source projects) has two components that read
+and write this repository. `.weblate` at the repository root points the `wlc` command-line client at the project.
+
+| Setting | `desktop` component | `android` component |
+|---|---|---|
+| Source code repository | `https://github.com/FlyToRakib/soundpush.git`, branch `main` | *(link to the desktop component)* `weblate://soundpush/desktop` |
+| Repository push | GitHub pull request (Weblate's bot opens and updates one PR) | same |
+| File format | i18next JSON file v4 | Android String Resource |
+| File mask | `sound-push-desktop/ui/src/lib/i18n/*.json` | `sound-push-mobile/android/core-ui/src/main/res/values-*/strings.xml` |
+| Monolingual base language file | `sound-push-desktop/ui/src/lib/i18n/en.json` | `sound-push-mobile/android/core-ui/src/main/res/values/strings.xml` |
+| Template for new translations | same as the base file | same as the base file |
+| Language code style | BCP style using hyphen as a separator (`pt-BR`) | Android style (`pt-rBR`) |
+| Language filter | *(default)* | `^[a-z]{2,3}(-r[A-Z]{2})?$` (skips `values-night` and other qualifiers) |
+| Translation flags | `placeholders:r"\{\d+\}"` (keep `{0}`, `{1}`) | *(default; printf checks are automatic)* |
+| License | GPL-3.0-or-later | GPL-3.0-or-later |
+
+Add-ons on both components: **Cleanup translation files**, **Squash Git commits** (by author) and **Language
+consistency**. The desktop loader reads flat keys (`"task.active"`), and the i18next v4 format keeps them flat; after
+the first sync, check one translation file in the pull request, and check that a language with several plural forms
+(for example Polish) offers `_few` and `_many`.
+
+Every Weblate pull request runs CI like any other: the desktop UI tests fail on unknown keys or changed placeholders,
+and the Android build compiles the string resources. Pseudo-locales (`en-XA`, `ar-XB`) are generated at runtime and
+are never Weblate languages.
 
 ## Where the strings live
 

@@ -199,6 +199,7 @@ Installs from Flathub are updated by Flatpak instead of the app.
 
 ## 9. Troubleshooting
 
+<!-- --8<-- [start:troubleshooting] -->
 The desktop app also has short tips under **Settings → Help & diagnostics**.
 
 ### The devices can't find each other
@@ -221,7 +222,7 @@ The desktop app also has short tips under **Settings → Help & diagnostics**.
 
 ### The microphone doesn't show up in Zoom/Discord/Meet
 
-- Set up the [virtual microphone](#4-virtual-microphone) and restart Windows after installing VB-CABLE.
+- Set up the [virtual microphone](user-guide.md#4-virtual-microphone) and restart Windows after installing VB-CABLE.
 - In the app, select **CABLE Output** (Windows) or **SoundPush Microphone** (macOS) — restart the app after installing.
 - Start **Use phone as microphone** and allow the microphone on the phone.
 
@@ -254,7 +255,8 @@ install it over the current one; your paired devices and settings are kept.
 2. Settings → Help & diagnostics → **Report a problem** opens GitHub. Describe what you did and attach the report.
    On Android, phone logs can be collected with `adb logcat -s SoundPush`.
 
-Security problems: please report privately (see [SECURITY.md](../SECURITY.md)).
+Security problems: please report privately (see [SECURITY.md](https://github.com/FlyToRakib/soundpush/blob/HEAD/SECURITY.md)).
+<!-- --8<-- [end:troubleshooting] -->
 
 ## 10. Uninstall and your data
 
@@ -266,4 +268,4 @@ Security problems: please report privately (see [SECURITY.md](../SECURITY.md)).
   Data: `~/.local/share/SoundPush`.
 - **Android:** uninstall the app; its data is removed with it.
 
-What SoundPush stores and why: [PRIVACY.md](../PRIVACY.md).
+What SoundPush stores and why: [privacy policy](privacy.md).

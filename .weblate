@@ -1,0 +1,6 @@
+# Weblate client (wlc) configuration: https://docs.weblate.org/en/latest/wlc.html
+# Translation happens at https://hosted.weblate.org/projects/soundpush/ ; component settings are in
+# docs/translating.md ("Weblate setup"). Example: `wlc show`, `wlc list-translations`, `wlc pull`.
+[weblate]
+url = https://hosted.weblate.org/api/
+translation = soundpush

@@ -71,4 +71,4 @@ SoundPush does not knowingly collect data from anyone, including children.
 
 Changes to this policy are published in this file with the date above and noted in `CHANGELOG.md`.
 Questions: open a discussion at <https://github.com/FlyToRakib/soundpush/discussions>. Security issues: see
-[`SECURITY.md`](SECURITY.md).
+[`SECURITY.md`](https://github.com/FlyToRakib/soundpush/blob/HEAD/SECURITY.md).
