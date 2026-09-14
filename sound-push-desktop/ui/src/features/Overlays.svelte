@@ -3,9 +3,25 @@
   import Button from "../lib/components/Button.svelte";
   import Dialog from "../lib/components/Dialog.svelte";
   import { engine } from "../lib/engine/client";
+  import type { FixAction } from "../lib/engine/types";
   import { t } from "../lib/i18n";
   import { store } from "../lib/stores/engine.svelte";
   import { run, toasts } from "../lib/stores/toast.svelte";
+  import { ui } from "../lib/stores/ui.svelte";
+  import FirewallFix from "./FirewallFix.svelte";
+
+  /** What a notice's fix button does. Fixes without an entry show no button. */
+  const FIXES: Partial<Record<FixAction, () => void>> = {
+    openFirewallFix: () => (ui.firewallFix = true),
+    installVirtualMic: () => (ui.page = "audio"),
+    chooseAnotherDevice: () => (ui.page = "audio"),
+    openMicPermissionSettings: () => void run(engine.openSystemSettings("microphone")),
+    pairAgain: () => (ui.page = "devices"),
+    switchToUsb: () => {
+      ui.page = "settings";
+      ui.troubleshoot = "noDevices";
+    },
+  };
 
   const app = $derived(store.state!);
   const prompt = $derived(app.pairing.prompts[0]);
@@ -58,11 +74,21 @@
   </Dialog>
 {/if}
 
+{#if ui.firewallFix}<FirewallFix onclose={() => (ui.firewallFix = false)} />{/if}
+
 <div class="toasts" aria-live="polite">
   {#each notices as notice (notice.id)}
+    {@const fix = notice.error?.fix ? FIXES[notice.error.fix] : undefined}
     <Banner
       severity={notice.severity}
       message={t(notice.key, ...notice.args)}
+      actionLabel={fix && notice.error?.fix ? t(`fix.${notice.error.fix}`) : undefined}
+      onaction={fix
+        ? () => {
+            fix();
+            void run(engine.dismissNotice(notice.id));
+          }
+        : undefined}
       ondismiss={() => run(engine.dismissNotice(notice.id))}
     />
   {/each}

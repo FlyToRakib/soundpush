@@ -90,6 +90,10 @@ export interface MicSettings {
 export interface CaptureSettings {
   systemDevice: string | null;
   muteLocalSpeakers: boolean;
+  /** Send only this app (executable name); null sends everything. Windows 10 2004+. */
+  app: string | null;
+  /** Send everything except `app`. */
+  excludeApp: boolean;
 }
 
 export interface DesktopSettings {
@@ -100,6 +104,9 @@ export interface DesktopSettings {
   muteHotkey: string | null;
   pushToTalkHotkey: string | null;
   virtualMicDevice: string | null;
+  /** Start the phone microphone when another app opens the virtual microphone. */
+  autoStartMic: boolean;
+  lastMicPeer: string | null;
 }
 
 export interface Settings {
@@ -242,4 +249,45 @@ export interface EngineState {
   };
   audioDevices: AudioDeviceView[];
   micLevelDb: number;
+  /** Microphone mute (tray, shortcuts, push-to-talk). */
+  micMuted: boolean;
 }
+
+// ---- desktop platform (src-tauri: network.rs, system.rs, hotkeys.rs)
+
+export interface NetworkStatus {
+  supported: boolean;
+  firewallEnabled: boolean;
+  /** Other devices can't connect to this computer. */
+  blocked: boolean;
+  publicNetwork: boolean;
+  publicNetworkName: string | null;
+  allowedOnPublic: boolean;
+}
+
+export type PermissionState = "granted" | "denied" | "notDetermined" | "restricted" | "unknown";
+
+export interface SystemStatus {
+  microphone: PermissionState;
+  systemAudio: PermissionState;
+  mediaFeaturePackMissing: boolean;
+  windowsEdition: string | null;
+  autostartDisabledByOs: boolean;
+  bluetoothOutputs: string[];
+  defaultOutput: string | null;
+  appCapture: boolean;
+}
+
+export type HotkeyKind = "mute" | "pushToTalk";
+export type HotkeyError = "invalid" | "duplicate" | "unavailable";
+export interface HotkeyStatus {
+  mute: HotkeyError | null;
+  pushToTalk: HotkeyError | null;
+}
+
+export interface AudioApps {
+  supported: boolean;
+  apps: { process: string; active: boolean }[];
+}
+
+export type SettingsTopic = "microphone" | "systemAudio" | "network" | "optionalFeatures" | "sound" | "startup";

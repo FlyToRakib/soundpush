@@ -3,6 +3,8 @@
   import Icon, { type IconName } from "./lib/components/Icon.svelte";
   import { engine } from "./lib/engine/client";
   import { store } from "./lib/stores/engine.svelte";
+  import { platform } from "./lib/stores/platform.svelte";
+  import { ui, type Page } from "./lib/stores/ui.svelte";
   import { setLanguage, t } from "./lib/i18n";
   import Home from "./features/Home.svelte";
   import Devices from "./features/Devices.svelte";
@@ -11,19 +13,21 @@
   import Overlays from "./features/Overlays.svelte";
   import Onboarding from "./features/Onboarding.svelte";
 
-  type Page = "home" | "devices" | "audio" | "settings";
   const nav: { id: Page; icon: IconName }[] = [
     { id: "home", icon: "home" },
     { id: "devices", icon: "devices" },
     { id: "audio", icon: "audio" },
     { id: "settings", icon: "settings" },
   ];
-  let page = $state<Page>("home");
 
   const app = $derived(store.state);
   const onboarding = $derived(app !== null && !app.settings.dismissedTips.includes("onboarding"));
   $effect(() => {
     if (app) setLanguage(app.settings.language);
+  });
+  // Firewall, permissions and media checks start once the engine is up.
+  $effect(() => {
+    if (app) platform.start();
   });
 </script>
 
@@ -35,7 +39,7 @@
         {t("app.name")}
       </div>
       {#each nav as item (item.id)}
-        <button class="nav-item" aria-current={page === item.id ? "page" : undefined} onclick={() => (page = item.id)}>
+        <button class="nav-item" aria-current={ui.page === item.id ? "page" : undefined} onclick={() => (ui.page = item.id)}>
           <Icon name={item.icon} />
           {t(`nav.${item.id}`)}
         </button>
@@ -47,11 +51,11 @@
     </nav>
 
     <main>
-      {#if page === "home"}
-        <Home onnavigate={(p) => (page = p)} />
-      {:else if page === "devices"}
+      {#if ui.page === "home"}
+        <Home onnavigate={(p) => (ui.page = p)} />
+      {:else if ui.page === "devices"}
         <Devices />
-      {:else if page === "audio"}
+      {:else if ui.page === "audio"}
         <Audio />
       {:else}
         <Settings />

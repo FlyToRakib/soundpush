@@ -1,6 +1,18 @@
 // Typed client for the Tauri commands exposed by src-tauri/src/commands.rs.
 // Outside Tauri (plain `vite` preview, tests) a mock engine is used instead.
-import type { EngineState, PermissionKind, Policy, RouteKind, Settings } from "./types";
+import type {
+  AudioApps,
+  EngineState,
+  HotkeyKind,
+  HotkeyStatus,
+  NetworkStatus,
+  PermissionKind,
+  Policy,
+  RouteKind,
+  Settings,
+  SettingsTopic,
+  SystemStatus,
+} from "./types";
 import { mockEngine } from "./mock";
 
 type Unlisten = () => void;
@@ -79,6 +91,16 @@ export const engine = {
   installVirtualMic: () => call<void>("install_virtual_mic"),
   uninstallVirtualMic: () => call<void>("uninstall_virtual_mic"),
   restartComputer: () => call<void>("restart_computer"),
+  listAudioApps: () => call<AudioApps>("list_audio_apps"),
+
+  // desktop platform
+  hotkeyStatus: () => call<HotkeyStatus>("hotkey_status"),
+  setHotkey: (kind: HotkeyKind, accelerator: string | null) => call<void>("set_hotkey", { kind, accelerator }),
+  networkStatus: () => call<NetworkStatus>("network_status"),
+  fixFirewall: (includePublic: boolean) => call<NetworkStatus>("fix_firewall", { includePublic }),
+  systemStatus: () => call<SystemStatus>("system_status"),
+  requestMicrophone: () => call<void>("request_microphone"),
+  openSystemSettings: (topic: SettingsTopic) => call<void>("open_system_settings", { topic }),
 
   // settings & app
   updateSettings: (settings: Settings) => call<Settings>("update_settings", { settings }),
