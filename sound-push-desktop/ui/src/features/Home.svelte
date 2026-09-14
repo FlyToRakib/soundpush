@@ -10,6 +10,7 @@
   import { store } from "../lib/stores/engine.svelte";
   import { run, toasts } from "../lib/stores/toast.svelte";
   import PairDialog from "./PairDialog.svelte";
+  import PlatformBanners from "./PlatformBanners.svelte";
   import RouteCard from "./RouteCard.svelte";
 
   let { onnavigate }: { onnavigate: (page: "devices" | "audio") => void } = $props();
@@ -76,6 +77,7 @@
 </script>
 
 <div class="page stack">
+  <PlatformBanners />
   {#if store.trustedPeers.length === 0}
     <section class="empty">
       <span class="empty-icon"><Icon name="phone" size={28} /></span>

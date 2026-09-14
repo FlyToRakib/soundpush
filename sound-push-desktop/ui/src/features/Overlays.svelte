@@ -3,11 +3,27 @@
   import Button from "../lib/components/Button.svelte";
   import Dialog from "../lib/components/Dialog.svelte";
   import { engine } from "../lib/engine/client";
-  import type { RouteStatus } from "../lib/engine/types";
+  import type { FixAction, RouteStatus } from "../lib/engine/types";
+
   import { t } from "../lib/i18n";
   import { routeTitle } from "../lib/routes";
   import { store } from "../lib/stores/engine.svelte";
   import { run, toasts } from "../lib/stores/toast.svelte";
+  import { ui } from "../lib/stores/ui.svelte";
+  import FirewallFix from "./FirewallFix.svelte";
+
+  /** What a notice's fix button does. Fixes without an entry show no button. */
+  const FIXES: Partial<Record<FixAction, () => void>> = {
+    openFirewallFix: () => (ui.firewallFix = true),
+    installVirtualMic: () => (ui.page = "audio"),
+    chooseAnotherDevice: () => (ui.page = "audio"),
+    openMicPermissionSettings: () => void run(engine.openSystemSettings("microphone")),
+    pairAgain: () => (ui.page = "devices"),
+    switchToUsb: () => {
+      ui.page = "settings";
+      ui.troubleshoot = "noDevices";
+    },
+  };
 
   const app = $derived(store.state!);
   const prompt = $derived(app.pairing.prompts[0]);
@@ -90,6 +106,8 @@
 
 <p class="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 
+{#if ui.firewallFix}<FirewallFix onclose={() => (ui.firewallFix = false)} />{/if}
+
 <!-- One live region for all messages (the banners inside do not announce twice).
      Messages stay open while hovered or focused. -->
 <div
@@ -103,10 +121,18 @@
   onfocusout={() => (toasts.paused = false)}
 >
   {#each notices as notice (notice.id)}
+    {@const fix = notice.error?.fix ? FIXES[notice.error.fix] : undefined}
     <Banner
       live={false}
       severity={notice.severity}
       message={t(notice.key, ...notice.args)}
+      actionLabel={fix && notice.error?.fix ? t(`fix.${notice.error.fix}`) : undefined}
+      onaction={fix
+        ? () => {
+            fix();
+            void run(engine.dismissNotice(notice.id));
+          }
+        : undefined}
       ondismiss={() => run(engine.dismissNotice(notice.id))}
     />
   {/each}

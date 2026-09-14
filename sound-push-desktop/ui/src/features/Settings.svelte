@@ -13,13 +13,14 @@
   import { updateSettings } from "../lib/stores/settings";
   import { run, toasts } from "../lib/stores/toast.svelte";
   import { updater } from "../lib/stores/updater.svelte";
+  import { platform } from "../lib/stores/platform.svelte";
+  import Troubleshooter from "./Troubleshooter.svelte";
 
   const app = $derived(store.state!);
   const s = $derived(app.settings);
   const isMac = $derived(app.local.platform === "macos");
-  let openTip = $state<string | null>(null);
-
-  const troubles = ["noDevices", "noSound", "micApps", "crackles"];
+  /** Launch at login is on here but switched off in the OS (Task Manager / Startup apps). */
+  const startupBlocked = $derived(s.desktop.launchAtLogin && platform.system?.autostartDisabledByOs === true);
 
   // Pseudo-locales appear in development builds, or once chosen (e.g. set by a tester).
   const languages = $derived([
@@ -87,7 +88,13 @@
         onchange={(v) => updateSettings((x) => (x.language = v))}
       />
     </SettingRow>
-    <SettingRow label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}>
+    <SettingRow
+      label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
+      description={startupBlocked ? t("settings.launchAtLogin.disabledByOs") : undefined}
+    >
+      {#if startupBlocked}
+        <Button variant="ghost" onclick={() => run(engine.openSystemSettings("startup"))}>{t("common.openSettings")}</Button>
+      {/if}
       <Toggle checked={s.desktop.launchAtLogin} label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
         onchange={(v) => updateSettings((x) => (x.desktop.launchAtLogin = v))} />
     </SettingRow>
@@ -102,6 +109,9 @@
     <SettingRow label={t("settings.preventSleep")}>
       <Toggle checked={s.desktop.preventSleepWhileStreaming} label={t("settings.preventSleep")}
         onchange={(v) => updateSettings((x) => (x.desktop.preventSleepWhileStreaming = v))} />
+    </SettingRow>
+    <SettingRow label={t("settings.audioCues")} description={t("settings.audioCues.desc")}>
+      <Toggle checked={s.audioCues} label={t("settings.audioCues")} onchange={(v) => updateSettings((x) => (x.audioCues = v))} />
     </SettingRow>
   </Card>
 
@@ -121,20 +131,7 @@
   </Card>
 
   <Card title={t("settings.help")}>
-    <div class="troubles">
-      {#each troubles as id (id)}
-        <button
-          type="button"
-          class="trouble"
-          aria-expanded={openTip === id}
-          aria-controls={`trouble-${id}`}
-          onclick={() => (openTip = openTip === id ? null : id)}
-        >
-          {t(`trouble.${id}`)}
-        </button>
-        {#if openTip === id}<p class="caption tip" id={`trouble-${id}`}>{t(`trouble.${id}.body`)}</p>{/if}
-      {/each}
-    </div>
+    <Troubleshooter />
     <div class="row wrap">
       <Button onclick={exportDiagnostics}>{t("settings.export")}</Button>
       <Button variant="ghost" onclick={() => run(engine.openLogsFolder())}>{t("settings.openLogs")}</Button>
@@ -185,21 +182,6 @@
     border: 1px solid var(--color-border);
     background: var(--color-background);
     user-select: text;
-  }
-  .troubles {
-    display: flex;
-    flex-direction: column;
-  }
-  .trouble {
-    text-align: start;
-    padding: 8px 0;
-    border: 0;
-    border-bottom: 1px solid var(--color-border);
-    background: transparent;
-    cursor: pointer;
-  }
-  .tip {
-    padding: 8px 0 12px;
   }
   .code {
     font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;

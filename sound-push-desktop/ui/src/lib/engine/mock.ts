@@ -29,7 +29,7 @@ const settings: Settings = {
     systemEchoCancellation: true,
     monitor: false,
   },
-  capture: { systemDevice: null, muteLocalSpeakers: false },
+  capture: { systemDevice: null, muteLocalSpeakers: false, app: null, excludeApp: false },
   desktop: {
     launchAtLogin: true,
     startMinimized: true,
@@ -38,6 +38,8 @@ const settings: Settings = {
     muteHotkey: null,
     pushToTalkHotkey: null,
     virtualMicDevice: null,
+    autoStartMic: false,
+    lastMicPeer: null,
   },
   mobile: { stayAvailable: false, remindAfterRestart: true },
   autoConnectTrusted: true,
@@ -100,6 +102,16 @@ let state: EngineState = {
     { id: "Microphone", name: "Microphone", isInput: true, isDefault: true, virtualCable: false },
   ],
   micLevelDb: -120,
+  micMuted: false,
+};
+
+const mockNetwork = {
+  supported: true,
+  firewallEnabled: true,
+  blocked: false,
+  publicNetwork: false,
+  publicNetworkName: null,
+  allowedOnPublic: false,
 };
 
 const listeners = new Set<(s: EngineState) => void>();
@@ -168,6 +180,35 @@ export const mockEngine = {
         return undefined as T;
       case "export_diagnostics":
         return "/tmp/soundpush-diagnostics.zip" as T;
+      case "set_mic_muted":
+        emit({ micMuted: Boolean(args?.muted) });
+        return undefined as T;
+      case "network_status":
+      case "fix_firewall":
+        return { ...mockNetwork } as T;
+      case "system_status":
+        return {
+          microphone: "granted",
+          systemAudio: "granted",
+          mediaFeaturePackMissing: false,
+          windowsEdition: "Professional",
+          autostartDisabledByOs: false,
+          bluetoothOutputs: [],
+          defaultOutput: "Speakers",
+          appCapture: true,
+        } as T;
+      case "hotkey_status":
+        return { mute: null, pushToTalk: null } as T;
+      case "set_hotkey": {
+        const next = structuredClone(state.settings);
+        const accelerator = (args?.accelerator as string | null) ?? null;
+        if (args?.kind === "mute") next.desktop.muteHotkey = accelerator;
+        else next.desktop.pushToTalkHotkey = accelerator;
+        emit({ settings: next });
+        return undefined as T;
+      }
+      case "list_audio_apps":
+        return { supported: true, apps: [{ process: "spotify.exe", active: true }, { process: "chrome.exe", active: false }] } as T;
       case "virtual_mic_status":
         return { supported: true, installed: mockDriverInstalled, provider: "soundpush" } as T;
       case "install_virtual_mic":

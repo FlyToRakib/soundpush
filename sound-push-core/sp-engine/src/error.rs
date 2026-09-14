@@ -36,6 +36,8 @@ pub enum EngineError {
     Unreachable,
     #[error("network blocks local devices")]
     NetworkBlocked,
+    #[error("firewall blocks incoming connections")]
+    FirewallBlocked,
     #[error("device is not paired")]
     NotPaired,
     #[error("pairing rejected")]
@@ -77,6 +79,7 @@ impl EngineError {
             Self::DeviceNotFound => "error.device.notFound",
             Self::Unreachable => "error.network.unreachable",
             Self::NetworkBlocked => "error.network.blocked",
+            Self::FirewallBlocked => "error.network.firewall",
             Self::NotPaired => "error.security.notPaired",
             Self::PairingRejected => "error.security.pairingRejected",
             Self::PairingExpired => "error.security.pairingExpired",
@@ -104,13 +107,17 @@ impl EngineError {
     }
 
     pub fn retryable(&self) -> bool {
-        matches!(self, Self::Unreachable | Self::NetworkBlocked | Self::AudioDevice(_))
+        matches!(
+            self,
+            Self::Unreachable | Self::NetworkBlocked | Self::FirewallBlocked | Self::AudioDevice(_)
+        )
     }
 
     pub fn fix(&self) -> Option<FixAction> {
         match self {
             Self::Unreachable => Some(FixAction::RetryConnection),
             Self::NetworkBlocked => Some(FixAction::SwitchToUsb),
+            Self::FirewallBlocked => Some(FixAction::OpenFirewallFix),
             Self::NotPaired | Self::Revoked | Self::PairingExpired => Some(FixAction::PairAgain),
             Self::IncompatibleVersion => Some(FixAction::UpdatePeerApp),
             Self::MicPermissionDenied => Some(FixAction::OpenMicPermissionSettings),

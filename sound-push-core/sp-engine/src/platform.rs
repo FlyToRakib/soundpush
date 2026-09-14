@@ -64,6 +64,18 @@ pub trait PlatformHooks: Send + Sync + 'static {
         true
     }
 
+    /// Whether another app is recording from this device's virtual microphone right now.
+    /// Polled every few seconds while "start the phone microphone when an app uses it" is on.
+    fn virtual_mic_in_use(&self) -> bool {
+        false
+    }
+
+    /// Whether the OS firewall currently stops other devices from connecting to this one.
+    /// Must be cheap (a cached result): it is checked when a connection error is shown.
+    fn inbound_blocked(&self) -> bool {
+        false
+    }
+
     /// Ask the OS to keep the engine alive for these activities (Android FGS types).
     fn keep_alive(&self, _reason: KeepAlive) {}
 

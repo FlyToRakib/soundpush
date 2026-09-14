@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use sp_engine::settings::Settings;
 use sp_engine::state::RouteKind;
-use sp_engine::{EngineError, EngineState, ErrorView, PermissionKind, Policy};
+use sp_engine::{EngineError, EngineState, ErrorView, PermissionKind, Policy, Severity};
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
@@ -22,6 +22,19 @@ pub struct CommandError(ErrorView);
 impl From<EngineError> for CommandError {
     fn from(e: EngineError) -> Self {
         Self(ErrorView::from(&e))
+    }
+}
+
+impl CommandError {
+    /// An error the engine does not know about (desktop-only features), by i18n key.
+    fn keyed(key: &'static str, message: impl Into<String>) -> Self {
+        Self(ErrorView {
+            key,
+            message: message.into(),
+            severity: Severity::Warning,
+            retryable: false,
+            fix: None,
+        })
     }
 }
 
@@ -277,6 +290,132 @@ async fn change_virtual_mic(f: impl FnOnce() -> Result<(), String> + Send + 'sta
     .await
     .map_err(|e| EngineError::Internal(e.to_string()))?
     .map_err(|e| EngineError::Internal(e).into())
+}
+
+#[tauri::command]
+pub fn hotkey_status(app: AppHandle) -> crate::hotkeys::HotkeyStatus {
+    crate::hotkeys::status(&app)
+}
+
+/// Set or clear a global shortcut. It is registered first, so a combination another app owns
+/// is reported (and not saved); then the settings are saved.
+#[tauri::command]
+pub async fn set_hotkey(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    kind: crate::hotkeys::Kind,
+    accelerator: Option<String>,
+) -> CmdResult<()> {
+    let engine = state.engine()?.clone();
+    let accelerator = accelerator.map(|a| a.trim().to_string()).filter(|a| !a.is_empty());
+    {
+        // Registration waits on the main thread, so it must not run on it (or on the async runtime).
+        let accelerator = accelerator.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::hotkeys::set(&app, kind, accelerator.as_deref()))
+            .await
+            .map_err(|e| EngineError::Internal(e.to_string()))?
+            .map_err(|e| CommandError::keyed(e.key(), format!("{e:?}")))?;
+    }
+
+    let mut settings = engine.state().settings.clone();
+    match kind {
+        crate::hotkeys::Kind::Mute => settings.desktop.mute_hotkey = accelerator,
+        crate::hotkeys::Kind::PushToTalk => settings.desktop.push_to_talk_hotkey = accelerator,
+    }
+    engine.update_settings(settings).await?;
+    Ok(())
+}
+
+/// Firewall and network profile (Windows). Checked fresh; takes a moment on large rule sets.
+#[tauri::command]
+pub async fn network_status(state: State<'_, AppState>) -> CmdResult<crate::network::NetworkStatus> {
+    let status = tauri::async_runtime::spawn_blocking(crate::network::status)
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()))?;
+    state.hooks.set_network_status(status.clone());
+    Ok(status)
+}
+
+/// Add SoundPush's firewall rule through a UAC prompt, then check again.
+#[tauri::command]
+pub async fn fix_firewall(state: State<'_, AppState>, include_public: bool) -> CmdResult<crate::network::NetworkStatus> {
+    tauri::async_runtime::spawn_blocking(move || crate::network::fix_firewall(include_public))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()))?
+        .map_err(EngineError::Internal)?;
+    network_status(state).await
+}
+
+#[tauri::command]
+pub async fn system_status() -> CmdResult<crate::system::SystemStatus> {
+    tauri::async_runtime::spawn_blocking(crate::system::status)
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
+/// Ask the OS for microphone access (macOS shows its prompt only while undecided).
+#[tauri::command]
+pub async fn request_microphone(state: State<'_, AppState>) -> CmdResult<()> {
+    let backend = state.hooks.backend();
+    tauri::async_runtime::spawn_blocking(move || {
+        use sp_audio_io::AudioBackend;
+        // Opening the microphone is what makes macOS ask; nothing is recorded.
+        if let Ok(stream) = backend.open_capture(&sp_audio_io::CaptureSource::DefaultInput, 1, Box::new(|_| {}), Box::new(|_| {})) {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(stream);
+        }
+    })
+    .await
+    .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
+/// Open a System Settings page ("microphone", "systemAudio", "network", "optionalFeatures", "sound", "startup").
+#[tauri::command]
+pub fn open_system_settings(app: AppHandle, topic: String) -> CmdResult<()> {
+    let url = crate::system::settings_url(&topic).ok_or_else(|| invalid("topic"))?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioApps {
+    /// Per-app capture works on this computer.
+    pub supported: bool,
+    /// Executable names of apps with audio sessions, playing ones first.
+    pub apps: Vec<AudioApp>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioApp {
+    pub process: String,
+    pub active: bool,
+}
+
+#[tauri::command]
+pub async fn list_audio_apps() -> CmdResult<AudioApps> {
+    tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(windows)]
+        return AudioApps {
+            supported: sp_audio_io::wasapi_process::process_loopback_supported(),
+            apps: sp_audio_io::wasapi_process::audio_apps()
+                .into_iter()
+                .map(|a| AudioApp {
+                    process: a.process,
+                    active: a.active,
+                })
+                .collect(),
+        };
+        #[allow(unreachable_code)]
+        AudioApps {
+            supported: false,
+            apps: Vec::new(),
+        }
+    })
+    .await
+    .map_err(|e| EngineError::Internal(e.to_string()).into())
 }
 
 #[tauri::command]

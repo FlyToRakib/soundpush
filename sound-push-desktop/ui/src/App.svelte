@@ -5,6 +5,8 @@
   import { engine } from "./lib/engine/client";
   import { store } from "./lib/stores/engine.svelte";
   import { updater } from "./lib/stores/updater.svelte";
+  import { platform } from "./lib/stores/platform.svelte";
+  import { ui, type Page } from "./lib/stores/ui.svelte";
   import { setLanguage, t } from "./lib/i18n";
   import Home from "./features/Home.svelte";
   import Devices from "./features/Devices.svelte";
@@ -14,14 +16,12 @@
   import Onboarding from "./features/Onboarding.svelte";
   import UpdateBanner from "./features/UpdateBanner.svelte";
 
-  type Page = "home" | "devices" | "audio" | "settings";
   const nav: { id: Page; icon: IconName }[] = [
     { id: "home", icon: "home" },
     { id: "devices", icon: "devices" },
     { id: "audio", icon: "audio" },
     { id: "settings", icon: "settings" },
   ];
-  let page = $state<Page>("home");
   let main = $state<HTMLElement>();
 
   const app = $derived(store.state);
@@ -37,13 +37,18 @@
     return () => updater.setAutomatic(false);
   });
 
+  // Firewall, permissions and media checks start once the engine is up.
+  $effect(() => {
+    if (app) platform.start();
+  });
+
   /** Ctrl+1…4 (⌘1…4 on macOS) switch pages; focus moves to the new page for screen readers. */
   function onkeydown(e: KeyboardEvent) {
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || !app) return;
     const item = nav[Number(e.key) - 1];
     if (!item || document.querySelector("dialog[open]")) return;
     e.preventDefault();
-    page = item.id;
+    ui.page = item.id;
     void tick().then(() => main?.focus());
   }
 </script>
@@ -62,9 +67,9 @@
           <button
             type="button"
             class="nav-item"
-            aria-current={page === item.id ? "page" : undefined}
+            aria-current={ui.page === item.id ? "page" : undefined}
             aria-keyshortcuts={`${modifier}+${i + 1}`}
-            onclick={() => (page = item.id)}
+            onclick={() => (ui.page = item.id)}
           >
             <Icon name={item.icon} />
             {t(`nav.${item.id}`)}
@@ -76,13 +81,13 @@
         </div>
       </nav>
 
-      <main bind:this={main} tabindex="-1" aria-label={t(`nav.${page}`)}>
+      <main bind:this={main} tabindex="-1" aria-label={t(`nav.${ui.page}`)}>
         <UpdateBanner />
-        {#if page === "home"}
-          <Home onnavigate={(p) => (page = p)} />
-        {:else if page === "devices"}
+        {#if ui.page === "home"}
+          <Home onnavigate={(p) => (ui.page = p)} />
+        {:else if ui.page === "devices"}
           <Devices />
-        {:else if page === "audio"}
+        {:else if ui.page === "audio"}
           <Audio />
         {:else}
           <Settings />

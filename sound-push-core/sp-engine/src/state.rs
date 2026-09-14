@@ -23,6 +23,8 @@ pub struct EngineState {
     pub capabilities: LocalCapabilities,
     pub audio_devices: Vec<AudioDeviceView>,
     pub mic_level_db: f32,
+    /// Microphone mute (tray, global shortcuts): silences every microphone route on this device.
+    pub mic_muted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
