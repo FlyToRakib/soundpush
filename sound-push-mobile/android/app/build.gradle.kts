@@ -96,6 +96,7 @@ dependencies {
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.compose.ui.test.junit4.accessibility)
     testImplementation(libs.androidx.test.ext.junit)
     debugImplementation(platform(libs.compose.bom))
     debugImplementation(libs.compose.ui.test.manifest)
