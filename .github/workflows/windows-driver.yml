@@ -1,0 +1,120 @@
+name: Windows driver
+
+# Builds SoundPush's own Windows virtual audio driver (drivers/windows-virtual-audio) for x64
+# and ARM64, test-signs it with a throwaway certificate created in this job (never committed,
+# private key deleted at the end), validates it and uploads the test-signed package.
+# The SoundPush app does not use this driver: VB-CABLE stays active until the driver is
+# Microsoft attestation-signed.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "sound-push-desktop/drivers/windows-virtual-audio/**"
+      - ".github/workflows/windows-driver.yml"
+
+jobs:
+  driver:
+    name: Windows driver (x64 + ARM64, test-signed)
+    # Same image as microsoft/Windows-driver-samples CI: Visual Studio with the WDK component;
+    # the WDK and SDK themselves come from NuGet (packages.config).
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: sound-push-desktop/drivers/windows-virtual-audio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Restore WDK and SDK (NuGet)
+        run: |
+          nuget restore packages.config -PackagesDirectory packages -NonInteractive
+          if ($LASTEXITCODE -ne 0) { "::error title=NuGet::nuget restore failed ($LASTEXITCODE)"; exit 1 }
+
+      # Failures are written as annotations, readable on the run page without downloading logs.
+      - name: Build (Release x64, ARM64) with code analysis
+        run: |
+          $failed = $false
+          foreach ($platform in 'x64', 'ARM64') {
+            $log = "build-$platform.log"
+            msbuild SoundPushVirtualAudio.vcxproj /nologo /m /v:minimal `
+              /p:Configuration=Release /p:Platform=$platform `
+              /p:RunCodeAnalysis=true /p:CodeAnalysisTreatWarningsAsErrors=true `
+              "/flp:logfile=$log;verbosity=normal"
+            if ($LASTEXITCODE -ne 0) {
+              $failed = $true
+              Select-String -Path $log -Pattern ': (fatal )?error |: warning C\d+' |
+                Select-Object -First 40 |
+                ForEach-Object { "::error title=Driver build ($platform)::$($_.Line.Trim())" }
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Package, validate and test-sign
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $kit = '10.0.28000.0'
+          $version = ([xml](Get-Content packages.config)).packages.package[0].version
+          $wdk = "packages\Microsoft.Windows.WDK.x64.$version\c"
+          $sdk = "packages\Microsoft.Windows.SDK.CPP.$version\c"
+          $signtool = "$sdk\bin\$kit\x64\signtool.exe"
+          $problems = [System.Collections.Generic.List[string]]::new()
+          function Check([string] $title, [scriptblock] $command) {
+            $output = & $command 2>&1 | Out-String
+            Write-Host $output
+            if ($LASTEXITCODE -ne 0) {
+              $problems.Add($title)
+              ($output -split "`r?`n") | Where-Object { $_ -match 'error|fail|invalid' } |
+                Select-Object -First 20 | ForEach-Object { "::error title=$title::$($_.Trim())" }
+            }
+          }
+
+          # Throwaway test certificate. Only the public part leaves this job.
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=SoundPush Test Driver Signing' `
+            -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddDays(90)
+          "SP_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Append
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Export-Certificate -Cert $cert -FilePath dist\SoundPushTestSigning.cer | Out-Null
+          # Trust it on this disposable runner only, so the signatures can be verified below.
+          Import-Certificate -FilePath dist\SoundPushTestSigning.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Import-Certificate -FilePath dist\SoundPushTestSigning.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+
+          foreach ($platform in 'x64', 'ARM64') {
+            $out = "build\$platform\Release"
+            $pkg = "dist\$platform"
+            New-Item -ItemType Directory -Force $pkg | Out-Null
+            Copy-Item "$out\SoundPushVirtualAudio.sys", "$out\SoundPushVirtualAudio.inf", "$out\SoundPushVirtualAudio.pdb" $pkg
+            $arch = if ($platform -eq 'x64') { 'x64' } else { 'arm64' }
+            $os = if ($platform -eq 'x64') { '10_VB_X64' } else { '10_VB_ARM64' }
+            $ddis = "$wdk\build\$kit\universalDDIs\$arch"
+
+            Check "infverif ($platform)" { & "$wdk\tools\$kit\x64\infverif.exe" /w /v "$pkg\SoundPushVirtualAudio.inf" }
+            Check "ApiValidator ($platform)" {
+              & "$wdk\bin\$kit\x64\apivalidator.exe" "-DriverPackagePath:$pkg" `
+                "-SupportedApiXmlFiles:$ddis\UniversalDDIs.xml" "-ModuleWhiteListXmlFiles:$ddis\ModuleWhitelist.xml"
+            }
+            # Sign the binary first so the catalog hashes the signed file, then sign the catalog.
+            Check "Sign .sys ($platform)" { & $signtool sign /fd sha256 /s My /sha1 $cert.Thumbprint "$pkg\SoundPushVirtualAudio.sys" }
+            Check "inf2cat ($platform)" { & "$wdk\bin\$kit\x86\Inf2Cat.exe" "/driver:$pkg" "/os:$os" }
+            Check "Sign .cat ($platform)" { & $signtool sign /fd sha256 /s My /sha1 $cert.Thumbprint "$pkg\SoundPushVirtualAudio.cat" }
+            Check "Verify signatures ($platform)" {
+              & $signtool verify /pa /v /c "$pkg\SoundPushVirtualAudio.cat" "$pkg\SoundPushVirtualAudio.sys"
+            }
+          }
+
+          Copy-Item packaging\INSTALL.txt, scripts\Install-SoundPushDriver.ps1 dist
+          if ($problems.Count -gt 0) { "::error title=Driver package::Failed: $($problems -join ', ')"; exit 1 }
+
+      - name: Delete test signing key
+        if: always()
+        run: |
+          if ($env:SP_CERT_THUMBPRINT) { Remove-Item "Cert:\CurrentUser\My\$($env:SP_CERT_THUMBPRINT)" -ErrorAction SilentlyContinue }
+
+      - name: Upload test-signed driver
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundPush-Windows-Driver-TestSigned
+          path: sound-push-desktop/drivers/windows-virtual-audio/dist
+          if-no-files-found: error
