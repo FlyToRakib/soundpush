@@ -38,9 +38,12 @@ class MicCapture private constructor(private val record: AudioRecord, private va
     }
 
     companion object {
+        /** The parts of [MicSettings] baked into the recorder at creation; the rest applies live in the engine. */
+        fun recorderSettings(s: MicSettings) = listOf(s.mode, s.systemAgc, s.systemNoiseSuppression, s.systemEchoCancellation)
+
         private fun source(mode: String): Int = when (mode) {
             "default" -> MediaRecorder.AudioSource.DEFAULT
-            "raw" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) MediaRecorder.AudioSource.UNPROCESSED else MediaRecorder.AudioSource.VOICE_RECOGNITION
+            "raw" -> MediaRecorder.AudioSource.UNPROCESSED
             "voicePerformance" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaRecorder.AudioSource.VOICE_PERFORMANCE else MediaRecorder.AudioSource.MIC
             "voiceRecognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
             "camcorder" -> MediaRecorder.AudioSource.CAMCORDER

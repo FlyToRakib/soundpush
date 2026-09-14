@@ -1,13 +1,16 @@
 package net.soundpush.service
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import net.soundpush.engine.EngineState
 import net.soundpush.ui.R
 
@@ -22,7 +25,6 @@ object Notifications {
     const val ACTION_TOGGLE_MUTE = "net.soundpush.TOGGLE_MUTE"
 
     fun ensureChannels(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_STREAMING, context.getString(R.string.notif_channel_streaming), NotificationManager.IMPORTANCE_LOW)
@@ -75,6 +77,20 @@ object Notifications {
         builder.build()
     }
 
+    /** Android 13+ needs the user's permission before any notification is posted. */
+    private fun post(context: Context, id: Int, notification: android.app.Notification) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        try {
+            NotificationManagerCompat.from(context).notify(id, notification)
+        } catch (e: SecurityException) {
+            // Permission revoked between the check and the call.
+        }
+    }
+
     fun attention(context: Context, peerName: String) {
         val n = NotificationCompat.Builder(context, CHANNEL_ATTENTION)
             .setSmallIcon(R.drawable.ic_notification)
@@ -84,7 +100,7 @@ object Notifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(ID_ATTENTION, n) }
+        post(context, ID_ATTENTION, n)
     }
 
     fun reconnectReminder(context: Context) {
@@ -94,6 +110,6 @@ object Notifications {
             .setContentIntent(openAppIntent(context))
             .setAutoCancel(true)
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(ID_REMINDER, n) }
+        post(context, ID_REMINDER, n)
     }
 }

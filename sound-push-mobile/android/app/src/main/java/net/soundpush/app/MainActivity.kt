@@ -48,13 +48,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.os.BundleCompat
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import java.io.Serializable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import net.soundpush.audio.AudioScreen
 import net.soundpush.devices.DevicesScreen
@@ -74,23 +79,33 @@ import net.soundpush.ui.theme.Tokens
 
 class MainActivity : ComponentActivity() {
 
-    /** Routes waiting for the microphone permission or screen-capture consent. */
-    private var pendingStart: Pair<String, List<String>>? = null
+    /** What to finish once a permission dialog or the screen-capture consent returns. Survives recreation. */
+    private sealed interface Pending : Serializable {
+        /** Routes the user started from Home. */
+        data class Start(val peerId: String, val kinds: List<String>) : Pending
 
-    /** A remote microphone request the user allowed, waiting for the microphone permission. */
-    private var pendingResponse: Pair<Long, Boolean>? = null
+        /** A remote request the user allowed. */
+        data class Respond(val requestId: Long, val remember: Boolean) : Pending
+
+        /** App-audio routes that opened without consent (a remembered permission, resume on start). */
+        data class Consent(val routeIds: List<String>) : Pending
+    }
+
+    private var pending: Pending? = null
+
+    /** Route ids the consent safety net already asked about, so a refused consent is not asked again. */
+    private var consentAskedFor: List<String> = emptyList()
 
     private var afterCameraGranted: (() -> Unit)? = null
     private val messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
+    private fun takePending(): Pending? = pending.also { pending = null }
+
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        pendingStart?.let { (peer, kinds) ->
-            pendingStart = null
-            if (granted) startRoutes(peer, kinds)
-        }
-        pendingResponse?.let { (requestId, remember) ->
-            pendingResponse = null
-            SoundPush.command { respondRouteRequest(requestId.toULong(), granted, remember && granted) }
+        when (val p = takePending()) {
+            is Pending.Start -> if (granted) startRoutes(p.peerId, p.kinds)
+            is Pending.Respond -> SoundPush.command { respondRouteRequest(p.requestId.toULong(), granted, p.remember && granted) }
+            else -> {}
         }
         if (!granted) messages.tryEmit(getString(R.string.permission_mic_needed))
     }
@@ -104,19 +119,25 @@ class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     private val projectionConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val pending = pendingStart ?: return@registerForActivityResult
-        pendingStart = null
         val data = result.data
-        if (result.resultCode == RESULT_OK && data != null) {
-            StreamingService.startAppAudio(this, result.resultCode, data)
-            pending.second.forEach { kind -> SoundPush.command { startRoute(pending.first, kind) } }
+        val ok = result.resultCode == RESULT_OK && data != null
+        if (result.resultCode == RESULT_OK && data != null) StreamingService.startAppAudio(this, result.resultCode, data)
+        when (val p = takePending()) {
+            is Pending.Start -> if (ok) p.kinds.forEach { kind -> SoundPush.command { startRoute(p.peerId, kind) } }
+            is Pending.Respond -> SoundPush.command { respondRouteRequest(p.requestId.toULong(), ok, p.remember && ok) }
+            // Without consent the route would carry silence: end it rather than pretend.
+            is Pending.Consent -> if (!ok) p.routeIds.forEach { id -> SoundPush.command { stopRoute(id) } }
+            null -> {}
         }
+        if (!ok) messages.tryEmit(getString(R.string.permission_capture_needed))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33 && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+        pending = savedInstanceState?.let { BundleCompat.getSerializable(it, KEY_PENDING, Pending::class.java) }
+        // Ask once per launch, not again on every rotation after a "don't allow".
+        if (savedInstanceState == null && Build.VERSION.SDK_INT >= 33 && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         setContent {
@@ -149,22 +170,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putSerializable(KEY_PENDING, pending)
+    }
+
     private fun hasPermission(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    /** Screen-capture consent is single-use and only needed while no app-audio recorder runs. */
+    private fun needsCaptureConsent() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !StreamingService.capturing.value
+
+    private fun askCaptureConsent(next: Pending) {
+        pending = next
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        projectionConsent.launch(manager.createScreenCaptureIntent())
+    }
 
     /** Check the permissions each route kind needs, then start. */
     private fun startRoutes(peerId: String, kinds: List<String>) {
         val needsMic = kinds.any { it.startsWith("sendMic") }
         val needsProjection = kinds.contains("sendAppAudio")
         if (needsMic && !hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            pendingStart = peerId to kinds
+            pending = Pending.Start(peerId, kinds)
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        if (needsProjection && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            pendingStart = peerId to kinds
-            val manager = getSystemService(MediaProjectionManager::class.java)
-            projectionConsent.launch(manager.createScreenCaptureIntent())
+        if (needsProjection && needsCaptureConsent()) {
+            askCaptureConsent(Pending.Start(peerId, kinds))
             return
         }
         kinds.forEach { kind -> SoundPush.command { startRoute(peerId, kind) } }
@@ -194,6 +227,32 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(Unit) {
             messages.collect { snackbar.showSnackbar(it) }
+        }
+        // Engine notices (paired, a store was reset, a device forgot us) show once each, in order.
+        LaunchedEffect(Unit) {
+            SoundPush.state
+                .mapNotNull { it?.notices?.firstOrNull() }
+                .distinctUntilChangedBy { it.id }
+                .collect { notice ->
+                    SoundPush.command { dismissNotice(notice.id.toULong()) }
+                    val text = notice.error?.let { context.getString(Labels.error(it.key)) }
+                        ?: context.getString(Labels.notice(notice.key), *notice.args.toTypedArray())
+                    snackbar.showSnackbar(text)
+                }
+        }
+
+        // App-audio routes opened without this screen (a remembered permission, resume on start) carry
+        // silence until the user grants screen capture. Ask once such a route has been open a moment;
+        // the moment covers the normal path, where the recorder starts right after consent.
+        val capturing by StreamingService.capturing.collectAsState()
+        val unconsented = if (capturing) emptyList() else state.routes.filter { it.kind == "sendAppAudio" }.map { it.routeId }
+        LaunchedEffect(unconsented) {
+            if (unconsented.isEmpty() || unconsented == consentAskedFor) return@LaunchedEffect
+            delay(1_500)
+            if (pending == null && needsCaptureConsent()) {
+                consentAskedFor = unconsented
+                askCaptureConsent(Pending.Consent(unconsented))
+            }
         }
 
         Scaffold(
@@ -312,10 +371,19 @@ class MainActivity : ComponentActivity() {
     /** `kind` is from this phone's point of view: "sendMic…" means the other device wants this phone's microphone. */
     private fun respond(request: RouteRequestPrompt, accept: Boolean, remember: Boolean) {
         if (accept && request.kind.startsWith("sendMic") && !hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            pendingResponse = request.requestId to remember
+            pending = Pending.Respond(request.requestId, remember)
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
+        // The computer wants this phone's app audio: get screen-capture consent before accepting.
+        if (accept && request.kind == "sendAppAudio" && needsCaptureConsent()) {
+            askCaptureConsent(Pending.Respond(request.requestId, remember))
+            return
+        }
         SoundPush.command { respondRouteRequest(request.requestId.toULong(), accept, remember) }
+    }
+
+    private companion object {
+        const val KEY_PENDING = "pending"
     }
 }

@@ -1,14 +1,31 @@
 package net.soundpush.service
 
+import android.annotation.SuppressLint
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import net.soundpush.engine.SoundPush
 
 /** Quick Settings tile: start or stop listening to the first connected computer. */
 class StreamTileService : TileService() {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var follow: Job? = null
+
     override fun onStartListening() {
-        refresh()
+        // Follow the engine while the panel is open, so the tile never shows a stale on/off.
+        follow?.cancel()
+        follow = scope.launch { SoundPush.state.collect { refresh() } }
+    }
+
+    override fun onStopListening() {
+        follow?.cancel()
+        follow = null
     }
 
     override fun onClick() {
@@ -29,7 +46,6 @@ class StreamTileService : TileService() {
             }
             SoundPush.command { startRoute(peer.deviceId, "receiveSystemAudio") }
         }
-        refresh()
     }
 
     private fun refresh() {
@@ -39,7 +55,13 @@ class StreamTileService : TileService() {
         tile.updateTile()
     }
 
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
     @Suppress("DEPRECATION")
+    @SuppressLint("StartActivityAndCollapseDeprecated") // The Intent form is the only one before API 34.
     private fun startActivityAndCollapseCompat() {
         val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)

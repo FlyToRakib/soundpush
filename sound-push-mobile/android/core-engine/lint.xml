@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Generated UniFFI bindings pick java.lang.ref.Cleaner at runtime only where it exists
+         (Class.forName), falling back to JNA's cleaner on older Android. Lint cannot see that. -->
+    <issue id="NewApi">
+        <ignore path="src/main/java/uniffi" />
+    </issue>
+</lint>

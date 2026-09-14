@@ -47,6 +47,18 @@ object Labels {
         else -> R.string.request_play
     }
 
+    /** Engine notices (`EngineState.notices`); their `args` fill the placeholders. */
+    @StringRes
+    fun notice(key: String): Int = when (key) {
+        "notice.pairingSuccess" -> R.string.notice_pairing_success
+        "notice.peerForgotUs" -> R.string.notice_peer_forgot_us
+        "notice.identityReset" -> R.string.notice_identity_reset
+        "notice.trustStoreRecovered" -> R.string.notice_trust_store_recovered
+        "notice.settingsRecovered" -> R.string.notice_settings_recovered
+        "notice.muteSpeakersUnsupported" -> R.string.notice_mute_speakers_unsupported
+        else -> R.string.notice_generic
+    }
+
     @StringRes
     fun error(key: String): Int = when (key) {
         "error.device.notFound" -> R.string.error_device_not_found

@@ -18,14 +18,20 @@ import android.os.PowerManager
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import net.soundpush.engine.EngineState
+import net.soundpush.engine.MicSettings
 import net.soundpush.engine.PlatformDelegate
 import net.soundpush.engine.SoundPush
 
@@ -42,11 +48,17 @@ class StreamingService : Service() {
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var focusRequest: AudioFocusRequest? = null
+    private var focusMode: String? = null
     private var mutedByFocus = false
     private var capture: AppAudioCapture? = null
+        set(value) {
+            field = value
+            _capturing.value = value != null
+        }
     private var mic: MicCapture? = null
+    private var micSettingsInUse: MicSettings? = null
     private var stopJob: Job? = null
-    private var micMuted = false
+    private var consentAskedFor: String? = null
 
     private val streaming get() = types.playback || types.microphone || types.appAudio
 
@@ -66,11 +78,9 @@ class StreamingService : Service() {
             SoundPush.state.collectLatest { state ->
                 if (state == null) return@collectLatest
                 updateNotification()
-                val appAudioRoute = state.routes.any { it.kind == "sendAppAudio" }
-                if (!appAudioRoute && capture != null && SoundPush.direct { appAudioActive() } != true) {
-                    capture?.stop()
-                    capture = null
-                }
+                restartMicIfSettingsChanged(state.settings.mic)
+                if (types.playback) updateAudioFocus()
+                syncAppAudioCapture(state)
             }
         }
     }
@@ -81,18 +91,24 @@ class StreamingService : Service() {
                 SoundPush.command { stopRoute(r.routeId) }
             }
             Notifications.ACTION_TOGGLE_MUTE -> {
-                micMuted = !micMuted
-                SoundPush.command { setMicMuted(micMuted) }
+                // Follow the routes' own mute state, the same one the app's Mute button uses, so the
+                // notification never fights a mute set from the app or from the computer.
+                val micRoutes = SoundPush.state.value?.routes?.filter { it.isMic }.orEmpty()
+                val muted = micRoutes.isNotEmpty() && micRoutes.all { it.muted }
+                micRoutes.forEach { r -> SoundPush.command { setRouteMuted(r.routeId, !muted) } }
             }
             ACTION_UPDATE -> {
                 types = KeepAliveTypes(
                     playback = intent.getBooleanExtra(EXTRA_PLAYBACK, false),
                     microphone = intent.getBooleanExtra(EXTRA_MIC, false),
-                    appAudio = intent.getBooleanExtra(EXTRA_APP_AUDIO, false) || capture != null,
+                    // App-audio capture needs the user's screen-capture consent, so the recorder is the
+                    // truth here, not the engine's wish: without a recorder there is nothing to keep alive.
+                    appAudio = capture != null,
                     stayAvailable = intent.getBooleanExtra(EXTRA_STAY, false),
                 )
             }
             ACTION_START_APP_AUDIO -> {
+                // Android 14 requires the mediaProjection foreground type before the projection is created.
                 types = types.copy(appAudio = true)
                 enterForeground()
                 val data = IntentCompat.getParcelableExtra(intent, EXTRA_PROJECTION_DATA, Intent::class.java)
@@ -100,11 +116,38 @@ class StreamingService : Service() {
                 if (data != null && capture == null) {
                     capture = AppAudioCapture.start(this, code, data)
                 }
+                if (capture == null) types = types.copy(appAudio = false)
             }
         }
         enterForeground()
         return START_NOT_STICKY
     }
+
+    /**
+     * The recorder follows the app-audio routes: it stops when the last one ends, and a route that
+     * opened without the app on screen (a remembered permission, resume on start) has no recorder
+     * until the user grants screen capture. A visible activity asks for that itself; otherwise ask
+     * the user to open the app, once per route.
+     */
+    private fun syncAppAudioCapture(state: EngineState) {
+        val routes = state.routes.filter { it.kind == "sendAppAudio" }
+        if (routes.isEmpty() && capture != null && SoundPush.direct { appAudioActive() } != true) {
+            capture?.stop()
+            capture = null
+            types = types.copy(appAudio = false)
+            enterForeground()
+        }
+        val first = routes.firstOrNull()
+        when {
+            first == null -> consentAskedFor = null
+            capture == null && consentAskedFor != first.routeId && !appVisible() -> {
+                consentAskedFor = first.routeId
+                Notifications.attention(this, first.peerName)
+            }
+        }
+    }
+
+    private fun appVisible() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
     private fun enterForeground() {
         if (!streaming && !types.stayAvailable) {
@@ -138,7 +181,8 @@ class StreamingService : Service() {
                 serviceTypes,
             )
         } catch (e: Exception) {
-            // Background start restrictions (Android 12+ / while-in-use mic): ask the user to open the app.
+            // Background start restrictions (Android 12+ / while-in-use mic): ask the user to open the
+            // app. ServiceDelegate re-sends the request when the app comes to the front.
             if (streaming) {
                 Notifications.attention(this, SoundPush.state.value?.connectedPeers?.firstOrNull()?.name ?: "SoundPush")
             }
@@ -157,10 +201,21 @@ class StreamingService : Service() {
         if (wanted && mic == null) {
             val settings = SoundPush.state.value?.settings?.mic ?: return
             mic = MicCapture.start(settings)
+            micSettingsInUse = settings
         } else if (!wanted && mic != null) {
             mic?.stop()
             mic = null
+            micSettingsInUse = null
         }
+    }
+
+    /** The recorder's source and platform effects are fixed when it opens: reopen it when they change mid-stream. */
+    private fun restartMicIfSettingsChanged(settings: MicSettings) {
+        val inUse = micSettingsInUse ?: return
+        if (mic == null || MicCapture.recorderSettings(inUse) == MicCapture.recorderSettings(settings)) return
+        mic?.stop()
+        mic = MicCapture.start(settings)
+        micSettingsInUse = settings
     }
 
     private fun updateNotification() {
@@ -212,13 +267,15 @@ class StreamingService : Service() {
 
     // ------------------------------------------------------------------ audio focus
 
+    /** Holds audio focus while playing, in the mode the user chose; re-requests when the mode changes. */
     private fun updateAudioFocus() {
         val mode = SoundPush.state.value?.settings?.output?.audioFocus ?: "pause"
-        if (!types.playback || mode == "mix" || mode == "mixDuringCalls" || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        if (!types.playback || mode == "mix" || mode == "mixDuringCalls") {
             abandonFocus()
             return
         }
-        if (focusRequest != null) return
+        if (focusRequest != null && focusMode == mode) return
+        abandonFocus()
         val am = getSystemService(AudioManager::class.java) ?: return
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(
@@ -228,13 +285,15 @@ class StreamingService : Service() {
                     .build(),
             )
             .setWillPauseWhenDucked(mode == "pause")
-            .setOnAudioFocusChangeListener { change -> onFocusChange(change, mode) }
+            .setOnAudioFocusChangeListener { change -> onFocusChange(change) }
             .build()
         am.requestAudioFocus(request)
         focusRequest = request
+        focusMode = mode
     }
 
-    private fun onFocusChange(change: Int, mode: String) {
+    private fun onFocusChange(change: Int) {
+        val mode = SoundPush.state.value?.settings?.output?.audioFocus ?: "pause"
         val receiving = SoundPush.state.value?.routes?.filter { !it.isSending }.orEmpty()
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
@@ -262,10 +321,9 @@ class StreamingService : Service() {
 
     private fun abandonFocus() {
         val request = focusRequest ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(AudioManager::class.java)?.abandonAudioFocusRequest(request)
-        }
+        getSystemService(AudioManager::class.java)?.abandonAudioFocusRequest(request)
         focusRequest = null
+        focusMode = null
     }
 
     private val noisyReceiver = object : BroadcastReceiver() {
@@ -288,6 +346,7 @@ class StreamingService : Service() {
         runCatching { unregisterReceiver(noisyReceiver) }
         runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(networkCallback) }
         capture?.stop()
+        capture = null
         mic?.stop()
         abandonFocus()
         releaseLocks()
@@ -311,6 +370,11 @@ class StreamingService : Service() {
         const val EXTRA_STAY = "stayAvailable"
         const val EXTRA_PROJECTION_CODE = "projectionCode"
         const val EXTRA_PROJECTION_DATA = "projectionData"
+
+        private val _capturing = MutableStateFlow(false)
+
+        /** True while the app-audio recorder runs, i.e. screen-capture consent was given and is in use. */
+        val capturing: StateFlow<Boolean> = _capturing
 
         /** Begin app-audio capture with a MediaProjection consent result (call from a visible activity). */
         fun startAppAudio(context: Context, resultCode: Int, data: Intent) {
@@ -344,6 +408,12 @@ class ServiceDelegate(private val context: Context) : PlatformDelegate {
         synchronized(this) { stayAvailable = enabled }
         push()
     }
+
+    /**
+     * Re-send the current request. Called when the app comes to the front: a foreground start
+     * refused while in the background (Android 12+ microphone rules) succeeds from here.
+     */
+    fun repush() = push()
 
     private fun push() {
         val intent: Intent

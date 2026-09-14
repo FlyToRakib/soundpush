@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,8 +60,9 @@ import net.soundpush.ui.theme.Tokens
 
 @Composable
 fun DevicesScreen(state: EngineState, onScan: () -> Unit, onShowMessage: (String) -> Unit) {
-    var addressOpen by remember { mutableStateOf(false) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    // Survive rotation: keep the address dialog and the open device sheet.
+    var addressOpen by rememberSaveable { mutableStateOf(false) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),

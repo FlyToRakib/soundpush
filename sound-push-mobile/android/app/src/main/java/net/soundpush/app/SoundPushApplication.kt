@@ -47,6 +47,8 @@ class SoundPushApplication : Application() {
                 runCatching { multicast?.acquire() }
                 SoundPush.command { setForeground(true) }
                 SoundPush.command { networkChanged() }
+                // A foreground start the OS refused while in the background succeeds from here.
+                delegate.repush()
             }
 
             override fun onStop(owner: LifecycleOwner) {
