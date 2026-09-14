@@ -1,6 +1,8 @@
 //! Diagnostic: what does cpal see while a system-audio tap exists?
 //! `cargo test -p sp-audio-io --test macos_tap_diagnostics -- --ignored --nocapture`
 #![cfg(target_os = "macos")]
+// A manual diagnostic: failing loudly on a missing device is the intended behaviour.
+#![allow(clippy::expect_used)]
 
 use std::time::Duration;
 
