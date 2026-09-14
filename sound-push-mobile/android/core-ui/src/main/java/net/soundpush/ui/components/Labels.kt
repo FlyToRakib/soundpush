@@ -59,6 +59,7 @@ object Labels {
         "notice.muteSpeakersUnsupported" -> R.string.notice_mute_speakers_unsupported
         "notice.crashReport" -> R.string.notice_crash_report
         "notice.unstableConnection" -> R.string.notice_unstable_connection
+        "notice.pairingRateLimited" -> R.string.notice_pairing_rate_limited
         else -> R.string.notice_generic
     }
 
@@ -82,6 +83,7 @@ object Labels {
         "error.security.notPaired" -> R.string.error_not_paired
         "error.security.pairingRejected" -> R.string.error_pairing_rejected
         "error.security.pairingExpired" -> R.string.error_pairing_expired
+        "error.security.pairingRateLimited" -> R.string.error_pairing_rate_limited
         "error.security.revoked" -> R.string.error_revoked
         "error.compat.version" -> R.string.error_version
         "error.permission.peerDenied" -> R.string.error_peer_denied

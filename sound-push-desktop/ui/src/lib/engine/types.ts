@@ -280,6 +280,33 @@ export interface NoticeView {
   createdUnix: number;
 }
 
+/** Local security log (sp-engine audit.rs). */
+export type AuditKind =
+  | "pairingAttempt"
+  | "pairingSucceeded"
+  | "pairingRejected"
+  | "pairingRateLimited"
+  | "deviceForgotten"
+  | "deviceBlocked"
+  | "deviceUnblocked"
+  | "permissionChanged"
+  | "routeApproved"
+  | "routeDenied"
+  | "routeStarted"
+  | "routeStopped"
+  | "connectionRefused"
+  | "logCleared";
+
+export interface AuditEntry {
+  timeUnix: number;
+  kind: AuditKind;
+  peerName: string;
+  peerCode: string;
+  route?: RouteKind;
+  /** Kind-specific: remote address, `permission=policy`, rejection or stop reason. */
+  detail: string;
+}
+
 export interface AudioDeviceView {
   id: string;
   name: string;

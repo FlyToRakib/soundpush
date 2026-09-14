@@ -32,10 +32,12 @@ use sp_transport::{Endpoint, EndpointConfig, SecureConnection, TcpEndpoint, Tran
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
+use crate::audit::{AuditEntry, AuditKind, AuditLog, permission_name, policy_name};
 use crate::error::{ErrorView, Severity};
 use crate::health::LinkHealth;
 use crate::net::{local_addresses, resolve, sort_candidates};
 use crate::nettest::NetworkReport;
+use crate::pairing_limit::{Decision, PairingLimiter};
 use crate::pipeline::monitor::MicMonitor;
 use crate::pipeline::receiver::{PacketSink, Receiver, ReceiverConfig};
 use crate::pipeline::sender::{Sender, SenderConfig, Subscriber, Subscription};
@@ -66,6 +68,8 @@ const TRUST_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const USB_FALLBACK_DELAY: Duration = Duration::from_secs(2);
 /// Time to open audio devices once a route is accepted.
 const PIPELINE_START_DEADLINE: Duration = Duration::from_secs(20);
+/// A blocked device that keeps reconnecting is written to the security log at most this often.
+const REFUSED_AUDIT_INTERVAL: Duration = Duration::from_secs(600);
 /// Anti-flap (plan §20): a device held on the Stable profile returns to its own latency setting
 /// after this long without another reconnect.
 const STABLE_HOLD: Duration = Duration::from_secs(600);
@@ -181,6 +185,8 @@ pub(crate) enum Command {
     SimulateConnectionLoss {
         device_id: String,
     },
+    AuditLog(Reply<Vec<AuditEntry>>),
+    ClearAuditLog(Reply<()>),
     /// `done` is signalled once sessions are closed and everything held has been released.
     Shutdown {
         done: Option<std::sync::mpsc::Sender<()>>,
@@ -395,6 +401,11 @@ pub(crate) struct Actor {
     /// profile since their last reconnect.
     flaps: HashMap<DeviceId, FlapDetector>,
     stabilized: HashMap<DeviceId, Instant>,
+    /// Local security log (plan §21) and the pairing rate limit per source address.
+    audit: AuditLog,
+    pairing_limiter: PairingLimiter,
+    /// When a refused connection from each device was last written to the security log.
+    refused_audited: HashMap<DeviceId, Instant>,
 }
 
 pub(crate) async fn spawn(
@@ -502,6 +513,9 @@ pub(crate) async fn spawn(
         local_audio: local_audio::LocalAudio::default(),
         flaps: HashMap::new(),
         stabilized: HashMap::new(),
+        audit: AuditLog::open(&data_dir, now_unix()),
+        pairing_limiter: PairingLimiter::default(),
+        refused_audited: HashMap::new(),
     };
     actor.refresh_local_addresses();
     if identity_reset {
@@ -989,7 +1003,11 @@ impl Actor {
             }
             Command::ForgetDevice { device_id } => {
                 if let Ok(id) = parse_device(&device_id) {
+                    // Logged after its routes stop, while the name is still known.
                     self.revoke(id);
+                    if self.trust.get(&id).is_some() {
+                        self.audit_peer(AuditKind::DeviceForgotten, &id, None, "");
+                    }
                     let _ = self.trust.remove(&id);
                     self.forget_network_test(&id);
                     let peer_id = id.to_hex();
@@ -1006,6 +1024,14 @@ impl Actor {
                     let _ = self.trust.update(&id, |d| d.blocked = blocked);
                     if blocked {
                         self.revoke(id);
+                    }
+                    if self.trust.get(&id).is_some() {
+                        let kind = if blocked {
+                            AuditKind::DeviceBlocked
+                        } else {
+                            AuditKind::DeviceUnblocked
+                        };
+                        self.audit_peer(kind, &id, None, "");
                     }
                 }
             }
@@ -1029,6 +1055,9 @@ impl Actor {
             } => {
                 if let Ok(id) = parse_device(&device_id) {
                     let _ = self.trust.update(&id, |d| d.permissions.set(kind, policy));
+                    if self.trust.get(&id).is_some() {
+                        self.audit_permission(&id, kind, policy);
+                    }
                     // Revocation takes effect immediately.
                     if policy == Policy::Deny {
                         self.enforce_permissions(id);
@@ -1189,6 +1218,16 @@ impl Actor {
                 {
                     s.conn.close(0, b"simulated loss");
                 }
+            }
+            Command::AuditLog(reply) => {
+                let _ = reply.send(Ok(self.audit.entries()));
+            }
+            Command::ClearAuditLog(reply) => {
+                let result = self
+                    .audit
+                    .clear(now_unix())
+                    .map_err(|e| EngineError::Storage(e.to_string()));
+                let _ = reply.send(result);
             }
             Command::Shutdown { .. } => {}
         }
@@ -1605,6 +1644,14 @@ impl Actor {
         if let Some(device) = self.trust.get(&id).cloned() {
             if device.blocked || device.public_key != key {
                 let _ = est.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
+                self.audit_refused(
+                    id,
+                    if device.blocked {
+                        "blocked"
+                    } else {
+                        "keyChanged"
+                    },
+                );
                 return;
             }
             // Session resume: looked at only after authentication and the trust check (resume.rs).
@@ -1628,9 +1675,67 @@ impl Actor {
                 }
             }
         } else {
+            // Pairing rate limit per source address (plan §21.1), before any pairing work.
+            let address = est.conn.remote_address().ip().to_canonical();
+            if let Decision::Refused { first } = self.pairing_limiter.check(address, Instant::now())
+            {
+                let _ = est.tx.send(SessionCmd::Close(StopReason::RateLimited));
+                if first {
+                    warn!(%address, "too many pairing attempts; refusing this address for a minute");
+                    self.audit.record(
+                        AuditEntry::new(now_unix(), AuditKind::PairingRateLimited)
+                            .peer(&est.hello.device_name, id.display_code())
+                            .detail(address.to_string()),
+                    );
+                    self.notice(
+                        "notice.pairingRateLimited",
+                        vec![address.to_string()],
+                        Severity::Warning,
+                        None,
+                    );
+                }
+                return;
+            }
             // Wait for the peer's PairRequest (30 s).
             self.unpaired.insert(est.conn_id, (est, Instant::now()));
         }
+    }
+
+    /// Write a security event about `peer` (its current name and short code) to the audit log.
+    fn audit_peer(
+        &mut self,
+        kind: AuditKind,
+        peer: &DeviceId,
+        route: Option<RouteKind>,
+        detail: &str,
+    ) {
+        let mut entry = AuditEntry::new(now_unix(), kind)
+            .peer(&self.peer_name(peer), peer.display_code())
+            .detail(detail);
+        if let Some(route) = route {
+            entry = entry.route(route);
+        }
+        self.audit.record(entry);
+    }
+
+    fn audit_permission(&mut self, peer: &DeviceId, kind: PermissionKind, policy: Policy) {
+        let detail = format!("{}={}", permission_name(kind), policy_name(policy));
+        self.audit_peer(AuditKind::PermissionChanged, peer, None, &detail);
+    }
+
+    /// A refused connection from a paired device, logged at most once per
+    /// [`REFUSED_AUDIT_INTERVAL`] so a blocked device that keeps retrying cannot flood the log.
+    fn audit_refused(&mut self, id: DeviceId, detail: &str) {
+        let now = Instant::now();
+        if self
+            .refused_audited
+            .get(&id)
+            .is_some_and(|t| now.duration_since(*t) < REFUSED_AUDIT_INTERVAL)
+        {
+            return;
+        }
+        self.refused_audited.insert(id, now);
+        self.audit_peer(AuditKind::ConnectionRefused, &id, None, detail);
     }
 
     fn begin_pairing(&mut self, id: DeviceId, est: Established, qr_scanner: bool) {
@@ -1683,6 +1788,7 @@ impl Actor {
             Body::PairResult(PairResult { accepted: accept }),
         )));
         if !accept {
+            self.audit_peer(AuditKind::PairingRejected, &id, None, "local");
             if let Some(p) = self.pairings.remove(&id) {
                 let _ = p.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
             }
@@ -1715,6 +1821,9 @@ impl Actor {
             self.error_notice(&e.into(), vec![]);
             return;
         }
+        self.audit.record(
+            AuditEntry::new(now_unix(), AuditKind::PairingSucceeded).peer(&name, id.display_code()),
+        );
         self.notice("notice.pairingSuccess", vec![name], Severity::Info, None);
         let est = Established {
             conn_id: p.conn_id,
@@ -1799,8 +1908,14 @@ impl Actor {
             .map(|(k, v)| (*k, v.conn_id))
         {
             self.pairings.remove(&id);
-            if reason == StopReason::PermissionDenied {
-                self.error_notice(&EngineError::PairingRejected, vec![]);
+            match reason {
+                StopReason::PermissionDenied => {
+                    self.error_notice(&EngineError::PairingRejected, vec![]);
+                }
+                StopReason::RateLimited => {
+                    self.error_notice(&EngineError::PairingRateLimited, vec![]);
+                }
+                _ => {}
             }
         }
         let Some(id) = self.conn_index.remove(&conn_id) else {
@@ -1952,6 +2067,7 @@ impl Actor {
                     return;
                 };
                 if !result.accepted {
+                    self.audit_peer(AuditKind::PairingRejected, &id, None, "peer");
                     if let Some(p) = self.pairings.remove(&id) {
                         let _ = p.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
                     }
@@ -2037,6 +2153,13 @@ impl Actor {
 
     fn on_pair_request(&mut self, est: Established, req: PairRequest) {
         let id = est.conn.peer_fingerprint().device_id();
+        let entry = |kind| {
+            AuditEntry::new(now_unix(), kind).peer(&est.hello.device_name, id.display_code())
+        };
+        self.audit.record(
+            entry(AuditKind::PairingAttempt)
+                .detail(est.conn.remote_address().ip().to_canonical().to_string()),
+        );
         match (req.qr_proof, self.qr.as_ref()) {
             (Some(proof), Some(qr)) if !qr.is_expired(now_unix()) => {
                 let ok = verify_pairing_proof(
@@ -2047,6 +2170,8 @@ impl Actor {
                 )
                 .is_ok();
                 if !ok {
+                    self.audit
+                        .record(entry(AuditKind::PairingRejected).detail("proof"));
                     let _ = est.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
                     return;
                 }
@@ -2069,7 +2194,15 @@ impl Actor {
                 // Code pairing is only accepted while pairing mode is open on this device.
                 self.begin_pairing(id, est, false);
             }
-            _ => {
+            (proof, _) => {
+                // A QR proof whose code expired, or pairing mode is not open.
+                let detail = if proof.is_some() && self.qr.is_some() {
+                    "proof"
+                } else {
+                    "closed"
+                };
+                self.audit
+                    .record(entry(AuditKind::PairingRejected).detail(detail));
                 let _ = est.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
             }
         }
@@ -2191,7 +2324,10 @@ impl Actor {
             });
         match policy {
             Policy::Allow => self.accept_route(peer, req, kind),
-            Policy::Deny => self.reject(peer, req.route, StopReason::PermissionDenied),
+            Policy::Deny => {
+                self.audit_peer(AuditKind::RouteDenied, &peer, Some(kind), "permission");
+                self.reject(peer, req.route, StopReason::PermissionDenied);
+            }
             // The user approved this route before the connection dropped, and the peer proved with
             // a resume token that this connection continues that session: no second prompt.
             Policy::Ask if resumed => self.accept_route(peer, req, kind),
@@ -2232,7 +2368,14 @@ impl Actor {
             let _ = self
                 .trust
                 .update(&pending.peer, |d| d.permissions.set(kind, policy));
+            self.audit_permission(&pending.peer, kind, policy);
         }
+        let decision = if accept {
+            AuditKind::RouteApproved
+        } else {
+            AuditKind::RouteDenied
+        };
+        self.audit_peer(decision, &pending.peer, Some(pending.kind), "user");
         if accept {
             self.accept_route(pending.peer, pending.request, pending.kind);
         } else {
@@ -2346,6 +2489,14 @@ impl Actor {
         };
         let mut route = self.routes.remove(pos);
         self.release_pipelines(&mut route);
+        if matches!(route.status, RouteStatus::Active | RouteStatus::Paused) {
+            self.audit_peer(
+                AuditKind::RouteStopped,
+                &route.peer,
+                Some(route.kind),
+                &format!("{reason:?}"),
+            );
+        }
         if notify_peer {
             if let Some(s) = self.sessions.get(&route.peer) {
                 s.send(Body::RouteStop(RouteStop {
@@ -2662,6 +2813,8 @@ impl Actor {
 
         self.update_link_health();
         self.expire_stable_holds(now);
+        self.refused_audited
+            .retain(|_, t| now.duration_since(*t) < REFUSED_AUDIT_INTERVAL);
 
         // Capabilities can change while connected (e.g. a virtual microphone was installed).
         // Re-send Hello so peers enable or disable the matching tasks without reconnecting.

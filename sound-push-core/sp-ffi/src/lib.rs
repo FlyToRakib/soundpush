@@ -399,6 +399,17 @@ impl SoundPushEngine {
         Ok(self.handle.dismiss_notice(id)?)
     }
 
+    /// The local security log as a JSON array of `AuditEntry`, newest first.
+    pub fn audit_log_json(&self) -> Result<String, FfiError> {
+        let entries = pollster::block_on(self.handle.audit_log())?;
+        Ok(serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into()))
+    }
+
+    /// Delete the security log (a "log cleared" entry remains).
+    pub fn clear_audit_log(&self) -> Result<(), FfiError> {
+        Ok(pollster::block_on(self.handle.clear_audit_log())?)
+    }
+
     pub fn network_changed(&self) -> Result<(), FfiError> {
         Ok(self.handle.network_changed()?)
     }

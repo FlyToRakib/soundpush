@@ -77,6 +77,7 @@ import net.soundpush.engine.RouteRequestPrompt
 import net.soundpush.engine.SoundPush
 import net.soundpush.home.HomeScreen
 import net.soundpush.service.StreamingService
+import net.soundpush.settings.AuditLogScreen
 import net.soundpush.settings.BatteryGuideScreen
 import net.soundpush.settings.SettingsScreen
 import net.soundpush.settings.TroubleTopic
@@ -412,9 +413,11 @@ class MainActivity : ComponentActivity() {
                         onOpenTroubleshooter = { nav.navigate("troubleshoot") },
                         onOpenBatteryGuide = { nav.navigate("battery") },
                         onExportDiagnostics = exportDiagnostics,
+                        onOpenAuditLog = { nav.navigate("audit") },
                     )
                 }
                 composable("audio") { AudioScreen(state) }
+                composable("audit") { AuditLogScreen() }
                 composable("troubleshoot") {
                     TroubleshooterScreen(onOpenTopic = { nav.navigate("troubleshoot/$it") }, onExportDiagnostics = exportDiagnostics)
                 }

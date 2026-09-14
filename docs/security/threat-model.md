@@ -53,15 +53,15 @@ Status: ✅ implemented · 🟡 partly implemented / needs verification · ⏳ p
 | Tampering | Local process writes into the virtual microphone | VB-CABLE: any local app can play into "CABLE Input" (accepted risk, same as any audio app). Own driver: private device interface with ACL for the interactive user + SYSTEM | 🟡 (accepted today) / ⏳ (own driver) |
 | Tampering | Modified trust store or settings file | Trust store and identity encrypted and authenticated at rest; settings are non-secret and sanitised/clamped on load | ✅ |
 | Tampering | Modified release artifact | `SHA256SUMS` published with each release; updater signature; optional GPG signature and Authenticode/Developer ID when enabled | ✅ checksums / ⏳ platform signing (docs/release-signing.md) |
-| **Repudiation** | "Who used my microphone?" | Microphone permission defaults to "Ask"; tray and notification show the mic-live state; logs record route starts/stops with device and time. Audit log view in Diagnostics | 🟡 logs / ⏳ audit log UI |
+| **Repudiation** | "Who used my microphone?" | Microphone permission defaults to "Ask"; tray and notification show the mic-live state; local security log of pairing, trust, permission and route start/stop events (30 days, Settings → Security log on both apps; `docs/security/pairing.md`) | ✅ |
 | **Information disclosure** | Eavesdrop microphone audio on shared Wi-Fi | Pairing required; TLS 1.3 only (rustls); no plaintext fallback | ✅ |
 | Information disclosure | Discovery reveals device names and presence | "Visible to" setting; default "Paired devices only" omits names; "Nobody" stops advertising | ✅ |
 | Information disclosure | Logs or diagnostics leak secrets | Logs never contain audio, keys, pairing secrets or full fingerprints; diagnostics export redacts peer addresses and shortens device IDs; nothing uploaded | ✅ |
 | Information disclosure | Android backup clones identity | `identity.bin`, `trust.bin`, `storage.key.enc` excluded from backup and device transfer | ✅ |
 | Information disclosure | Update check reveals usage | Only a plain HTTPS GET to GitHub; no identifiers; can be turned off | ✅ |
-| **Denial of service** | Handshake flooding, pairing spam | QUIC stateless retry; bounded per-peer resources; pairing mode expires after 5 minutes; pairing rate limits (5/min per source) | 🟡 rate limits to verify |
+| **Denial of service** | Handshake flooding, pairing spam | QUIC stateless retry; bounded per-peer resources; pairing mode expires after 5 minutes; pairing rate limit (5 attempts/min per source address, closed with `RateLimited`) | ✅ pairing / ⏳ discovery rate limits |
 | Denial of service | Oversized or malformed packets crash the engine | Size-limited control messages (64 KiB); media payload checked against codec maximum; parsers return errors, never panic; fuzz targets (`fuzz/`: beacon, control message, frame decoder, media packet, QR payload) | ✅ parsers / 🟡 nightly fuzzing in CI ⏳ |
-| **Elevation of privilege** | Malicious packet exploits a parser | Memory-safe Rust; `#![forbid(unsafe_code)]` in `sp-protocol`, `sp-security`, `sp-transport`, `sp-discovery`; unsafe confined to audio backends and FFI | ✅ (add to `sp-engine` ⏳) |
+| **Elevation of privilege** | Malicious packet exploits a parser | Memory-safe Rust; `#![forbid(unsafe_code)]` in `sp-protocol`, `sp-security`, `sp-engine`, `sp-transport` (except the Windows qWAVE module), `sp-discovery`; unsafe confined to audio backends, codec bindings and FFI | ✅ |
 | Elevation of privilege | Webview script calls privileged commands | Strict CSP (no remote content, no `eval`); Tauri capabilities allow only event, app, updater and process-restart APIs; commands validate input; `open_url` only accepts `https://`; the webview never navigates to remote pages | ✅ |
 | Elevation of privilege | Driver IOCTL abuse | Minimal IOCTL surface with strict length/range validation; Driver Verifier, SDV and an IOCTL fuzzer before signing | ⏳ (own driver) |
 | Elevation of privilege | Installer or driver install runs attacker code | Per-user NSIS install; elevation only for the virtual microphone install via the OS prompt; VB-CABLE package downloaded from vb-audio.com and verified against a pinned SHA-256 before it runs (`virtual_mic.rs`) | ✅ |
@@ -91,6 +91,6 @@ Status: ✅ implemented · 🟡 partly implemented / needs verification · ⏳ p
 2. Preview Android APKs are signed with a public debug key: anyone can build an APK that installs as an update over
    them. Release keystore needed before wide distribution (docs/release-signing.md §4).
 3. Any local process can feed VB-CABLE's input. The own driver with an ACL removes this.
-4. Pairing and discovery rate limits and the audit log UI need verification/implementation.
+4. Discovery (mDNS and beacon) traffic is not rate limited yet; pairing is (5/min per address).
 5. Nightly fuzzing, Gradle dependency verification, pinned Action SHAs and signed release tags are not enforced yet.
 6. External security review of pairing, transport and the driver is required before 1.0 (§21.2).

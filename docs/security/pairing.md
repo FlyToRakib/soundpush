@@ -46,6 +46,27 @@ route request and re-checked when changed (revocation stops routes immediately).
 A connection from an untrusted key is closed unless it is completing a pairing flow.
 Forgetting or blocking a device terminates its sessions.
 
+## Pairing rate limit
+
+Every connection from a key that is not paired counts as a pairing attempt for its source address (an IPv4-mapped
+IPv6 address counts as the IPv4 address), whether or not it goes on to send `PairRequest`. More than **5 attempts per
+minute** from one address are refused: the connection is closed with `Goodbye(RateLimited)` (stop reason 13) before
+any pairing work. The first refusal shows a notice and writes the security log; the dialing device reports "too many
+pairing attempts". Refused attempts do not extend the window. At most 256 addresses are tracked (least recently seen
+forgotten first). A peer that does not know stop reason 13 sees an ordinary close.
+
+## Security log
+
+The engine keeps a local audit log, `audit.log` (JSON Lines) in the data folder: pairing attempts (with the source
+address), successes and refusals, rate limiting, devices forgotten, blocked and unblocked, permission changes (in
+Settings or "remember" on a prompt), route approvals and denials, route starts and stops (with who started them), and
+connections refused from blocked devices or changed keys (at most once per device per 10 minutes).
+
+- At most 1000 entries from the last 30 days; older entries are dropped on load and compaction.
+- No keys, pairing codes or secrets; device names are untrusted labels and are clipped to 128 characters.
+- Never uploaded, and not part of diagnostics exports. Both apps show it (Settings → Privacy → Security log) and can
+  clear it; clearing leaves a "log cleared" entry.
+
 ## Session resume tokens (protocol 1.1)
 
 After a trusted session is established each side sends the other a `SessionTicket`: 32 random bytes from the OS

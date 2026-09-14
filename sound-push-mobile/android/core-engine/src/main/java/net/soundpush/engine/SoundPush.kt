@@ -132,6 +132,13 @@ object SoundPush {
     /** Blocking access for background components (service threads). */
     fun <T> direct(block: SoundPushEngine.() -> T): T? = if (isStarted) runCatching { engine.block() }.getOrNull() else null
 
+    /** The local security log, newest first. Blocking: call off the main thread. Null if the engine isn't running. */
+    fun securityLog(): List<AuditEntry>? =
+        direct { auditLogJson() }?.let { json -> runCatching { EngineJson.decodeFromString<List<AuditEntry>>(json) }.getOrNull() }
+
+    /** Delete the security log (a "log cleared" entry remains). Blocking: call off the main thread. */
+    fun clearSecurityLog(): Boolean = direct { clearAuditLog() } != null
+
     fun updateSettings(transform: (Settings) -> Settings) {
         val current = _state.value?.settings ?: return
         val next = transform(current)

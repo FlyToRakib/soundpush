@@ -449,6 +449,9 @@ impl Actor {
                 profile: r.profile.clone(),
             }));
         }
+        // Who started it: this device, or the peer.
+        let starter = if requested_locally { "local" } else { "peer" };
+        self.audit_peer(AuditKind::RouteStarted, &peer, Some(kind), starter);
         if requested_locally && self.settings.resume_routes_on_start {
             let peer_id = peer.to_hex();
             if !self

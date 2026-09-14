@@ -275,6 +275,9 @@ pub enum StopReason {
     NetworkLost = 10,
     UnsupportedEndpoint = 11,
     Timeout = 12,
+    /// Too many pairing attempts from this address; try again in a minute. Peers that do not
+    /// know the value treat it as an ordinary close.
+    RateLimited = 13,
 }
 
 /// Target of a volume or mute command.

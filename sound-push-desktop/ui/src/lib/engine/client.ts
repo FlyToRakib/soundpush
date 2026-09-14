@@ -1,6 +1,7 @@
 // Typed client for the Tauri commands exposed by src-tauri/src/commands.rs.
 // Outside Tauri (plain `vite` preview, tests) a mock engine is used instead.
 import type {
+  AuditEntry,
   AudioApps,
   DeviceProfile,
   EngineState,
@@ -123,5 +124,7 @@ export const engine = {
   dismissNotice: (id: number) => call<void>("dismiss_notice", { id }),
   exportDiagnostics: () => call<string>("export_diagnostics"),
   openLogsFolder: () => call<void>("open_logs_folder"),
+  auditLog: () => call<AuditEntry[]>("get_audit_log"),
+  clearAuditLog: () => call<void>("clear_audit_log"),
   openUrl: (url: string) => call<void>("open_url", { url }),
 };

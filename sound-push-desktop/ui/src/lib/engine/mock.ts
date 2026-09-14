@@ -1,5 +1,11 @@
 // In-browser mock engine so the UI can be previewed and tested without Tauri.
-import type { DeviceProfile, EngineState, NetworkReport, RouteKind, Settings } from "./types";
+import type { AuditEntry, DeviceProfile, EngineState, NetworkReport, RouteKind, Settings } from "./types";
+
+const auditLog: AuditEntry[] = [
+  { timeUnix: Date.now() / 1000 - 60, kind: "routeStarted", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", route: "sendSystemAudio", detail: "peer" },
+  { timeUnix: Date.now() / 1000 - 3600, kind: "permissionChanged", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", detail: "useMyMicrophone=ask" },
+  { timeUnix: Date.now() / 1000 - 7200, kind: "pairingSucceeded", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", detail: "" },
+];
 
 const settings: Settings = {
   version: 2,
@@ -205,6 +211,11 @@ export const mockEngine = {
         return undefined as T;
       case "export_diagnostics":
         return "/tmp/soundpush-diagnostics.zip" as T;
+      case "get_audit_log":
+        return [...auditLog] as T;
+      case "clear_audit_log":
+        auditLog.splice(0, auditLog.length, { timeUnix: Date.now() / 1000, kind: "logCleared", peerName: "", peerCode: "", detail: "" });
+        return undefined as T;
       case "set_device_profile": {
         const profiles = { ...state.settings.deviceProfiles };
         const profile = args?.profile as DeviceProfile | null;

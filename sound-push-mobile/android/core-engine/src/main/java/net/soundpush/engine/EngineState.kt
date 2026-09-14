@@ -158,6 +158,17 @@ data class RouteView(
     val isSending get() = kind.startsWith("send")
 }
 
+/** One entry of the local security log (sp-engine audit.rs); [kind] and [detail] as documented there. */
+@Serializable
+data class AuditEntry(
+    val timeUnix: Long = 0,
+    val kind: String = "",
+    val peerName: String = "",
+    val peerCode: String = "",
+    val route: String? = null,
+    val detail: String = "",
+)
+
 @Serializable
 data class PairingPrompt(
     val peerId: String,

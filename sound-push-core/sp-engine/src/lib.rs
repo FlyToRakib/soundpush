@@ -6,11 +6,13 @@
 #![forbid(unsafe_code)]
 
 mod actor;
+pub mod audit;
 pub mod crash;
 pub mod error;
 mod health;
 mod net;
 pub mod nettest;
+mod pairing_limit;
 pub mod pipeline;
 pub mod platform;
 pub mod reconnect;
@@ -23,6 +25,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot, watch};
 
+pub use audit::{AuditEntry, AuditKind};
 pub use error::{EngineError, ErrorView, FixAction, Severity};
 pub use nettest::{NetworkReport, NetworkTestStatus, NetworkTestView, Recommendation};
 pub use platform::{KeepAlive, PlatformHooks};
@@ -243,6 +246,18 @@ impl EngineHandle {
 
     pub fn cancel_network_test(&self, device_id: String) -> Result<(), EngineError> {
         self.send(Command::CancelNetworkTest { device_id })
+    }
+
+    /// The local security log, newest first (plan §21): pairing attempts and results, trust and
+    /// permission changes, route approvals, starts and stops, refused connections. Kept for
+    /// 30 days on this device only.
+    pub async fn audit_log(&self) -> Result<Vec<AuditEntry>, EngineError> {
+        self.request(Command::AuditLog).await
+    }
+
+    /// Delete the security log. A "log cleared" entry remains.
+    pub async fn clear_audit_log(&self) -> Result<(), EngineError> {
+        self.request(Command::ClearAuditLog).await
     }
 
     // ---------------------------------------------------------------- routes
