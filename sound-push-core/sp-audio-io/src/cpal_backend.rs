@@ -158,6 +158,11 @@ impl CpalBackend {
             .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
             .unwrap_or_default()
     }
+
+    /// Name of the default playback device, without touching any input (see above).
+    pub fn default_output_name(&self) -> Option<String> {
+        host().default_output_device().and_then(|d| d.name().ok())
+    }
 }
 
 impl AudioBackend for CpalBackend {
@@ -224,6 +229,16 @@ impl AudioBackend for CpalBackend {
         if matches!(source, CaptureSource::SystemLoopback(_)) && !self.supports_loopback() {
             return Err(AudioError::LoopbackUnsupported);
         }
+        if let CaptureSource::Application { process, exclude } = source {
+            // Per-app capture bypasses cpal: it needs WASAPI process loopback.
+            #[cfg(windows)]
+            return crate::wasapi_process::open(process, *exclude, channels, on_audio, on_error);
+            #[cfg(not(windows))]
+            {
+                let _ = (process, exclude);
+                return Err(AudioError::LoopbackUnsupported);
+            }
+        }
         let source = source.clone();
         spawn_stream(move || {
             let host = host();
@@ -256,6 +271,8 @@ impl AudioBackend for CpalBackend {
                     let c = d.default_output_config().map_err(|e| AudioError::Backend(e.to_string()))?;
                     (d, c)
                 }
+                // Handled before the stream thread starts.
+                CaptureSource::Application { .. } => return Err(AudioError::LoopbackUnsupported),
             };
             let device_rate = supported.sample_rate().0;
             let device_channels = supported.channels();

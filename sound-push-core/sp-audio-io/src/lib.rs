@@ -13,6 +13,8 @@ mod convert;
 #[cfg(all(target_os = "macos", feature = "cpal-backend"))]
 pub mod macos_tap;
 pub mod null;
+#[cfg(windows)]
+pub mod wasapi_process;
 
 pub use convert::{CaptureConverter, RenderConverter};
 
@@ -42,6 +44,9 @@ pub enum CaptureSource {
     Input(String),
     /// Everything played on an output device (default output when `None`).
     SystemLoopback(Option<String>),
+    /// What one app plays (by executable name, e.g. "spotify.exe"), or everything except that
+    /// app when `exclude` is set. Windows 10 version 2004+ (WASAPI process loopback).
+    Application { process: String, exclude: bool },
 }
 
 /// Where to play.
