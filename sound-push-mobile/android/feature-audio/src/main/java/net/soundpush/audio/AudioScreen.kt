@@ -30,6 +30,7 @@ import net.soundpush.ui.components.SettingChoice
 import net.soundpush.ui.components.SettingSlider
 import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.rememberFormat
 import net.soundpush.ui.theme.Tokens
 
@@ -44,7 +45,7 @@ fun AudioScreen(state: EngineState) {
 
     Column(
         Modifier
-            .fillMaxSize()
+            .readableWidth()
             .verticalScroll(rememberScrollState())
             .padding(start = Tokens.Space.md, end = Tokens.Space.md, bottom = Tokens.Space.lg),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),

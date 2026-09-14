@@ -36,6 +36,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -89,6 +91,8 @@ import net.soundpush.ui.R
 import net.soundpush.ui.components.BannerModel
 import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.Labels
+import net.soundpush.ui.components.LocalWidthClass
+import net.soundpush.ui.components.WidthClass
 import net.soundpush.ui.components.ScreenHeader
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.SoundPushTheme
@@ -209,10 +213,14 @@ class MainActivity : AppCompatActivity() {
             SoundPushTheme(theme) {
                 val current = state
                 val error = startError
-                when {
-                    current != null -> App(current)
-                    error != null -> StartupError(error) { SoundPush.start(applicationContext, BuildVersion.NAME) }
-                    else -> StartupLoading()
+                // Window width (split screen and foldables included) picks rail or bottom bar, one or two panes.
+                val widthClass = WidthClass.of(LocalConfiguration.current.screenWidthDp)
+                CompositionLocalProvider(LocalWidthClass provides widthClass) {
+                    when {
+                        current != null -> App(current)
+                        error != null -> StartupError(error) { SoundPush.start(applicationContext, BuildVersion.NAME) }
+                        else -> StartupLoading()
+                    }
                 }
             }
         }
@@ -385,6 +393,8 @@ class MainActivity : AppCompatActivity() {
         }
         val fromOnboarding = nav.previousBackStackEntry?.destination?.route == "onboarding"
         val fullScreen = route == "scan" || route == "onboarding"
+        val showNavigation = !fullScreen && !fromOnboarding
+        val showRail = showNavigation && LocalWidthClass.current != WidthClass.Compact
 
         val exportDiagnostics: () -> Unit = {
             if (!exporting) {
@@ -442,6 +452,8 @@ class MainActivity : AppCompatActivity() {
         val usbLabel = stringResource(R.string.peer_via_usb)
 
         Scaffold(
+            // The rail (medium and expanded windows) is drawn beside the scaffold, at the start edge.
+            modifier = Modifier.padding(start = if (showRail) RailWidth else 0.dp),
             containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
@@ -458,7 +470,7 @@ class MainActivity : AppCompatActivity() {
                 }
             },
             bottomBar = {
-                if (!fullScreen && !fromOnboarding) BottomBar(route) { destination -> nav.navigateToTab(destination) }
+                if (showNavigation && !showRail) BottomBar(route) { destination -> nav.navigateToTab(destination) }
             },
         ) { padding ->
             NavHost(nav, startDestination = startDestination, modifier = Modifier.padding(padding)) {
@@ -531,6 +543,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        if (showRail) SideRail(route) { destination -> nav.navigateToTab(destination) }
 
         Overlays(state)
         PermissionOverlays()

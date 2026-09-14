@@ -40,6 +40,7 @@ import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingChoice
 import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.theme.Tokens
 
 /** One runtime permission in Settings → Permissions. [onClick] asks again or leads to app settings. */
@@ -73,7 +74,7 @@ fun SettingsScreen(
 
     Column(
         Modifier
-            .fillMaxSize()
+            .readableWidth()
             .verticalScroll(rememberScrollState())
             .padding(start = Tokens.Space.md, end = Tokens.Space.md, bottom = Tokens.Space.lg),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),

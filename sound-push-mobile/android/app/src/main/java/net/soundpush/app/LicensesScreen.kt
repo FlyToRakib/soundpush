@@ -1,11 +1,11 @@
 package net.soundpush.app
 
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.mikepenz.aboutlibraries.ui.compose.android.rememberLibraries
 import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
+import net.soundpush.ui.components.readableWidth
 
 /**
  * Settings → About → Open-source licences. The list is generated at build time by the
@@ -16,5 +16,5 @@ import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 @Composable
 internal fun LicensesScreen() {
     val libraries by rememberLibraries(R.raw.aboutlibraries)
-    LibrariesContainer(libraries, Modifier.fillMaxSize())
+    LibrariesContainer(libraries, Modifier.readableWidth())
 }

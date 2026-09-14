@@ -4,8 +4,11 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -14,6 +17,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,6 +75,35 @@ internal fun BottomBar(route: String, onNavigate: (String) -> Unit) {
                 )
             }
         }
+    }
+}
+
+/** Width of [SideRail] (the Material rail plus its divider); the app shell pads its content by this much. */
+internal val RailWidth = 81.dp
+
+/** Navigation rail for medium and expanded windows (tablets, foldables, landscape) in place of the bottom bar. */
+@Composable
+internal fun SideRail(route: String, onNavigate: (String) -> Unit) {
+    val selectedTab = if (route in SETTINGS_SUBSCREENS) "settings" else route
+    Row(Modifier.fillMaxHeight().width(RailWidth)) {
+        NavigationRail(containerColor = MaterialTheme.colorScheme.surface, modifier = Modifier.weight(1f)) {
+            TABS.forEach { tab ->
+                NavigationRailItem(
+                    selected = selectedTab == tab.route,
+                    onClick = { if (selectedTab != tab.route || route != tab.route) onNavigate(tab.route) },
+                    icon = { Icon(tab.icon, contentDescription = null) },
+                    label = { CappedFontScale { Text(stringResource(tab.label), maxLines = 1) } },
+                    colors = NavigationRailItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                        indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                )
+            }
+        }
+        VerticalDivider(color = MaterialTheme.colorScheme.outline)
     }
 }
 

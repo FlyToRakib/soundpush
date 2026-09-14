@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
@@ -54,6 +56,9 @@ import net.soundpush.ui.components.BannerModel
 import net.soundpush.ui.components.EmptyState
 import net.soundpush.ui.components.IconTile
 import net.soundpush.ui.components.Labels
+import net.soundpush.ui.components.LocalWidthClass
+import net.soundpush.ui.components.WidthClass
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.QualityBadge
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingSlider
@@ -148,11 +153,8 @@ fun HomeScreen(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = Tokens.Space.md, end = Tokens.Space.md, top = Tokens.Space.xs, bottom = Tokens.Space.lg),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
-    ) {
+    /** Connection problems and tips. */
+    fun LazyListScope.statusItems() {
         if (offlinePeer != null) {
             item(key = "banner") {
                 val reconnecting = offlinePeer.connection == "connecting" || offlinePeer.connection == "reconnecting"
@@ -169,7 +171,10 @@ fun HomeScreen(
         }
 
         items(banners, key = { "banner-${it.key}" }) { banner -> StatusBanner(banner) }
+    }
 
+    /** What is streaming now. */
+    fun LazyListScope.routeItems() {
         if (state.routes.isNotEmpty()) {
             item(key = "active-title") { SectionTitle(stringResource(R.string.home_active)) }
             items(state.routes, key = { it.routeId }) { route ->
@@ -177,6 +182,10 @@ fun HomeScreen(
             }
         }
 
+    }
+
+    /** "What do you want to do?" task cards. */
+    fun LazyListScope.taskItems() {
         item(key = "tasks-title") { SectionTitle(stringResource(R.string.home_title)) }
         items(TASKS, key = { it.titleRes }) { task ->
             val appsUnsupported = task.kinds.contains("sendAppAudio") && !state.capabilities.appAudio
@@ -213,8 +222,33 @@ fun HomeScreen(
             }
         }
 
+    }
+
+    /** Paired devices and their connection state. */
+    fun LazyListScope.peerItems() {
         item(key = "peers-title") { SectionTitle(stringResource(R.string.devices_paired)) }
         items(state.trustedPeers, key = { "peer-${it.deviceId}" }) { peer -> PeerRow(peer, peerLabel(peer), onOpenDevices) }
+    }
+
+    if (LocalWidthClass.current == WidthClass.Expanded) {
+        // Tablets and unfolded foldables: what to do on one side, what is running and with whom on the other.
+        Row(Modifier.fillMaxSize()) {
+            HomeColumn(Modifier.weight(1f)) {
+                statusItems()
+                taskItems()
+            }
+            HomeColumn(Modifier.weight(1f)) {
+                routeItems()
+                peerItems()
+            }
+        }
+    } else {
+        HomeColumn(Modifier.readableWidth()) {
+            statusItems()
+            routeItems()
+            taskItems()
+            peerItems()
+        }
     }
 
     // The list follows live state: devices that disconnect disappear, the dialog closes when none are left.
@@ -257,6 +291,16 @@ fun HomeScreen(
             confirmButton = { TextButton(onClick = { pickingRes = null }) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
+}
+
+@Composable
+private fun HomeColumn(modifier: Modifier, content: LazyListScope.() -> Unit) {
+    LazyColumn(
+        modifier = modifier.fillMaxHeight(),
+        contentPadding = PaddingValues(start = Tokens.Space.md, end = Tokens.Space.md, top = Tokens.Space.xs, bottom = Tokens.Space.lg),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
+        content = content,
+    )
 }
 
 @Composable
