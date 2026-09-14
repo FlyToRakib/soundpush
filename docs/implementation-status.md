@@ -1,6 +1,6 @@
 # Implementation status
 
-Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-13.
+Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-14.
 
 Legend: ✅ done and tested · 🟡 implemented, needs real-device verification · ⏳ not started · ⛔ blocked on something outside the repo
 
@@ -10,8 +10,9 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 |---|---|---|
 | Monorepo, Cargo/npm/Gradle workspaces, `justfile`, CI workflow | ✅ | `.github/workflows/ci.yml` (not yet run on GitHub) |
 | Design tokens → CSS + Compose, WCAG contrast check | ✅ | `design/scripts/generate.mjs` |
-| Wire protocol spec, pairing/security doc, ADRs 0001–0005 | ✅ | `docs/protocol`, `docs/security`, `docs/adr` |
-| Open-source files (LICENSE notice, CONTRIBUTING, CoC, SECURITY) | ✅ | Full GPL text must be pasted into `LICENSE` before release |
+| Wire protocol spec, pairing/security doc, threat model, ADRs 0001–0019 | ✅ | `docs/protocol`, `docs/security`, `docs/adr` (index maps the plan's ADR numbers) |
+| Open-source files (full GPL-3.0 LICENSE, CONTRIBUTING, CoC, SECURITY, PRIVACY, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot) | ✅ | |
+| CI quality gates: fmt, clippy, tests, svelte-check, vitest, `cargo deny`, `npm audit --audit-level=high`, Android unit tests + lint | 🟡 | `ci.yml`; `cargo fmt --check` fails on existing formatting (not yet reformatted) |
 | Fuzz targets (media, control, framing, QR, beacon) | ✅ | `fuzz/` — run with `cargo +nightly fuzz run <target>` |
 
 ## Phase 1 — Core engine + "Listen to PC on phone"
@@ -63,8 +64,9 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
 | Media Feature Pack detection (Windows N) | ⏳ | |
 | Diagnostics export, troubleshooter tips, logs | ✅ (desktop) / 🟡 (Android tips only) | |
-| i18n infrastructure (English) | ✅ | translations via community later |
-| Accessibility pass with screen readers | ⏳ | components are labelled; audit pending |
+| i18n infrastructure (English; locale files, plurals, Intl formats, RTL, pseudo-locales en-XA/ar-XB) | ✅ | `docs/translating.md`; translations via community later |
+| Accessibility pass (desktop: keyboard, focus, dialogs, live regions, reduced motion, high contrast, text zoom) | 🟡 | done in code; screen-reader test on NVDA/VoiceOver/Orca and external audit pending |
+| Help/About (user guide, privacy, license, report a problem, logs) | ✅ desktop / ✅ Android | |
 
 ## Phase 4 — macOS parity
 
@@ -80,4 +82,6 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 |---|---|
 | Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices) |
 | External security review | ⏳ |
-| Installers (NSIS/deb/rpm/AppImage/DMG), updater signing, store listings | ⛔ (signing keys/accounts) |
+| Release workflow: NSIS, universal DMG, deb/rpm/AppImage, APK, SHA256SUMS, CycloneDX SBOMs, draft GitHub Release | 🟡 (`release.yml`, not yet run on GitHub) |
+| Desktop auto-update signed with a free minisign key; Android update check against GitHub Releases | 🟡 (needs the `TAURI_SIGNING_*` secrets and a first published release) |
+| Paid platform signing (Authenticode, Developer ID + notarisation, Android release key), store listings | ⛔ (certificates/accounts; steps in `docs/release-signing.md`) |
