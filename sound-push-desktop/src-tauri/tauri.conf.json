@@ -16,9 +16,19 @@
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgyNkFBRDMyQTgxMENFRDEKUldUUnpoQ29NcTFxZ3F2d0dwMVR0dU02RmtNRnlXd3JWTHZzUE53ZkpoRlBSRkdYR1EvbE1IZ1oK",
+      "endpoints": ["https://github.com/FlyToRakib/soundpush/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis", "deb", "rpm", "appimage", "dmg", "app"],
+    "createUpdaterArtifacts": false,
     "category": "Utility",
     "shortDescription": "Use your phone as a speaker, microphone or headset for your computer",
     "license": "GPL-3.0-or-later",

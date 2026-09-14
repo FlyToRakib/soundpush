@@ -16,6 +16,9 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
+# Signed in-app updates (minisign key, no paid certificate) and relaunch after installing.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"

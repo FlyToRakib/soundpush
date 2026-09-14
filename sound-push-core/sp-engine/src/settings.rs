@@ -257,6 +257,8 @@ pub struct Settings {
     pub saved_routes: Vec<SavedRoute>,
     pub dismissed_tips: Vec<String>,
     pub audio_cues: bool,
+    /// Look for a new SoundPush release in the background (GitHub Releases). Never installs by itself.
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -278,6 +280,7 @@ impl Default for Settings {
             saved_routes: Vec::new(),
             dismissed_tips: Vec::new(),
             audio_cues: false,
+            check_for_updates: true,
         }
     }
 }
@@ -352,6 +355,8 @@ mod tests {
         assert!(!recovered);
         assert_eq!(loaded.device_name, "Old");
         assert_eq!(loaded.theme, Theme::System);
+        // Files written before the update check existed keep it on.
+        assert!(loaded.check_for_updates);
     }
 
     #[test]

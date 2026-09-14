@@ -1,0 +1,14 @@
+# Reviewers for security-critical areas (docs/soundpush-final.md §30.1, §36.1).
+# Changes here need a maintainer review; pairing, transport and the drivers need two reviewers.
+
+*                                      @FlyToRakib
+
+/sound-push-core/sp-security/          @FlyToRakib
+/sound-push-core/sp-transport/         @FlyToRakib
+/sound-push-core/sp-protocol/          @FlyToRakib
+/sound-push-desktop/drivers/           @FlyToRakib
+/sound-push-desktop/src-tauri/capabilities/ @FlyToRakib
+/sound-push-desktop/src-tauri/tauri.conf.json @FlyToRakib
+/.github/workflows/                    @FlyToRakib
+/deny.toml                             @FlyToRakib
+/SECURITY.md                           @FlyToRakib

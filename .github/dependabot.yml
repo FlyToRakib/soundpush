@@ -1,0 +1,38 @@
+# Weekly, batched dependency updates reviewed by a maintainer (docs/soundpush-final.md §31).
+# Security updates are opened as soon as an advisory is published.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /sound-push-desktop/ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      ui-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: gradle
+    directory: /sound-push-mobile/android
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      android-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]

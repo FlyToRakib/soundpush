@@ -1,0 +1,441 @@
+name: Release
+
+# Builds every SoundPush package for a version tag (v1.2.3) and publishes a DRAFT GitHub Release with
+# checksums, SBOMs, release notes from CHANGELOG.md and the signed updater manifest (latest.json).
+# A maintainer tests the draft and publishes it; only published releases reach the in-app updater.
+#
+# Nothing here needs a paid certificate. Optional signing activates when its secrets exist
+# (see docs/release-signing.md):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD    updater bundles + latest.json (free minisign key)
+#   WINDOWS_CERTIFICATE, WINDOWS_CERTIFICATE_PASSWORD                Authenticode            (paid, disabled until set)
+#   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID                          Developer ID + notarise (paid, disabled until set)
+#   ANDROID_KEYSTORE, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD   release APK key
+#   LINUX_GPG_PRIVATE_KEY, LINUX_GPG_PASSPHRASE                      SHA256SUMS.asc          (free, disabled until set)
+#
+# "Run workflow" builds everything as a dry run (artifacts only, no release) unless "publish" is ticked;
+# publishing from a manual run needs the matching v<version> tag to exist.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Create the draft release (the v<version> tag must exist)
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          app_version=$(node -p "require('./sound-push-desktop/src-tauri/tauri.conf.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            if [ "${tag#v}" != "$app_version" ]; then
+              echo "::error title=Version::Tag $tag does not match tauri.conf.json version $app_version. Update the versions (docs/release-signing.md, Release checklist)."
+              exit 1
+            fi
+            publish=true
+          else
+            tag="v$app_version"
+            publish="${{ inputs.publish && 'true' || 'false' }}"
+          fi
+          android_version=$(sed -nE 's/.*versionName = "([^"]+)".*/\1/p' sound-push-mobile/android/app/build.gradle.kts | head -1)
+          if [ "$android_version" != "$app_version" ]; then
+            echo "::warning title=Version::Android versionName ($android_version) differs from the desktop version ($app_version)."
+          fi
+          {
+            echo "version=$app_version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        run: node tools/release/release-notes.mjs "${{ steps.version.outputs.version }}" > release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            rust-targets: ""
+            target-args: ""
+            bundles: nsis
+            out: target/release/bundle
+          - name: macos-universal
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin, x86_64-apple-darwin
+            target-args: --target universal-apple-darwin
+            bundles: app,dmg
+            out: target/universal-apple-darwin/release/bundle
+          # The oldest supported Ubuntu LTS runner, so the AppImage and packages run on older glibc too.
+          - name: linux-x64
+            os: ubuntu-22.04
+            rust-targets: ""
+            target-args: ""
+            bundles: deb,rpm,appimage
+            out: target/release/bundle
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CONFIG_DIR: ${{ github.workspace }}/.release-config
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sound-push-desktop/ui/package-lock.json
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # webview, tray, audio, keyring; PipeWire/clang for the Linux virtual microphone backend.
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libasound2-dev libdbus-1-dev libssl-dev libxdo-dev patchelf file \
+            libpipewire-0.3-dev libspa-0.2-dev libclang-dev
+
+      - name: Install UI dependencies
+        run: npm --prefix sound-push-desktop/ui ci
+
+      - name: Updater signing (free minisign key)
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          mkdir -p "$CONFIG_DIR"
+          if [ -z "$KEY" ]; then
+            echo "::warning title=Updater::TAURI_SIGNING_PRIVATE_KEY is not set: building without updater bundles, installed apps will not see this release as an update."
+            exit 0
+          fi
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<SP_EOF"
+            echo "$KEY"
+            echo "SP_EOF"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<SP_EOF"
+            echo "$KEY_PASSWORD"
+            echo "SP_EOF"
+          } >> "$GITHUB_ENV"
+          echo '{"bundle":{"createUpdaterArtifacts":true}}' > "$CONFIG_DIR/updater.json"
+
+      # ---- Paid signing hooks: skipped unless the secrets exist (docs/release-signing.md) ----
+
+      - name: "Windows Authenticode (disabled until WINDOWS_CERTIFICATE is set)"
+        if: runner.os == 'Windows'
+        env:
+          CERT: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          if (-not $env:CERT) { Write-Output "Not signing: WINDOWS_CERTIFICATE is not set (installer stays unsigned)."; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT))
+          $password = ConvertTo-SecureString -String $env:CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          $config = @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" } } }
+          New-Item -ItemType Directory -Force $env:CONFIG_DIR | Out-Null
+          $config | ConvertTo-Json -Depth 5 | Out-File -Encoding utf8NoBOM (Join-Path $env:CONFIG_DIR "windows-signing.json")
+          Write-Output "Authenticode signing enabled (thumbprint $($cert.Thumbprint))."
+
+      - name: "Apple Developer ID and notarisation (disabled until APPLE_CERTIFICATE is set)"
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "Not signing: APPLE_CERTIFICATE is not set (app stays ad-hoc signed, not notarised)."
+            exit 0
+          fi
+          # tauri build imports the certificate, signs with the hardened runtime and notarises when these are set.
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            value="${!name}"
+            [ -n "$value" ] && { echo "$name<<SP_EOF"; echo "$value"; echo "SP_EOF"; } >> "$GITHUB_ENV"
+          done
+          mkdir -p "$CONFIG_DIR"
+          node -e 'process.stdout.write(JSON.stringify({bundle:{macOS:{signingIdentity:process.argv[1]}}}))' "$APPLE_SIGNING_IDENTITY" \
+            > "$CONFIG_DIR/macos-signing.json"
+          echo "Developer ID signing enabled."
+
+      - name: Build
+        working-directory: sound-push-desktop
+        run: |
+          set -o pipefail
+          args=()
+          for config in "$CONFIG_DIR"/*.json; do
+            [ -e "$config" ] && args+=(--config "$config")
+          done
+          ./ui/node_modules/.bin/tauri build ${{ matrix.target-args }} --bundles ${{ matrix.bundles }} "${args[@]}" 2>&1 | tee ../build.log || {
+            grep -E "^error|error\[| --> " ../build.log | head -40 | sed 's/^/::error title=Build::/'
+            exit 1
+          }
+
+      - name: Collect packages
+        run: |
+          out="${{ matrix.out }}"
+          mkdir -p dist
+          shopt -s nullglob
+          case "${{ matrix.name }}" in
+            windows-x64)
+              cp "$out"/nsis/*-setup.exe* dist/ ;;
+            macos-universal)
+              cp "$out"/dmg/*.dmg dist/
+              # Name the updater bundle by version so every release keeps its own file.
+              for f in "$out"/macos/*.app.tar.gz "$out"/macos/*.app.tar.gz.sig; do
+                cp "$f" "dist/$(basename "$f" | sed "s/^SoundPush\.app\.tar\.gz/SoundPush_${VERSION}_universal.app.tar.gz/")"
+              done ;;
+            linux-x64)
+              cp "$out"/deb/*.deb "$out"/rpm/*.rpm "$out"/appimage/*.AppImage* dist/ ;;
+          esac
+          ls -l dist
+          [ -n "$(ls dist)" ] || { echo "::error title=Packages::No packages found under $out"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager "ndk;27.2.12479018"
+      - run: cargo install cargo-ndk --locked
+      - name: Kotlin bindings and native libraries
+        run: |
+          cargo build -p sp-ffi
+          rm -rf sound-push-mobile/android/core-engine/src/main/java/uniffi
+          cargo run -q -p sp-ffi --bin uniffi-bindgen -- generate --library target/debug/libsoundpush_ffi.so --language kotlin --out-dir sound-push-mobile/android/core-engine/src/main/java --no-format
+          ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 26 -o sound-push-mobile/android/core-engine/src/main/jniLibs build -p sp-ffi --release
+      - name: Build release APK
+        working-directory: sound-push-mobile/android
+        run: ./gradlew assembleRelease --console=plain
+
+      - name: Sign APK
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          apk=sound-push-mobile/android/app/build/outputs/apk/release/app-release.apk
+          apksigner=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -1)apksigner
+          mkdir -p dist
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+            out="dist/SoundPush_${VERSION}_android.apk"
+            "$apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-pass env:KEYSTORE_PASSWORD \
+              --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD --out "$out" "$apk"
+            rm -f "$RUNNER_TEMP/release.jks"
+          else
+            # Until the release keystore exists the APK keeps the public debug key, and its name says so.
+            out="dist/SoundPush_${VERSION}_android_debug-key-signed.apk"
+            cp "$apk" "$out"
+            echo "::warning title=Android::ANDROID_KEYSTORE is not set: the APK is signed with the public debug key (preview only, not for stores)."
+          fi
+          "$apksigner" verify --print-certs "$out" | head -5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*
+          if-no-files-found: error
+
+  sbom:
+    name: SBOMs
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cargo install cargo-cyclonedx --locked
+      - name: CycloneDX SBOMs
+        run: |
+          mkdir -p dist
+          cargo cyclonedx --format json
+          # One SBOM per shipped Rust artefact: the desktop app and the Android engine library.
+          for crate in sound-push-desktop sp-ffi; do
+            file=$(find . -name "${crate}.cdx.json" -not -path "./target/*" | head -1)
+            [ -n "$file" ] || { echo "::error title=SBOM::No SBOM for $crate. Found: $(find . -name '*.cdx.json' -not -path './target/*' | tr '\n' ' ')"; exit 1; }
+            cp "$file" "dist/SoundPush_${VERSION}_sbom-rust-${crate}.cdx.json"
+          done
+          npm --prefix sound-push-desktop/ui sbom --sbom-format cyclonedx --omit dev --package-lock-only \
+            > "dist/SoundPush_${VERSION}_sbom-desktop-ui.cdx.json"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Draft GitHub Release
+    needs: [prepare, desktop, android, sbom]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Updater manifest (latest.json)
+        run: |
+          mv dist/release-notes.md release-notes.md
+          if ls dist/*.sig >/dev/null 2>&1; then
+            node tools/release/latest-json.mjs "$VERSION" dist \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}" release-notes.md > dist/latest.json
+            cat dist/latest.json
+          else
+            echo "::warning title=Updater::No signed update bundles: the release has no latest.json. Add TAURI_SIGNING_PRIVATE_KEY (docs/release-signing.md)."
+          fi
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum -- * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          cat SHA256SUMS
+
+      - name: "GPG signature of SHA256SUMS (disabled until LINUX_GPG_PRIVATE_KEY is set)"
+        env:
+          GPG_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+        working-directory: dist
+        run: |
+          if [ -z "$GPG_KEY" ]; then echo "Not signing checksums: LINUX_GPG_PRIVATE_KEY is not set."; exit 0; fi
+          echo "$GPG_KEY" | gpg --batch --import
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+
+      - name: Release notes
+        env:
+          WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+          MAC_SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        run: |
+          signed_windows=$( [ "$WINDOWS_SIGNED" = true ] && echo yes || echo no )
+          signed_mac=$( [ "$MAC_SIGNED" = true ] && echo yes || echo no )
+          apk=$(cd dist && ls *.apk | head -1)
+          {
+            echo "## Downloads"
+            echo
+            echo "| Platform | File |"
+            echo "|---|---|"
+            for f in dist/*; do
+              name=$(basename "$f")
+              case "$name" in
+                *-setup.exe) echo "| Windows 10/11 (x64) | \`$name\` |" ;;
+                *.dmg) echo "| macOS 14.2+ (Apple Silicon and Intel) | \`$name\` |" ;;
+                *.deb) echo "| Ubuntu / Debian (x64) | \`$name\` |" ;;
+                *.rpm) echo "| Fedora / openSUSE (x64) | \`$name\` |" ;;
+                *.AppImage) echo "| Linux AppImage (x64, updates itself) | \`$name\` |" ;;
+                *.apk) echo "| Android 8+ | \`$name\` |" ;;
+              esac
+            done
+            echo
+            echo "Verify a download: \`sha256sum -c --ignore-missing SHA256SUMS\` (PowerShell: \`Get-FileHash <file>\`)."
+            echo "SBOMs (CycloneDX) are attached for the Rust engine, the Android engine library and the desktop UI."
+            echo
+            echo "### First install"
+            echo
+            if [ "$signed_windows" = no ]; then
+              echo "- **Windows:** the installer is not code-signed yet. If SmartScreen says *Windows protected your PC*, choose **More info → Run anyway**."
+            fi
+            if [ "$signed_mac" = no ]; then
+              echo "- **macOS:** the app is not notarised yet. If macOS says it can't verify SoundPush, open **System Settings → Privacy & Security → Open Anyway**."
+            fi
+            case "$apk" in
+              *debug-key-signed*) echo "- **Android:** this preview APK is signed with a public debug key. A later store/release-key build will need an uninstall first." ;;
+            esac
+            echo "- Already installed? The desktop app offers the update in **Settings → About** once this release is published."
+            echo
+            cat release-notes.md
+          } > release-body.md
+          cat release-body.md
+
+      - name: Create or update the draft release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --draft --title "SoundPush $VERSION" --notes-file release-body.md
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --draft --verify-tag --title "SoundPush $VERSION" --notes-file release-body.md
+          fi
+          echo "::notice title=Release::Draft release $TAG created. Test the files, then publish it on GitHub."

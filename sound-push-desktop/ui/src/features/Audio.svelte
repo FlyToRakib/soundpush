@@ -231,7 +231,7 @@
     {#if advanced}
       <SettingRow label={t("audio.balance")}>
         <Slider value={Math.round(s.output.balance * 100)} min={-100} max={100} step={5} label={t("audio.balance")}
-          format={(v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`)}
+          format={(v) => (v === 0 ? t("audio.balance.center") : v < 0 ? t("audio.balance.left", -v) : t("audio.balance.right", v))}
           onchange={(v) => updateSettings((x) => (x.output.balance = v / 100))} />
       </SettingRow>
       <SettingRow label={t("audio.mono")}>

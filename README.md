@@ -23,6 +23,18 @@ Secure pairing, end-to-end encrypted, no accounts, no ads, no telemetry.
 
 The full implementation plan is in [`docs/soundpush-final.md`](docs/soundpush-final.md).
 
+## Using SoundPush
+
+- Download: [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) (with `SHA256SUMS`)
+- [User guide](docs/user-guide.md): install, pairing, every task, virtual microphone per OS, USB, troubleshooting
+- [Privacy policy](PRIVACY.md) · [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md)
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), [architecture decisions](docs/adr/README.md),
+[threat model](docs/security/threat-model.md), [translating](docs/translating.md),
+[release signing](docs/release-signing.md).
+
 ## Building
 
 ```bash

@@ -45,6 +45,7 @@ const settings: Settings = {
   savedRoutes: [],
   dismissedTips: [],
   audioCues: false,
+  checkForUpdates: true,
 };
 
 let state: EngineState = {

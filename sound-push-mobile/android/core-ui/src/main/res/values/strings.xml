@@ -378,4 +378,19 @@
     <string name="a11y_unavailable">Unavailable</string>
     <string name="a11y_show_details">Show details</string>
     <string name="a11y_hide_details">Hide details</string>
+
+    <string name="settings_updates_auto">Check for updates automatically</string>
+    <string name="settings_updates_auto_desc">Looks for a new version on GitHub. Nothing is downloaded or installed without you.</string>
+    <string name="settings_update_check">Check for updates</string>
+    <string name="settings_update_checking">Checking for updates…</string>
+    <string name="settings_update_up_to_date">SoundPush is up to date.</string>
+    <string name="settings_update_available">SoundPush %1$s is available.</string>
+    <string name="settings_update_download">Download</string>
+    <string name="settings_update_failed">Couldn\'t check for updates. Check your internet connection and try again.</string>
+    <string name="settings_user_guide">User guide</string>
+    <string name="settings_report_bug">Report a problem</string>
+    <string name="settings_privacy_policy">Privacy policy</string>
+    <string name="settings_license">License</string>
+    <string name="settings_license_desc">Free and open source under GPL-3.0-or-later</string>
+    <string name="settings_source">Source code</string>
 </resources>

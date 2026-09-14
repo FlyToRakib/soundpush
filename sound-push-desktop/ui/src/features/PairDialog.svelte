@@ -65,7 +65,7 @@
       <div class="row">
         <Button variant="ghost" onclick={() => (manual = false)}>{t("common.back")}</Button>
         <div class="spacer"></div>
-        <Button variant="primary" disabled={!address.trim()}>{t("pair.connect")}</Button>
+        <Button type="submit" variant="primary" disabled={!address.trim()}>{t("pair.connect")}</Button>
       </div>
     </form>
   {/if}

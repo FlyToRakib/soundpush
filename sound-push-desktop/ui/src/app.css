@@ -54,10 +54,10 @@ select {
   color: inherit;
 }
 
+/* Visible keyboard focus everywhere. The outline follows each control's own shape. */
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-  border-radius: var(--radius-control);
 }
 
 .muted {
@@ -74,9 +74,29 @@ select {
   position: absolute;
   width: 1px;
   height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* Icons that point along the reading direction mirror in right-to-left languages. */
+[dir="rtl"] svg[data-icon="chevron"] {
+  transform: scaleX(-1);
+}
+
+/* "Reduce motion" in the OS turns off every transition and animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .stack {

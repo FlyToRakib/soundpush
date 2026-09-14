@@ -18,6 +18,7 @@
   const peer = $derived(store.state?.peers.find((p) => p.deviceId === route.peerId));
   const quality = $derived<LinkQuality>(peer?.quality ?? "unknown");
   const sending = $derived(route.kind.startsWith("send"));
+  const detailsId = $props.id();
 </script>
 
 <article class="route" aria-label={routeTitle(route)}>
@@ -40,12 +41,19 @@
       label={route.muted ? t("route.unmute") : t("route.mute")}
       onclick={() => run(engine.setRouteMuted(route.routeId, !route.muted))}
     />
-    <Button variant="ghost" icon="chevron" label={t("route.details")} onclick={() => (expanded = !expanded)} />
+    <Button
+      variant="ghost"
+      icon="chevron"
+      label={t("route.details")}
+      expanded={expanded}
+      controls={detailsId}
+      onclick={() => (expanded = !expanded)}
+    />
     <Button variant="secondary" icon="stop" onclick={() => run(engine.stopRoute(route.routeId))}>{t("route.stop")}</Button>
   </div>
 
   {#if expanded}
-    <div class="details">
+    <div class="details" id={detailsId}>
       {#if !route.kind.includes("Mic")}
         <div class="row">
           <span class="grow">{t("audio.volume")}</span>
@@ -82,14 +90,14 @@
         />
       </div>
       <dl class="stats caption">
-        <div><dt>Codec</dt><dd>{route.stats.codec}{route.stats.bitrateKbps ? ` · ${route.stats.bitrateKbps} kb/s` : ""}</dd></div>
+        <div><dt>{t("stats.codec")}</dt><dd>{route.stats.codec}{route.stats.bitrateKbps ? ` · ${route.stats.bitrateKbps} kb/s` : ""}</dd></div>
         <div><dt>{t("audio.latency")}</dt><dd>{Math.round(route.stats.latencyMs)} ms</dd></div>
-        <div><dt>Buffer</dt><dd>{Math.round(route.stats.bufferMs)} ms</dd></div>
-        <div><dt>Jitter</dt><dd>{route.stats.jitterMs.toFixed(1)} ms</dd></div>
-        <div><dt>Loss</dt><dd>{route.stats.lossPct.toFixed(1)} %</dd></div>
-        <div><dt>Clock drift</dt><dd>{route.stats.driftPpm} ppm</dd></div>
-        <div><dt>Dropouts</dt><dd>{route.stats.underruns}</dd></div>
-        <div><dt>RTT</dt><dd>{peer ? Math.round(peer.rttMs) : 0} ms</dd></div>
+        <div><dt>{t("stats.buffer")}</dt><dd>{Math.round(route.stats.bufferMs)} ms</dd></div>
+        <div><dt>{t("stats.jitter")}</dt><dd>{route.stats.jitterMs.toFixed(1)} ms</dd></div>
+        <div><dt>{t("stats.loss")}</dt><dd>{route.stats.lossPct.toFixed(1)} %</dd></div>
+        <div><dt>{t("stats.drift")}</dt><dd>{route.stats.driftPpm} ppm</dd></div>
+        <div><dt>{t("stats.dropouts")}</dt><dd>{route.stats.underruns}</dd></div>
+        <div><dt>{t("stats.rtt")}</dt><dd>{peer ? Math.round(peer.rttMs) : 0} ms</dd></div>
       </dl>
     </div>
   {/if}
