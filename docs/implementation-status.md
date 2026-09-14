@@ -26,9 +26,12 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | `sp-media` (Opus/PCM, adaptive jitter buffer, drift, DSP, RNNoise) | ✅ | 19 tests incl. 1-hour drift simulation |
 | `sp-audio-io` (trait, cpal backend, null backend, converters) | 🟡 | unit-tested; device paths need hardware |
 | `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | unit tests plus two-engine tests: pairing → audio → prompt → stop → forget, restart-reconnect, resume without a second prompt, shared encoder, live codec switch, USB (TCP) + network test, resume after restart. Audio devices open off the actor |
-| Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, 9 UI tests |
+| Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, Vitest units, Playwright e2e against the mock engine in light and dark with axe WCAG 2.1 AA checks (`npm run test:e2e`) |
+| Desktop window lifecycle (plan §13.1, §24) | 🟡 | `window_state.rs`: size, position and maximized state restored onto a connected monitor; the window waits up to 1.5 s for the engine; autostart opens it only when "Start in the background" is off or onboarding is unfinished; one-time "SoundPush keeps running" hint on the first close to the tray |
+| Desktop tray (plan §13.2, §23.1) | 🟡 | `tray.rs`: per-route Mute/Stop, microphone mute with shortcut, recent devices (connect, listen, use as microphone), status badge (streaming, microphone live, attention, error); Linux without a StatusNotifier host minimizes instead of hiding |
+| OS network change, sleep/resume and session end → engine | 🟡 | `os_events.rs`: Windows `NotifyIpInterfaceChange` + hidden window (`WM_POWERBROADCAST`, `WM_ENDSESSION`) + `RegisterApplicationRestart` (Restart Manager); macOS IOKit power + SystemConfiguration keys (not yet compiled on macOS); Linux rtnetlink + logind `PrepareForSleep`. Needs a real sleep/Wi-Fi-switch check on each OS |
 | Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`); speakers are not muted while sending on PulseAudio (its monitors follow the sink mute) |
-| Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test |
+| Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test. Notification Stop / Mute / Output (system output switcher per Android version), widget Mute, denied/blocked permission states with Open settings, process-level network watcher, per-app language picker (generated locale list, pseudo-locales in debug), custom latency, output device choice (platform player), connection details, OSS licences (AboutLibraries), share app, tablet/foldable layouts (rail, list-detail Devices, two-column Home). Robolectric flow tests with ATF accessibility checks and Light/Dark/RTL/en-XA/tablet screenshots |
 
 ## Phase 2 — Microphone & headset
 
@@ -38,7 +41,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Android mic presets (7 modes) + platform AEC/NS/AGC with availability | 🟡 | Kotlin `MicCapture` |
 | Gain 0–20 dB, soft limiter, RNNoise, level meter, mic monitor | ✅ | |
 | "Ask" permission prompt for microphone | ✅ | tested end-to-end |
-| Headset mode (both routes in one action) | 🟡 | desktop + Android home task |
+| Headset mode (both routes in one action) | 🟡 | desktop + Android home task; on Android the recorder uses the voice-call preset with echo cancellation while the headset task runs and returns to the user's preset afterwards. RNNoise "on the computer instead" needs receiver-side denoising in the engine (not yet) |
 | Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
 | Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | 🟡 | `sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT: "SoundPush Microphone Feed" → "SoundPush Microphone"); x64 builds locally with `/W4 /WX /analyze`, infverif, inf2cat and ApiValidator clean; CI builds x64 + ARM64 and test-signs (`windows-driver.yml`). Not yet installed on a test-signing PC. Not used by the app: VB-CABLE stays active until attestation signing |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
@@ -53,12 +56,12 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Android app audio → PC (playback capture) | 🟡 | `AppAudioCapture` |
 | PC mic → phone, PC↔PC, phone↔phone | 🟡 | same route model; untested on hardware |
 | Multi-device streaming | ✅ / 🟡 | encoder groups: one capture and encoder per (source, profile) shared by every route that can use it (engine test: two receivers, one capture); needs a multi-phone hardware check |
-| Per-stream volume, balance, mono, A/V offset, remote volume/mute, "Mute PC" | ✅ / 🟡 | engine + UI; OS mute via platform calls |
+| Per-stream volume, balance, mono, A/V offset, remote volume/mute, "Mute PC" | ✅ / 🟡 | engine + UI; OS mute via platform calls. `PeerView.speakersMuted` shows the state; a peer's remote mute ends with its session (engine test). Desktop: sending mutes this computer's speakers, receiving from another computer mutes that one |
 | Adaptive bitrate from receiver stats | ✅ | |
 | Packet redundancy (auto on >1 % loss) | ✅ | test recovers frames with 20 % simulated loss |
-| Session timer, quality badge, connection details | ✅ | |
+| Session timer, quality badge, connection details | ✅ | desktop: transport and path (USB/adb, tethering, local, IPv4/IPv6), address, per-stage latency (capture, encode, network, buffer, output from `RouteStats`), 5-minute latency/loss chart with a text summary |
 | Custom bitrate steps incl. AudioRelay's | ✅ | |
-| USB tethering | 🟡 | works as IP network |
+| USB tethering | 🟡 | works as IP network; desktop `tethering.rs` detects RNDIS/NCM/Apple tethering adapters, labels devices reached through them and warns when the computer's internet uses the phone's mobile data (Windows/Linux unit-tested parsers; macOS reader not yet compiled) |
 | USB via ADB (TLS-over-TCP transport) | 🟡 | ADR-0005: `sp-transport/src/tcp.rs`; desktop listens on loopback, Devices page finds adb and runs `adb reverse`; the phone dials its loopback candidate after 2 s of network candidates. Tested engine to engine over TCP; needs a real phone |
 | Session resume after a network interruption | ✅ / 🟡 | single-use resume tokens bound to the peer key (10 min) + QUIC migration; an approved "Ask" route resumes without a second prompt (engine test); needs a Wi-Fi roam check |
 | Per-device audio profiles (latency, quality, bitrate, redundancy) | ✅ / 🟡 | `settings.deviceProfiles`, applied at route start and live (bitrate/redundancy live, codec changes renegotiated); desktop Devices page, Android device sheet |
@@ -66,14 +69,14 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Local crash reports for Rust panics | ✅ | redacted report in the data folder, notice once on next start, included in the desktop diagnostics export; nothing uploaded |
 | Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
 | PipeWire app capture | ⏳ | ADR-0002. On Linux it means moving the app's stream to a private null sink and recording its monitor; `CaptureSource::Application` exists (Windows) but has no Linux implementation yet |
-| Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
+| Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service; "Lower volume" uses a separate output duck gain (`set_output_duck`), route volumes are never overwritten |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
 | Media Feature Pack detection (Windows N) | 🟡 | `src-tauri/src/system.rs` (missing `mfplat.dll`), Home banner → Optional features |
 | Windows Firewall / Public network fix | 🟡 | `src-tauri/src/network.rs`: firewall policy + network category read as a normal user; "Allow SoundPush" runs `netsh` through UAC (UDP, this exe, private/domain; public only if chosen); the uninstaller removes the rule with one UAC prompt (`windows/hooks.nsh`) |
 | Audio device changes (follow default, device lost) | 🟡 | `src-tauri/src/device_watch.rs` (`IMMNotificationClient`, Core Audio listeners) → `EngineHandle::audio_devices_changed`; routes on the default device reopen, pinned devices report lost |
 | Audio cues | 🟡 | `src-tauri/src/cues.rs`, generated tones, `settings.audioCues` |
-| Diagnostics export, guided troubleshooter, logs | ✅ (desktop) / 🟡 (Android tips only) | desktop troubleshooter runs checks (firewall, network profile, driver, devices, permissions, Bluetooth) with fix buttons |
+| Diagnostics export, guided troubleshooter, logs | ✅ (desktop) / 🟡 (Android tips only) | desktop troubleshooter runs checks (firewall, network profile, driver, devices, permissions, Bluetooth) with fix buttons; the export is previewed first (sections, what is removed, exact text) and redacts addresses, device ids and the pairing code, also inside log lines. The "Detailed logging" toggle appears once the engine exposes `debugLogging` |
 | macOS permissions (microphone, System Audio Recording) | 🟡 | `src-tauri/src/macos.rs`: status without prompting, deep links to System Settings. Not yet compiled on macOS |
 | Windows ARM64 installer | 🟡 | `windows-build.yml` matrix, artifact `SoundPush-Windows-arm64` (cross-compiled, not yet run) |
 | i18n infrastructure (English; locale files, plurals, Intl formats, RTL, pseudo-locales en-XA/ar-XB) | ✅ | `docs/translating.md`; translations via community later |

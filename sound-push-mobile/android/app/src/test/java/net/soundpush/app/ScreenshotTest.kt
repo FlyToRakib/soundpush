@@ -3,6 +3,13 @@ package net.soundpush.app
 import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import net.soundpush.ui.components.LocalWidthClass
+import net.soundpush.ui.components.WidthClass
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +36,7 @@ import net.soundpush.settings.SettingsScreen
 import net.soundpush.settings.TroubleshootTopicScreen
 import net.soundpush.settings.TroubleshooterScreen
 import net.soundpush.ui.components.BannerModel
+import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.ScreenHeader
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.SoundPushTheme
@@ -176,6 +184,53 @@ class ScreenshotTest {
     /** Right-to-left layout (Arabic): mirrored chevrons and back arrow. */
     @Test @Config(qualifiers = "ar-w393dp-h851dp-xxhdpi")
     fun homeConnectedRtl() = capture("home-connected-rtl", "light", "home", home(connected))
+
+    private val languages = listOf(Choice("system", "System language"), Choice("en", "English"), Choice("ar", "العربية"))
+
+    /** Right-to-left Settings: rows, switches, choices and chevrons mirror; nothing is cut off. */
+    @Test @Config(qualifiers = "ar-w393dp-h851dp-xxhdpi")
+    fun settingsRtl() = capture("settings-rtl", "light", "settings") {
+        SettingsScreen(connected, onOpenAudio = {}, languages = languages, language = "ar")
+    }
+
+    @Test @Config(qualifiers = "ar-w393dp-h851dp-xxhdpi")
+    fun audioRtlDark() = capture("audio-rtl", "dark", "audio") { AudioScreen(connected) }
+
+    /** en-XA pseudo-locale (debug builds): about 40 % longer text; plain English here would be hard-coded. */
+    @Test @Config(qualifiers = "en-rXA-w393dp-h851dp-xxhdpi")
+    fun homeConnectedPseudoLocale() = capture("home-connected-en-XA", "light", "home", home(connected))
+
+    /** Tablet and unfolded-foldable layouts: navigation rail, list-detail and two-column Home. */
+    private fun captureWide(name: String, theme: String, route: String, before: () -> Unit = {}, content: @Composable () -> Unit) {
+        compose.setContent {
+            SoundPushTheme(theme) {
+                CompositionLocalProvider(LocalWidthClass provides WidthClass.of(LocalConfiguration.current.screenWidthDp)) {
+                    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+                        Row {
+                            SideRail(route) {}
+                            Column(Modifier.weight(1f)) {
+                                ScreenHeader(title = androidx.compose.ui.res.stringResource(titleFor(route)))
+                                Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        before()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/$name-$theme.png")
+    }
+
+    @Test @Config(qualifiers = "w1280dp-h800dp-xhdpi")
+    fun devicesTabletListDetail() = captureWide("devices-tablet", "light", "devices", before = {
+        compose.onNodeWithText("Rakibs-MacBook-Air").performClick()
+    }) { DevicesScreen(connected, onScan = {}, onShowMessage = {}) }
+
+    @Test @Config(qualifiers = "w1280dp-h800dp-xhdpi")
+    fun homeTabletDark() = captureWide("home-tablet", "dark", "home", content = home(connected))
+
+    @Test @Config(qualifiers = "w700dp-h1000dp-xhdpi")
+    fun settingsMediumWidth() = captureWide("settings-medium", "light", "settings") { SettingsScreen(connected, onOpenAudio = {}) }
 
     private fun captureBare(name: String, theme: String, content: @Composable () -> Unit) {
         compose.setContent { SoundPushTheme(theme) { content() } }

@@ -964,6 +964,7 @@ impl Actor {
                         self.conn_index.remove(&s.conn_id);
                         let _ = s.tx.send(SessionCmd::Close(StopReason::UserStopped));
                     }
+                    self.forget_speaker_mutes(id);
                     self.remove_routes_for(id);
                     self.end_network_test(id, EngineError::Unreachable);
                     // Suppress auto reconnect for this device until the user connects again.

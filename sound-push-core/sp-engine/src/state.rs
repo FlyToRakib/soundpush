@@ -118,7 +118,8 @@ pub struct PeerView {
     pub transport: String,
     /// Address of the connection's other end ("192.168.1.20:47650"), empty while disconnected.
     pub remote_address: String,
-    /// This device asked the peer to mute its speakers ("Mute PC"); cleared when the session ends.
+    /// This device asked the peer to mute its own speakers ("Mute PC") in the current session.
+    /// Reset when the session ends; always false while disconnected.
     pub speakers_muted: bool,
 }
 

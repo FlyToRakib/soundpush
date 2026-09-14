@@ -17,4 +17,20 @@
     <Import Condition="'$(Platform)' == 'ARM64'" Project="$(SpPackages)Microsoft.Windows.SDK.CPP.arm64.$(SpKitVersion)\build\native\Microsoft.Windows.SDK.cpp.arm64.props" />
     <Import Project="$(SpPackages)Microsoft.Windows.SDK.CPP.$(SpKitVersion)\build\native\Microsoft.Windows.SDK.cpp.props" />
   </ImportGroup>
+
+  <!--
+    StampInf tool path. With the NuGet WDK, WindowsDriver.Common.targets sets InfToolPath only
+    when $(Processor_Architecture) is AMD64 or ARM64, i.e. only in a 64-bit MSBuild process. A
+    32-bit MSBuild sees x86, leaves InfToolPath empty and the build fails with
+    TRK0005 "Failed to locate: stampinf.exe". stampinf.exe ships in the WDK package under
+    c\bin\<kit>\x64 and c\bin\<kit>\ARM64 (no x86), so point at the host OS architecture's copy.
+  -->
+  <PropertyGroup Condition="'$(InfToolPath)' == ''">
+    <SpHostArch>$(PROCESSOR_ARCHITEW6432)</SpHostArch>
+    <SpHostArch Condition="'$(SpHostArch)' == ''">$(PROCESSOR_ARCHITECTURE)</SpHostArch>
+    <SpWdkBin Condition="'$(Platform)' == 'x64'">$(SpPackages)Microsoft.Windows.WDK.x64.$(SpKitVersion)\c\bin\$(WindowsTargetPlatformVersion)\</SpWdkBin>
+    <SpWdkBin Condition="'$(Platform)' == 'ARM64'">$(SpPackages)Microsoft.Windows.WDK.arm64.$(SpKitVersion)\c\bin\$(WindowsTargetPlatformVersion)\</SpWdkBin>
+    <InfToolPath Condition="'$(SpWdkBin)' != '' and '$(SpHostArch)' == 'ARM64' and Exists('$(SpWdkBin)ARM64\stampinf.exe')">$(SpWdkBin)ARM64\</InfToolPath>
+    <InfToolPath Condition="'$(SpWdkBin)' != '' and '$(InfToolPath)' == '' and Exists('$(SpWdkBin)x64\stampinf.exe')">$(SpWdkBin)x64\</InfToolPath>
+  </PropertyGroup>
 </Project>
