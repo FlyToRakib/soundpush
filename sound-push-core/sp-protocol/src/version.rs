@@ -47,10 +47,12 @@ impl fmt::Display for VersionRange {
     }
 }
 
-/// The range this build supports.
+/// The range this build supports. 1.1 adds session tickets, network tests, route
+/// reconfiguration and the TCP transport; every 1.1 feature is also gated by a capability bit,
+/// so 1.0 peers keep working.
 pub const LOCAL_VERSIONS: VersionRange = VersionRange {
     min: ProtocolVersion::new(1, 0),
-    max: ProtocolVersion::new(1, 0),
+    max: ProtocolVersion::new(1, 1),
 };
 
 impl VersionRange {
@@ -81,6 +83,14 @@ impl Capabilities {
     pub const FEATURE_REDUNDANCY: u64 = 1 << 24;
     pub const FEATURE_REMOTE_CONTROL: u64 = 1 << 25;
     pub const FEATURE_MIC_MONITOR: u64 = 1 << 26;
+    /// Understands `SessionTicket` and `Hello.resume_token` (protocol 1.1).
+    pub const FEATURE_SESSION_RESUME: u64 = 1 << 27;
+    /// Answers `NetTestStart` and echoes probe datagrams (protocol 1.1).
+    pub const FEATURE_NETWORK_TEST: u64 = 1 << 28;
+    /// Applies codec, frame and channel changes carried by `RouteUpdate` (protocol 1.1).
+    pub const FEATURE_ROUTE_RECONFIGURE: u64 = 1 << 29;
+    /// Accepts TLS-over-TCP connections on its port (USB via `adb reverse`, protocol 1.1).
+    pub const TRANSPORT_TCP: u64 = 1 << 30;
 
     pub const fn has(self, bit: u64) -> bool {
         self.0 & bit == bit

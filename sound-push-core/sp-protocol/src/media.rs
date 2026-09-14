@@ -17,9 +17,17 @@ use crate::ProtocolError;
 pub const MEDIA_HEADER_VERSION: u8 = 1;
 /// Size of the fixed media header in bytes.
 pub const MEDIA_HEADER_LEN: usize = 16;
-/// Largest payload accepted. Keeps datagrams under a 1280-byte IPv6 minimum MTU
-/// after QUIC overhead.
-pub const MAX_MEDIA_PAYLOAD: usize = 1200;
+/// Largest payload a sender produces.
+///
+/// QUIC starts every path at a 1200-byte UDP payload and only grows it after path MTU
+/// discovery. A short-header packet spends up to ~40 bytes on the connection id, packet number,
+/// AEAD tag and DATAGRAM frame header, so a datagram must stay at or below ~1160 bytes to be sent
+/// before (or without) PMTU discovery. 16 header bytes + 1100 payload bytes leave margin.
+/// PCM frames are capped to fit: 5 ms stereo or 10 ms mono = 960 bytes.
+pub const MAX_MEDIA_PAYLOAD: usize = 1100;
+/// Largest payload a receiver accepts. Protocol 1.0 senders used 1200 bytes, which can pass once
+/// PMTU discovery has raised the path MTU, so receivers keep accepting it.
+pub const MAX_ACCEPTED_MEDIA_PAYLOAD: usize = 1200;
 
 /// Audio codec carried in a media packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -128,10 +136,10 @@ impl MediaPacket {
             });
         }
         let payload_len = datagram.len() - MEDIA_HEADER_LEN;
-        if payload_len > MAX_MEDIA_PAYLOAD {
+        if payload_len > MAX_ACCEPTED_MEDIA_PAYLOAD {
             return Err(ProtocolError::PayloadTooLarge {
                 len: payload_len,
-                max: MAX_MEDIA_PAYLOAD,
+                max: MAX_ACCEPTED_MEDIA_PAYLOAD,
             });
         }
         let version = datagram.get_u8();
@@ -210,6 +218,16 @@ mod tests {
         let mut pkt = sample();
         pkt.payload = Bytes::from(vec![0u8; MAX_MEDIA_PAYLOAD + 1]);
         assert!(pkt.encode().is_err());
+    }
+
+    #[test]
+    fn legacy_1200_byte_payloads_still_decode() {
+        let mut wire = sample().encode().unwrap().to_vec();
+        wire.truncate(MEDIA_HEADER_LEN);
+        wire.resize(MEDIA_HEADER_LEN + MAX_ACCEPTED_MEDIA_PAYLOAD, 0);
+        assert!(MediaPacket::decode(Bytes::from(wire.clone())).is_ok());
+        wire.push(0);
+        assert!(MediaPacket::decode(Bytes::from(wire)).is_err());
     }
 
     proptest! {

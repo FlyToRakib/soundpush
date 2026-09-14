@@ -5,7 +5,7 @@
 
 use sp_protocol::Codec;
 use sp_protocol::control::StreamProfile;
-use sp_protocol::media::MAX_MEDIA_PAYLOAD;
+use sp_protocol::media::{MAX_ACCEPTED_MEDIA_PAYLOAD, MAX_MEDIA_PAYLOAD};
 #[allow(clippy::unsafe_removed_from_name)] // every call site below is still an explicit `unsafe` block
 use unsafe_libopus as opus;
 
@@ -216,7 +216,7 @@ impl OpusDecoder {
 
 impl Decoder for OpusDecoder {
     fn decode(&mut self, payload: &[u8], out: &mut [f32]) -> Result<usize, MediaError> {
-        if payload.is_empty() || payload.len() > MAX_MEDIA_PAYLOAD {
+        if payload.is_empty() || payload.len() > MAX_ACCEPTED_MEDIA_PAYLOAD {
             return Err(MediaError::WrongPayloadSize {
                 got: payload.len(),
                 expected: 1,

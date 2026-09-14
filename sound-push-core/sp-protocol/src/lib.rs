@@ -4,12 +4,14 @@
 //! - [`media`]: the fixed 16-byte media datagram header.
 //! - [`control`]: protobuf control messages exchanged on the reliable channel.
 //! - [`framing`]: length-prefixed framing for stream transports.
+//! - [`probe`]: network-test probe datagrams.
 //! - [`version`]: protocol version range negotiation and capability bits.
 #![forbid(unsafe_code)]
 
 pub mod control;
 pub mod framing;
 pub mod media;
+pub mod probe;
 pub mod version;
 
 pub use media::{Codec, MediaFlags, MediaHeader, MediaPacket};
@@ -30,6 +32,10 @@ pub enum ProtocolError {
     FrameTooLarge { len: usize, max: usize },
     #[error("malformed control message: {0}")]
     Decode(String),
+    #[error("control message type not known to this version")]
+    UnknownMessage,
+    #[error("unknown stream frame type {0}")]
+    UnknownFrameKind(u8),
     #[error("no common protocol version (local {local}, peer {peer})")]
     NoCommonVersion { local: VersionRange, peer: VersionRange },
 }

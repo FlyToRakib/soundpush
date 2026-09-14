@@ -20,7 +20,7 @@ pub struct ControlMsg {
     pub request_id: u32,
     #[prost(
         oneof = "control_msg::Body",
-        tags = "10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25"
+        tags = "10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29"
     )]
     pub body: Option<control_msg::Body>,
 }
@@ -62,7 +62,53 @@ pub mod control_msg {
         PairRequest(PairRequest),
         #[prost(message, tag = "25")]
         PairResult(PairResult),
+        // Protocol 1.1. Only sent to peers advertising the matching capability bit:
+        // a 1.0 peer cannot decode these and would drop the session.
+        #[prost(message, tag = "26")]
+        SessionTicket(SessionTicket),
+        #[prost(message, tag = "27")]
+        NetTestStart(NetTestStart),
+        #[prost(message, tag = "28")]
+        NetTestReady(NetTestReady),
+        #[prost(message, tag = "29")]
+        NetTestStop(NetTestStop),
     }
+}
+
+/// A single-use resume token for the next connection to the issuing device
+/// (`FEATURE_SESSION_RESUME`). Presented back in `Hello.resume_token`.
+#[derive(Clone, PartialEq, Message)]
+pub struct SessionTicket {
+    /// Opaque 256-bit value.
+    #[prost(bytes = "bytes", tag = "1")]
+    pub token: Bytes,
+    /// Seconds the issuer will accept the token for.
+    #[prost(uint32, tag = "2")]
+    pub lifetime_secs: u32,
+}
+
+/// Ask the peer to echo probe datagrams for a network test (`FEATURE_NETWORK_TEST`).
+#[derive(Clone, PartialEq, Message)]
+pub struct NetTestStart {
+    #[prost(uint32, tag = "1")]
+    pub test_id: u32,
+    /// Upper bound of the test; the responder stops echoing afterwards.
+    #[prost(uint32, tag = "2")]
+    pub duration_ms: u32,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct NetTestReady {
+    #[prost(uint32, tag = "1")]
+    pub test_id: u32,
+    #[prost(bool, tag = "2")]
+    pub accepted: bool,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct NetTestStop {
+    #[prost(uint32, tag = "1")]
+    pub test_id: u32,
 }
 
 /// Sent by an untrusted peer after `Hello` to start pairing.
@@ -345,7 +391,13 @@ impl ControlMsg {
         }
         let msg = Self::decode(data).map_err(|e| ProtocolError::Decode(e.to_string()))?;
         if msg.body.is_none() {
-            return Err(ProtocolError::Decode("empty body".into()));
+            // A well-formed envelope whose body tag this build does not know comes from a newer
+            // peer; stream readers skip it instead of treating it as corruption.
+            return Err(if data.is_empty() {
+                ProtocolError::Decode("empty body".into())
+            } else {
+                ProtocolError::UnknownMessage
+            });
         }
         Ok(msg)
     }
@@ -385,5 +437,34 @@ mod tests {
     fn garbage_is_error_not_panic() {
         assert!(ControlMsg::from_bytes(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]).is_err());
         assert!(ControlMsg::from_bytes(&[]).is_err());
+    }
+
+    #[test]
+    fn unknown_body_from_newer_peer_is_distinguishable() {
+        // request_id = 1, then field 99 (a future body) as a length-delimited empty message.
+        let future = [0x08, 0x01, 0x9A, 0x06, 0x00];
+        assert_eq!(ControlMsg::from_bytes(&future), Err(ProtocolError::UnknownMessage));
+    }
+
+    #[test]
+    fn protocol_1_1_messages_roundtrip() {
+        for body in [
+            Body::SessionTicket(SessionTicket {
+                token: Bytes::from_static(&[9; 32]),
+                lifetime_secs: 600,
+            }),
+            Body::NetTestStart(NetTestStart {
+                test_id: 7,
+                duration_ms: 8000,
+            }),
+            Body::NetTestReady(NetTestReady {
+                test_id: 7,
+                accepted: true,
+            }),
+            Body::NetTestStop(NetTestStop { test_id: 7 }),
+        ] {
+            let msg = ControlMsg::new(0, body);
+            assert_eq!(ControlMsg::from_bytes(&msg.to_bytes()).unwrap(), msg);
+        }
     }
 }

@@ -55,6 +55,8 @@ pub struct JitterBuffer {
     last_transit: Option<i64>,
     jitter_samples: f64,
     deviations: Vec<u32>,
+    /// Preallocated scratch for the percentile (adapt runs on the audio thread).
+    sorted: Vec<u32>,
     dev_cursor: usize,
     stats: JitterStats,
 }
@@ -62,6 +64,9 @@ pub struct JitterBuffer {
 const WINDOW: usize = 512;
 /// Frames of concealment before falling back to rebuffering.
 const MAX_CONCEAL_FRAMES: u32 = 5;
+/// Hard cap on buffered frames, whatever timestamps a sender invents. The largest legitimate
+/// buffer (1.5 s custom delay plus A/V offset, 2.5 ms frames) needs about 700.
+pub const MAX_FRAMES: usize = 1024;
 
 impl JitterBuffer {
     pub fn new(cfg: JitterConfig) -> Self {
@@ -77,6 +82,7 @@ impl JitterBuffer {
             last_transit: None,
             jitter_samples: 0.0,
             deviations: Vec::with_capacity(WINDOW),
+            sorted: Vec::with_capacity(WINDOW),
             dev_cursor: 0,
             stats: JitterStats::default(),
         }
@@ -106,8 +112,13 @@ impl JitterBuffer {
             }
         }
         let frame_len = (samples.len() / self.cfg.channels.max(1)) as u64;
-        self.newest_end_ts = self.newest_end_ts.max(sender_ts + frame_len);
+        // Timestamps are untrusted: never let them overflow.
+        self.newest_end_ts = self.newest_end_ts.max(sender_ts.saturating_add(frame_len));
         self.frames.insert(sender_ts, samples);
+        while self.frames.len() > MAX_FRAMES {
+            self.frames.pop_first();
+            self.stats.late += 1;
+        }
 
         // Far too much buffered (e.g. the receiver stalled): jump forward.
         let limit = ms_to_samples(self.cfg.max_delay_ms) + ms_to_samples(200);
@@ -174,7 +185,7 @@ impl JitterBuffer {
             let n = frame.len().min(out.len());
             out[..n].copy_from_slice(&frame[..n]);
             out[n..].fill(0.0);
-            self.play_ts = Some(play + (frame.len() / self.cfg.channels.max(1)) as u64);
+            self.play_ts = Some(play.saturating_add((frame.len() / self.cfg.channels.max(1)) as u64));
             self.consecutive_missing = 0;
             self.stats.played += 1;
             return PopStatus::Played;
@@ -193,21 +204,23 @@ impl JitterBuffer {
         if !have_future && self.consecutive_missing > MAX_CONCEAL_FRAMES {
             // Genuine underrun: rebuffer with a larger target.
             self.stats.underruns += 1;
-            self.target_samples = self.clamp_target(self.target_samples + 2 * advance);
+            self.target_samples = self.clamp_target(self.target_samples.saturating_add(2 * advance));
             self.buffering = true;
             self.play_ts = None;
             self.consecutive_missing = 0;
             out.fill(0.0);
             return PopStatus::Buffering;
         }
-        self.play_ts = Some(play + advance);
+        self.play_ts = Some(play.saturating_add(advance));
         PopStatus::Missing
     }
 
     /// Slowly converge the target towards what the measured jitter needs.
     /// Call about once per second.
     pub fn adapt(&mut self) {
-        let needed = self.percentile_deviation(0.98) as u64 * 2 + self.cfg.frame_samples as u64;
+        let needed = (self.percentile_deviation(0.98) as u64)
+            .saturating_mul(2)
+            .saturating_add(self.cfg.frame_samples as u64);
         let needed = self.clamp_target(needed);
         if needed > self.target_samples {
             self.target_samples = needed;
@@ -244,9 +257,10 @@ impl JitterBuffer {
     }
 
     fn update_jitter(&mut self, sender_ts: u64, arrival: u64) {
-        let transit = arrival as i64 - sender_ts as i64;
+        // Wrapping arithmetic: a hostile timestamp must not overflow (it only skews the estimate).
+        let transit = (arrival as i64).wrapping_sub(sender_ts as i64);
         if let Some(last) = self.last_transit {
-            let d = (transit - last).unsigned_abs();
+            let d = transit.wrapping_sub(last).unsigned_abs();
             self.jitter_samples += (d as f64 - self.jitter_samples) / 16.0;
             let d = d.min(u32::MAX as u64) as u32;
             if self.deviations.len() < WINDOW {
@@ -259,14 +273,15 @@ impl JitterBuffer {
         self.last_transit = Some(transit);
     }
 
-    fn percentile_deviation(&self, p: f64) -> u32 {
+    fn percentile_deviation(&mut self, p: f64) -> u32 {
         if self.deviations.is_empty() {
             return 0;
         }
-        let mut sorted = self.deviations.clone();
-        sorted.sort_unstable();
-        let idx = ((sorted.len() - 1) as f64 * p).round() as usize;
-        sorted[idx]
+        self.sorted.clear();
+        self.sorted.extend_from_slice(&self.deviations);
+        self.sorted.sort_unstable();
+        let idx = ((self.sorted.len() - 1) as f64 * p).round() as usize;
+        self.sorted[idx.min(self.sorted.len() - 1)]
     }
 }
 
@@ -332,6 +347,31 @@ mod tests {
         jb.pop(&mut out);
         jb.push(0, frame(0), 0);
         assert_eq!(jb.stats().late, 1);
+    }
+
+    #[test]
+    fn hostile_timestamps_never_panic_and_stay_bounded() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(11);
+        let mut jb = JitterBuffer::new(cfg(20, 1000));
+        let mut out = vec![0.0; FRAME];
+        for i in 0..20_000u64 {
+            let ts = match i % 4 {
+                0 => u64::MAX - rng.gen_range(0..1000),
+                1 => rng.r#gen::<u64>(),
+                2 => i * 7,
+                _ => rng.gen_range(0..u64::MAX / 2),
+            };
+            let arrival = if i % 3 == 0 { u64::MAX } else { rng.r#gen() };
+            jb.push(ts, frame(0), arrival);
+            assert!(jb.frames.len() <= MAX_FRAMES);
+            if i % 5 == 0 {
+                jb.pop(&mut out);
+            }
+            if i % 97 == 0 {
+                jb.adapt();
+            }
+        }
+        let _ = jb.stats();
     }
 
     #[test]

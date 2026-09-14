@@ -1337,6 +1337,7 @@ impl Actor {
                 }
             }
             Body::Goodbye(_) | Body::PairRequest(_) | Body::PairResult(_) => {}
+            Body::SessionTicket(_) | Body::NetTestStart(_) | Body::NetTestReady(_) | Body::NetTestStop(_) => {}
         }
     }
 

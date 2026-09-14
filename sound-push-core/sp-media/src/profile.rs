@@ -71,9 +71,11 @@ mod tests {
     #[test]
     fn pcm_frames_fit_in_datagram() {
         for lat in [LatencyProfile::LowLatency, LatencyProfile::Balanced, LatencyProfile::Stable] {
-            let p = build_profile(lat, Quality::Lossless, 2, false);
-            let bytes = samples_per_frame(p.frame_us) * p.channels as usize * 2;
-            assert!(bytes <= MAX_MEDIA_PAYLOAD, "{lat:?} -> {bytes}");
+            for channels in [1, 2] {
+                let p = build_profile(lat, Quality::Lossless, channels, false);
+                let bytes = samples_per_frame(p.frame_us) * p.channels as usize * 2;
+                assert!(bytes <= MAX_MEDIA_PAYLOAD, "{lat:?} {channels} ch -> {bytes}");
+            }
         }
     }
 

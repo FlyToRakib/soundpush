@@ -37,6 +37,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "stream_frame"
+path = "fuzz_targets/stream_frame.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "qr_payload"
 path = "fuzz_targets/qr_payload.rs"
 test = false
