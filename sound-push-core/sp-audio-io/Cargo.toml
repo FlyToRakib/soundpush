@@ -9,6 +9,9 @@ rust-version.workspace = true
 [features]
 default = ["cpal-backend"]
 cpal-backend = ["dep:cpal"]
+# Linux: devices, system-audio capture and module loading through PulseAudio or pipewire-pulse.
+# Needs libpulse-dev to build. Off by default so Android binding builds on Linux hosts skip it.
+pulse = ["dep:libpulse-binding", "dep:libpulse-simple-binding"]
 
 [dependencies]
 sp-media = { path = "../sp-media" }
@@ -17,12 +20,33 @@ tracing = "0.1"
 # 0.16 uses AAudio directly on Android (no C++/CMake build needed).
 cpal = { version = "0.16", optional = true }
 
+# Windows per-app capture via WASAPI process loopback (Windows 10 2004+).
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.58"
+windows = { version = "0.58", features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_Security",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+] }
+
 # macOS system-audio capture via Core Audio process taps.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-core-audio = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFDictionary"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSString", "NSUUID", "NSValue"] }
+
+# Linux system-audio capture from sink monitors (works on PipeWire through pipewire-pulse).
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = { version = "2.30", optional = true }
+libpulse-simple-binding = { version = "2.29", optional = true }
 
 [lints]
 workspace = true

@@ -17,17 +17,20 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import net.soundpush.ui.R
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.Tokens
 
-private data class Tab(val route: String, val icon: ImageVector, @StringRes val label: Int)
+private data class Tab(val route: String, val icon: ImageVector, @param:StringRes val label: Int)
 
 private val TABS = listOf(
     Tab("home", SpIcons.Home, R.string.nav_home),
@@ -35,11 +38,14 @@ private val TABS = listOf(
     Tab("settings", SpIcons.Settings, R.string.nav_settings),
 )
 
+/** Settings sub-screens: they show a back arrow and keep the Settings tab selected. */
+internal val SETTINGS_SUBSCREENS = setOf("audio", "troubleshoot", "troubleshoot/{topic}", "battery")
+
 /** Bottom navigation. Sub-screens (e.g. Audio) keep their parent tab selected. */
 @Composable
 internal fun BottomBar(route: String, onNavigate: (String) -> Unit) {
     val selectedTab = when (route) {
-        "audio" -> "settings"
+        in SETTINGS_SUBSCREENS -> "settings"
         else -> route
     }
     Column {
@@ -50,7 +56,8 @@ internal fun BottomBar(route: String, onNavigate: (String) -> Unit) {
                     selected = selectedTab == tab.route,
                     onClick = { if (selectedTab != tab.route || route != tab.route) onNavigate(tab.route) },
                     icon = { Icon(tab.icon, contentDescription = null) },
-                    label = { Text(stringResource(tab.label)) },
+                    // The bar has a fixed height: cap label scaling so 200% text doesn't clip (TalkBack still reads it).
+                    label = { CappedFontScale { Text(stringResource(tab.label), maxLines = 1) } },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,
                         selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -64,11 +71,19 @@ internal fun BottomBar(route: String, onNavigate: (String) -> Unit) {
     }
 }
 
+@Composable
+private fun CappedFontScale(max: Float = 1.3f, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, max)), content = content)
+}
+
 @StringRes
 internal fun titleFor(route: String): Int = when (route) {
     "devices" -> R.string.devices_title
     "settings" -> R.string.settings_title
     "audio" -> R.string.audio_title
+    "troubleshoot", "troubleshoot/{topic}" -> R.string.trouble_title
+    "battery" -> R.string.settings_battery
     else -> R.string.app_name
 }
 

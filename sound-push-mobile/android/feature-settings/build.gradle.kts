@@ -19,4 +19,5 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation(project(":core-ui"))
+    testImplementation(libs.junit)
 }

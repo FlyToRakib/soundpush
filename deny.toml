@@ -1,0 +1,61 @@
+# cargo-deny configuration (docs/soundpush-final.md §31 Dependency strategy).
+# Run locally with `cargo deny check`. CI runs it on every push and pull request.
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+# RustSec advisories fail the check. To accept one temporarily, add its ID with a reason and a review date:
+# ignore = [{ id = "RUSTSEC-0000-0000", reason = "not reachable: … (review 2026-12-01)" }]
+ignore = []
+yanked = "warn"
+# Vulnerabilities always fail. "Unmaintained" notices fail only for crates we depend on directly; transitive ones
+# (e.g. the unic-* crates inside Tauri) have no replacement we control and are reviewed when upstream changes.
+unmaintained = "workspace"
+
+[licenses]
+version = 2
+# Licences compatible with GPL-3.0-or-later. GPL-2.0-only and proprietary licences are not allowed.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "GPL-3.0-or-later",
+    "ISC",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0-or-later",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# Workspace crates are GPL-3.0-or-later and not published.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+# Workspace crates use path dependencies without versions; they are not published, so this only warns.
+wildcards = "warn"
+allow-wildcard-paths = true
+# Dependency direction (§11.2): apps depend on the engine, never the other way round.
+deny = [
+    { crate = "sp-engine", wrappers = ["sound-push-desktop", "sp-ffi"] },
+    { crate = "sp-audio-io", wrappers = ["sp-engine", "sound-push-desktop", "sp-ffi"] },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

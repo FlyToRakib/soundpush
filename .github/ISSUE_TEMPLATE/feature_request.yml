@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an idea or an improvement.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        SoundPush aims to stay simple: one clear task per screen, no accounts, no ads, no telemetry.
+        Big changes start as a discussion or a short ADR (docs/adr).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation, not only the solution.
+      placeholder: When I join a call from my laptop, I have to open SoundPush on the phone every time…
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Platforms
+      multiple: true
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Android
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and discussions.
+          required: true

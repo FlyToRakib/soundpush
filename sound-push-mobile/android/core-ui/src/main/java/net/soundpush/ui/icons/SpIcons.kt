@@ -15,8 +15,9 @@ import androidx.compose.ui.unit.dp
  * Android's path parser does not accept the compact SVG flag form and draws broken shapes.
  */
 object SpIcons {
-    private fun icon(name: String, vararg paths: String): ImageVector {
-        val builder = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+    /** [mirror]: flip in right-to-left layouts (directional icons such as arrows and chevrons). */
+    private fun icon(name: String, vararg paths: String, mirror: Boolean = false): ImageVector {
+        val builder = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f, autoMirror = mirror)
         for (d in paths) {
             builder.addPath(
                 pathData = PathParser().parsePathString(d).toNodes(),
@@ -49,7 +50,11 @@ object SpIcons {
             "M18 12h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z",
         )
     }
-    val Back by lazy { icon("back", "M19 12H5", "M12 19l-7-7 7-7") }
+    val Back by lazy { icon("back", "M19 12H5", "M12 19l-7-7 7-7", mirror = true) }
+    val Check by lazy { icon("check", "M5 12.5l4.5 4.5L19 7.5") }
+    val Info by lazy { icon("info", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5", "M12 7.5h.01") }
+    val Bluetooth by lazy { icon("bluetooth", "M7 7l10 10-5 4V3l5 4L7 17") }
+    val Usb by lazy { icon("usb", "M12 3v14", "M9 6l3-3 3 3", "M7 10v2a2 2 0 0 0 2 2h3", "M17 9v3a2 2 0 0 1-2 2h-3", "M12 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4z") }
     val Wifi by lazy { icon("wifi", "M5 12.55a11 11 0 0 1 14.08 0", "M1.42 9a16 16 0 0 1 21.16 0", "M8.53 16.11a6 6 0 0 1 6.95 0", "M12 20h.01") }
     val Audio by lazy { icon("audio", "M4 10v4", "M8 7v10", "M12 4v16", "M16 8v8", "M20 11v2") }
     val Settings by lazy {
@@ -96,7 +101,7 @@ object SpIcons {
             "M18 14h2",
         )
     }
-    val Chevron by lazy { icon("chevron", "M9 6l6 6-6 6") }
+    val Chevron by lazy { icon("chevron", "M9 6l6 6-6 6", mirror = true) }
     val Alert by lazy { icon("alert", "M12 3 22 21H2L12 3z", "M12 10v4", "M12 17.5h.01") }
 
     fun forPlatform(platform: String) = if (platform == "android" || platform == "ios") Phone else Laptop

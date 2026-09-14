@@ -7,22 +7,53 @@
   import Toggle from "../lib/components/Toggle.svelte";
   import { engine } from "../lib/engine/client";
   import type { Theme, Visibility } from "../lib/engine/types";
-  import { t } from "../lib/i18n";
+  import { PSEUDO_LONG, PSEUDO_RTL, availableLanguages, languageName, t } from "../lib/i18n";
+  import { LINKS } from "../lib/links";
   import { store } from "../lib/stores/engine.svelte";
   import { updateSettings } from "../lib/stores/settings";
   import { run, toasts } from "../lib/stores/toast.svelte";
+  import { updater } from "../lib/stores/updater.svelte";
+  import { platform } from "../lib/stores/platform.svelte";
+  import Troubleshooter from "./Troubleshooter.svelte";
 
   const app = $derived(store.state!);
   const s = $derived(app.settings);
   const isMac = $derived(app.local.platform === "macos");
-  let openTip = $state<string | null>(null);
+  /** Launch at login is on here but switched off in the OS (Task Manager / Startup apps). */
+  const startupBlocked = $derived(s.desktop.launchAtLogin && platform.system?.autostartDisabledByOs === true);
 
-  const troubles = ["noDevices", "noSound", "micApps", "crackles"];
+  // Pseudo-locales appear in development builds, or once chosen (e.g. set by a tester).
+  const languages = $derived([
+    { value: "system", label: t("theme.system") },
+    ...availableLanguages(import.meta.env.DEV || s.language === PSEUDO_LONG || s.language === PSEUDO_RTL).map(
+      (tag) => ({ value: tag, label: languageName(tag) }),
+    ),
+  ]);
+
+  const updateText = $derived.by(() => {
+    if (updater.errorKey) return t(updater.errorKey);
+    switch (updater.status) {
+      case "checking":
+        return t("update.checking");
+      case "upToDate":
+        return t("update.upToDate");
+      case "available":
+        return t("update.available", updater.version ?? "");
+      case "downloading":
+        return updater.percent === null ? t("update.downloadingUnknown") : t("update.downloading", `${updater.percent}%`);
+      case "ready":
+        return t("update.ready", updater.version ?? "");
+      default:
+        return "";
+    }
+  });
 
   async function exportDiagnostics() {
     const path = await run(engine.exportDiagnostics());
     if (path) toasts.show(t("settings.exported", path));
   }
+
+  const open = (url: string) => run(engine.openUrl(url));
 </script>
 
 <div class="page stack">
@@ -53,15 +84,18 @@
       <Select
         value={s.language}
         label={t("settings.language")}
-        options={[
-          { value: "system", label: t("theme.system") },
-          { value: "en", label: "English" },
-        ]}
+        options={languages}
         onchange={(v) => updateSettings((x) => (x.language = v))}
       />
     </SettingRow>
-    <SettingRow label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}>
-      <Toggle checked={s.desktop.launchAtLogin} label={t("settings.launchAtLogin")}
+    <SettingRow
+      label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
+      description={startupBlocked ? t("settings.launchAtLogin.disabledByOs") : undefined}
+    >
+      {#if startupBlocked}
+        <Button variant="ghost" onclick={() => run(engine.openSystemSettings("startup"))}>{t("common.openSettings")}</Button>
+      {/if}
+      <Toggle checked={s.desktop.launchAtLogin} label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
         onchange={(v) => updateSettings((x) => (x.desktop.launchAtLogin = v))} />
     </SettingRow>
     <SettingRow label={t("settings.startMinimized")}>
@@ -75,6 +109,9 @@
     <SettingRow label={t("settings.preventSleep")}>
       <Toggle checked={s.desktop.preventSleepWhileStreaming} label={t("settings.preventSleep")}
         onchange={(v) => updateSettings((x) => (x.desktop.preventSleepWhileStreaming = v))} />
+    </SettingRow>
+    <SettingRow label={t("settings.audioCues")} description={t("settings.audioCues.desc")}>
+      <Toggle checked={s.audioCues} label={t("settings.audioCues")} onchange={(v) => updateSettings((x) => (x.audioCues = v))} />
     </SettingRow>
   </Card>
 
@@ -94,18 +131,14 @@
   </Card>
 
   <Card title={t("settings.help")}>
-    <div class="troubles">
-      {#each troubles as id (id)}
-        <button class="trouble" aria-expanded={openTip === id} onclick={() => (openTip = openTip === id ? null : id)}>
-          {t(`trouble.${id}`)}
-        </button>
-        {#if openTip === id}<p class="caption tip">{t(`trouble.${id}.body`)}</p>{/if}
-      {/each}
-    </div>
-    <div class="row">
+    <Troubleshooter />
+    <div class="row wrap">
       <Button onclick={exportDiagnostics}>{t("settings.export")}</Button>
       <Button variant="ghost" onclick={() => run(engine.openLogsFolder())}>{t("settings.openLogs")}</Button>
+      <Button variant="ghost" onclick={() => open(LINKS.userGuide)}>{t("settings.userGuide")}</Button>
+      <Button variant="ghost" onclick={() => open(LINKS.reportBug)}>{t("settings.reportBug")}</Button>
     </div>
+    <p class="caption">{t("settings.shortcuts", isMac ? "⌘" : "Ctrl")}</p>
   </Card>
 
   <Card title={t("settings.about")}>
@@ -113,6 +146,27 @@
       <span class="caption code">{app.local.displayCode}</span>
     </SettingRow>
     <p class="caption">{t("settings.version", app.local.appVersion)} · {t("settings.license")}</p>
+
+    <SettingRow label={t("update.auto")} description={t("update.auto.desc")}>
+      <Toggle checked={s.checkForUpdates} label={t("update.auto")}
+        onchange={(v) => updateSettings((x) => (x.checkForUpdates = v))} />
+    </SettingRow>
+    <div class="row wrap">
+      <p class="caption grow" role="status">{updateText}</p>
+      {#if updater.status === "available"}
+        <Button variant="primary" onclick={() => updater.download()}>{t("update.download")}</Button>
+      {:else if updater.status === "ready"}
+        <Button variant="primary" onclick={() => updater.restart()}>{t("update.restart")}</Button>
+      {:else}
+        <Button disabled={updater.busy} onclick={() => updater.check(true)}>{t("update.check")}</Button>
+      {/if}
+    </div>
+
+    <div class="row wrap">
+      <Button variant="ghost" onclick={() => open(LINKS.privacy)}>{t("settings.privacyPolicy")}</Button>
+      <Button variant="ghost" onclick={() => open(LINKS.license)}>{t("settings.viewLicense")}</Button>
+      <Button variant="ghost" onclick={() => open(LINKS.source)}>{t("settings.source")}</Button>
+    </div>
   </Card>
 </div>
 
@@ -129,23 +183,15 @@
     background: var(--color-background);
     user-select: text;
   }
-  .troubles {
-    display: flex;
-    flex-direction: column;
-  }
-  .trouble {
-    text-align: left;
-    padding: 8px 0;
-    border: 0;
-    border-bottom: 1px solid var(--color-border);
-    background: transparent;
-    cursor: pointer;
-  }
-  .tip {
-    padding: 8px 0 12px;
-  }
   .code {
     font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
     user-select: text;
+  }
+  .wrap {
+    flex-wrap: wrap;
+  }
+  .grow {
+    flex: 1;
+    min-width: 200px;
   }
 </style>

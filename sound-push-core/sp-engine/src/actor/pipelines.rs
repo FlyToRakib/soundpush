@@ -13,6 +13,8 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SourceKey {
     System(Option<String>),
+    /// Per-app capture of this computer's audio (one app, or all but one).
+    Application { process: String, exclude: bool },
     Apps,
     Mic(Option<String>),
 }
@@ -32,6 +34,10 @@ impl EncoderKey {
         let source = match source {
             _ if apps => SourceKey::Apps,
             CaptureSource::SystemLoopback(device) => SourceKey::System(device.clone()),
+            CaptureSource::Application { process, exclude } => SourceKey::Application {
+                process: process.clone(),
+                exclude: *exclude,
+            },
             CaptureSource::Input(device) if is_mic => SourceKey::Mic(Some(device.clone())),
             CaptureSource::Input(device) => SourceKey::System(Some(device.clone())),
             CaptureSource::DefaultInput => SourceKey::Mic(None),
@@ -107,7 +113,9 @@ impl Actor {
                     profile.jitter_min_ms,
                     profile.jitter_max_ms,
                 ));
-                c.muted.store(route.muted, Ordering::Relaxed);
+                // The microphone mute also silences a phone microphone arriving here.
+                c.muted
+                    .store(route.muted || (route.kind.is_mic() && self.mic_muted), Ordering::Relaxed);
                 if !route.kind.is_mic() {
                     c.balance.set(self.settings.output.balance);
                     c.mono.store(self.settings.output.mono, Ordering::Relaxed);
@@ -147,7 +155,7 @@ impl Actor {
     fn begin_sender(&mut self, route: &mut Route, profile: StreamProfile) -> Result<bool, EngineError> {
         let apps = route.kind.endpoints().0 == "apps";
         let source = match route.kind.endpoints().0 {
-            "system" => CaptureSource::SystemLoopback(self.settings.capture.system_device.clone()),
+            "system" => self.system_audio_source(),
             "apps" => self.hooks.app_audio_source().ok_or(EngineError::LoopbackUnsupported)?,
             _ => self.mic_source(),
         };
@@ -157,7 +165,7 @@ impl Actor {
         // Per-route controls; the group has its own for gain, noise suppression and mic mute.
         let controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
         controls.redundancy.store(profile.redundancy, Ordering::Relaxed);
-        controls.muted.store(route.muted, Ordering::Relaxed);
+        controls.muted.store(route.muted || (is_mic && self.mic_muted), Ordering::Relaxed);
         route.sender_controls = Some(controls.clone());
         route.encoder = Some(key.clone());
         route.subscription = None;
@@ -321,20 +329,38 @@ impl Actor {
         }
     }
 
-    /// A shared capture failed (device unplugged): every route using it stops.
+    /// A shared capture failed (device unplugged). The group is closed; routes on the system
+    /// default device reopen on the new default, the others stop.
     pub(super) fn on_encoder_failed(&mut self, key: EncoderKey, error: EngineError) {
-        let affected: Vec<(String, DeviceId)> = self
+        self.close_encoder(&key);
+        let affected: Vec<(String, DeviceId, u8)> = self
             .routes
             .iter()
             .filter(|r| r.encoder.as_ref() == Some(&key))
-            .map(|r| (r.key(), r.peer))
+            .map(|r| (r.key(), r.peer, r.id))
             .collect();
-        if let Some((_, peer)) = affected.first() {
-            let name = self.peer_name(peer);
-            self.error_notice(&error, vec![name]);
-        }
-        for (route_id, _) in affected {
+        let mut notified = false;
+        for (route_id, peer, id) in affected {
+            if self.reopen_on_default_device(peer, id) || !self.routes.iter().any(|r| r.key() == route_id) {
+                continue;
+            }
+            if !notified {
+                let name = self.peer_name(&peer);
+                self.error_notice(&error, vec![name]);
+                notified = true;
+            }
             self.stop_route_by_key(&route_id, StopReason::AudioDeviceLost, true);
+        }
+    }
+
+    /// Close a running encoder group now (its device failed or changed). Routes that used it keep
+    /// their stale subscription until they are restarted or stopped.
+    pub(super) fn close_encoder(&mut self, key: &EncoderKey) {
+        // A group still opening opens on the current device anyway: only running ones close.
+        if matches!(self.encoders.get(key), Some(EncoderSlot::Running(_))) {
+            if let Some(EncoderSlot::Running(sender)) = self.encoders.remove(key) {
+                drop_off_actor(sender);
+            }
         }
     }
 

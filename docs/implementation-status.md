@@ -1,6 +1,6 @@
 # Implementation status
 
-Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-13.
+Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-14.
 
 Legend: ✅ done and tested · 🟡 implemented, needs real-device verification · ⏳ not started · ⛔ blocked on something outside the repo
 
@@ -10,8 +10,9 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 |---|---|---|
 | Monorepo, Cargo/npm/Gradle workspaces, `justfile`, CI workflow | ✅ | `.github/workflows/ci.yml` (not yet run on GitHub) |
 | Design tokens → CSS + Compose, WCAG contrast check | ✅ | `design/scripts/generate.mjs` |
-| Wire protocol spec, pairing/security doc, ADRs 0001–0005 | ✅ | `docs/protocol`, `docs/security`, `docs/adr` |
-| Open-source files (LICENSE notice, CONTRIBUTING, CoC, SECURITY) | ✅ | Full GPL text must be pasted into `LICENSE` before release |
+| Wire protocol spec, pairing/security doc, threat model, ADRs 0001–0019 | ✅ | `docs/protocol`, `docs/security`, `docs/adr` (index maps the plan's ADR numbers) |
+| Open-source files (full GPL-3.0 LICENSE, CONTRIBUTING, CoC, SECURITY, PRIVACY, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot) | ✅ | |
+| CI quality gates: fmt, clippy, tests, svelte-check, vitest, `cargo deny`, `npm audit --audit-level=high`, Android unit tests + lint | 🟡 | `ci.yml`; `cargo fmt --check` fails on existing formatting (not yet reformatted) |
 | Fuzz targets (media, control, framing, QR, beacon) | ✅ | `fuzz/` — run with `cargo +nightly fuzz run <target>` |
 
 ## Phase 1 — Core engine + "Listen to PC on phone"
@@ -26,6 +27,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | `sp-audio-io` (trait, cpal backend, null backend, converters) | 🟡 | unit-tested; device paths need hardware |
 | `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | 13 tests incl. two-engine pairing → audio → prompt → stop → forget → restart-reconnect |
 | Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, 9 UI tests |
+| Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`); speakers are not muted while sending on PulseAudio (its monitors follow the sink mute) |
 | Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test |
 
 ## Phase 2 — Microphone & headset
@@ -38,10 +40,11 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | "Ask" permission prompt for microphone | ✅ | tested end-to-end |
 | Headset mode (both routes in one action) | 🟡 | desktop + Android home task |
 | Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
-| Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | ⏳ | replaces VB-CABLE once Microsoft-signed |
+| Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | 🟡 | `sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT: "SoundPush Microphone Feed" → "SoundPush Microphone"); x64 builds locally with `/W4 /WX /analyze`, infverif, inf2cat and ApiValidator clean; CI builds x64 + ARM64 and test-signs (`windows-driver.yml`). Not yet installed on a test-signing PC. Not used by the app: VB-CABLE stays active until attestation signing |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
-| Linux PipeWire virtual source created by the app | ⏳ | |
-| Push-to-talk / mute global hotkey | ⏳ | setting exists; tray mute works |
+| Linux virtual microphone created by the app (PipeWire/PulseAudio null sink + remap source) | 🟡 | `virtual_mic.rs`; tested against PulseAudio in a container (load, audio, unload) and PipeWire (load, drop-in restore); PipeWire audio needs a desktop session. See [virtual-microphone.md](virtual-microphone.md) |
+| Push-to-talk / mute global hotkey | 🟡 | `src-tauri/src/hotkeys.rs` (global-shortcut plugin), recorder on the Audio page, conflict errors, tray check mark follows the engine's `micMuted`; mute also silences the phone mic feeding the virtual mic |
+| Auto-start phone mic when an app opens the virtual mic | 🟡 | `desktop.autoStartMic`; `PlatformHooks::virtual_mic_in_use` (Windows: active sessions on "CABLE Output"; macOS: `DeviceIsRunningSomewhere`; Linux: recording streams on the SoundPush source); engine `actor/local_audio.rs` starts the last mic phone and stops it 15 s after the app lets go |
 
 ## Phase 3 — Parity completion
 
@@ -57,14 +60,21 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Custom bitrate steps incl. AudioRelay's | ✅ | |
 | USB tethering | 🟡 | works as IP network |
 | USB via ADB (TLS-over-TCP transport) | ⏳ | ADR-0005 |
-| Windows per-app capture, PipeWire app capture | ⏳ | ADR-0002 |
+| Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
+| PipeWire app capture | ⏳ | ADR-0002. On Linux it means moving the app's stream to a private null sink and recording its monitor; `CaptureSource::Application` exists (Windows) but has no Linux implementation yet |
 | Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
-| Media Feature Pack detection (Windows N) | ⏳ | |
-| Diagnostics export, troubleshooter tips, logs | ✅ (desktop) / 🟡 (Android tips only) | |
-| i18n infrastructure (English) | ✅ | translations via community later |
-| Accessibility pass with screen readers | ⏳ | components are labelled; audit pending |
+| Media Feature Pack detection (Windows N) | 🟡 | `src-tauri/src/system.rs` (missing `mfplat.dll`), Home banner → Optional features |
+| Windows Firewall / Public network fix | 🟡 | `src-tauri/src/network.rs`: firewall policy + network category read as a normal user; "Allow SoundPush" runs `netsh` through UAC (UDP, this exe, private/domain; public only if chosen); the uninstaller removes the rule with one UAC prompt (`windows/hooks.nsh`) |
+| Audio device changes (follow default, device lost) | 🟡 | `src-tauri/src/device_watch.rs` (`IMMNotificationClient`, Core Audio listeners) → `EngineHandle::audio_devices_changed`; routes on the default device reopen, pinned devices report lost |
+| Audio cues | 🟡 | `src-tauri/src/cues.rs`, generated tones, `settings.audioCues` |
+| Diagnostics export, guided troubleshooter, logs | ✅ (desktop) / 🟡 (Android tips only) | desktop troubleshooter runs checks (firewall, network profile, driver, devices, permissions, Bluetooth) with fix buttons |
+| macOS permissions (microphone, System Audio Recording) | 🟡 | `src-tauri/src/macos.rs`: status without prompting, deep links to System Settings. Not yet compiled on macOS |
+| Windows ARM64 installer | 🟡 | `windows-build.yml` matrix, artifact `SoundPush-Windows-arm64` (cross-compiled, not yet run) |
+| i18n infrastructure (English; locale files, plurals, Intl formats, RTL, pseudo-locales en-XA/ar-XB) | ✅ | `docs/translating.md`; translations via community later |
+| Accessibility pass (desktop: keyboard, focus, dialogs, live regions, reduced motion, high contrast, text zoom) | 🟡 | done in code; screen-reader test on NVDA/VoiceOver/Orca and external audit pending |
+| Help/About (user guide, privacy, license, report a problem, logs) | ✅ desktop / ✅ Android | |
 
 ## Phase 4 — macOS parity
 
@@ -80,4 +90,6 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 |---|---|
 | Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices) |
 | External security review | ⏳ |
-| Installers (NSIS/deb/rpm/AppImage/DMG), updater signing, store listings | ⛔ (signing keys/accounts) |
+| Release workflow: NSIS, universal DMG, deb/rpm/AppImage, APK, SHA256SUMS, CycloneDX SBOMs, draft GitHub Release | 🟡 (`release.yml`, not yet run on GitHub) |
+| Desktop auto-update signed with a free minisign key; Android update check against GitHub Releases | 🟡 (needs the `TAURI_SIGNING_*` secrets and a first published release) |
+| Paid platform signing (Authenticode, Developer ID + notarisation, Android release key), store listings | ⛔ (certificates/accounts; steps in `docs/release-signing.md`) |

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { t } from "../i18n";
   import Button from "./Button.svelte";
 
   let {
@@ -9,17 +10,25 @@
     actions,
   }: { title: string; onclose?: () => void; children: Snippet; actions?: Snippet } = $props();
 
+  const titleId = $props.id();
   let dialog: HTMLDialogElement;
   $effect(() => {
+    // showModal() makes the rest of the window inert, so focus stays inside the dialog.
+    // Focus goes back to whatever opened it when the dialog closes.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog.showModal();
-    return () => dialog.close();
+    return () => {
+      dialog.close();
+      if (opener?.isConnected) opener.focus();
+    };
   });
 </script>
 
-<dialog bind:this={dialog} aria-label={title} oncancel={(e) => { e.preventDefault(); onclose?.(); }}>
+<!-- Escape fires "cancel": it closes dialogs that can be closed and is ignored by ones that need an answer. -->
+<dialog bind:this={dialog} aria-labelledby={titleId} oncancel={(e) => { e.preventDefault(); onclose?.(); }}>
   <header>
-    <h1>{title}</h1>
-    {#if onclose}<Button variant="ghost" icon="close" label="Close" onclick={onclose} />{/if}
+    <h1 id={titleId}>{title}</h1>
+    {#if onclose}<Button variant="ghost" icon="close" label={t("common.close")} onclick={onclose} />{/if}
   </header>
   <div class="body">{@render children()}</div>
   {#if actions}<footer>{@render actions()}</footer>{/if}
@@ -51,6 +60,7 @@
   }
   footer {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--space-sm);
     margin-top: var(--space-lg);

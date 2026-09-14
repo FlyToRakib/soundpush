@@ -273,4 +273,5 @@ data class Settings(
     val audioCues: Boolean = false,
     /** Keyed by device id; kept here so settings written from this app don't drop profiles. */
     val deviceProfiles: Map<String, DeviceProfile> = emptyMap(),
+    val checkForUpdates: Boolean = true,
 )

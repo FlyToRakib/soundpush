@@ -191,7 +191,7 @@
     border-radius: var(--radius-control);
     background: transparent;
     cursor: pointer;
-    text-align: left;
+    text-align: start;
   }
   .peer:hover,
   .peer[aria-current="true"] {

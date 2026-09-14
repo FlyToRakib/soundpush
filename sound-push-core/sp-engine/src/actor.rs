@@ -44,6 +44,7 @@ use crate::{EngineConfig, EngineError};
 mod network_test;
 mod pipelines;
 mod profiles;
+mod local_audio;
 
 type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
 
@@ -81,6 +82,7 @@ pub(crate) enum Command {
     SetMicMuted { muted: bool },
     SetMicMonitor { enabled: bool },
     RefreshAudioDevices,
+    AudioDevicesChanged { default_input: bool, default_output: bool },
     UpdateSettings { settings: Settings, reply: Reply<Settings> },
     DismissNotice { id: u64 },
     NetworkChanged,
@@ -261,6 +263,7 @@ pub(crate) struct Actor {
     local_addrs_at: Instant,
     last_publish: Instant,
     trust_flushed_at: Instant,
+    local_audio: local_audio::LocalAudio,
 }
 
 pub(crate) async fn spawn(
@@ -353,6 +356,7 @@ pub(crate) async fn spawn(
         local_addrs_at: Instant::now(),
         last_publish: Instant::now(),
         trust_flushed_at: Instant::now(),
+        local_audio: local_audio::LocalAudio::default(),
     };
     actor.refresh_local_addresses();
     if identity_reset {
@@ -612,6 +616,11 @@ impl Actor {
     }
 
     fn error_notice(&mut self, error: &EngineError, args: Vec<String>) {
+        // When the firewall blocks incoming connections, that is the fix to offer.
+        if matches!(error, EngineError::Unreachable | EngineError::NetworkBlocked) && self.hooks.inbound_blocked() {
+            let error = EngineError::FirewallBlocked;
+            return self.notice(error.key(), args, error.severity(), Some(&error));
+        }
         self.notice(error.key(), args, error.severity(), Some(error));
     }
 
@@ -843,13 +852,16 @@ impl Actor {
                 }
             }
             Command::SetRouteMuted { route_id, muted } => {
+                let mic_muted = self.mic_muted;
                 if let Some(r) = self.routes.iter_mut().find(|r| r.key() == route_id) {
                     r.muted = muted;
+                    // The microphone mute keeps microphone routes silent whatever the route says.
+                    let silent = muted || (r.kind.is_mic() && mic_muted);
                     if let Some(c) = &r.receiver_controls {
-                        c.muted.store(muted, Ordering::Relaxed);
+                        c.muted.store(silent, Ordering::Relaxed);
                     }
                     if let Some(c) = &r.sender_controls {
-                        c.muted.store(muted, Ordering::Relaxed);
+                        c.muted.store(silent, Ordering::Relaxed);
                     }
                     if r.receiver_controls.is_none() {
                         if let Some(s) = self.sessions.get(&r.peer) {
@@ -891,12 +903,13 @@ impl Actor {
                 accept,
                 remember,
             } => self.respond_request(request_id, accept, remember),
-            Command::SetMicMuted { muted } => {
-                self.mic_muted = muted;
-                self.update_mic_groups();
-            }
+            Command::SetMicMuted { muted } => self.set_mic_muted(muted),
             Command::SetMicMonitor { enabled } => self.set_monitor(enabled),
             Command::RefreshAudioDevices => self.refresh_audio_devices(),
+            Command::AudioDevicesChanged {
+                default_input,
+                default_output,
+            } => self.on_audio_devices_changed(default_input, default_output),
             Command::UpdateSettings { mut settings, reply } => {
                 settings.sanitize();
                 if settings.device_name.is_empty() {
@@ -1212,6 +1225,9 @@ impl Actor {
                 self.discovered.remove(&id);
             }
             Internal::AudioFailed { peer, route, error } => {
+                if self.reopen_on_default_device(peer, route) {
+                    return;
+                }
                 let key = route_key(&peer, route);
                 let name = self.peer_name(&peer);
                 self.error_notice(&error, vec![name]);
@@ -2152,6 +2168,8 @@ impl Actor {
             self.update_discovery();
         }
 
+        self.check_virtual_mic_use();
+
         // Pending prompts expire.
         let expired_requests: Vec<u64> = self.requests.iter().filter(|(_, r)| now > r.expires).map(|(k, _)| *k).collect();
         for id in expired_requests {
@@ -2375,6 +2393,7 @@ impl Actor {
             audio_devices: self.audio_devices.clone(),
             mic_level_db,
             network_tests: self.network_test_views(),
+            mic_muted: self.mic_muted,
         };
         let _ = self.state_tx.send(Arc::new(state));
     }

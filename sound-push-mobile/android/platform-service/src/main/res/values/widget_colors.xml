@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget colours from design/tokens (light). RemoteViews cannot read the Compose theme. -->
+<resources>
+    <color name="sp_widget_background">#FFFFFFFF</color>
+    <color name="sp_widget_border">#FFE2E2E7</color>
+    <color name="sp_widget_text">#FF16161A</color>
+    <color name="sp_widget_text_secondary">#FF5C5C66</color>
+    <color name="sp_widget_accent">#FF2860E6</color>
+</resources>

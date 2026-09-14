@@ -110,17 +110,24 @@ pub fn update(app: &AppHandle, state: &EngineState) {
         1 => format!("Streaming with {}", active[0].peer_name),
         n => format!("{n} streams active"),
     };
-    let summary = if mic_live { format!("● Microphone live · {summary}") } else { summary };
+    let summary = match (mic_live, state.mic_muted) {
+        (true, true) => format!("Microphone muted · {summary}"),
+        (true, false) => format!("● Microphone live · {summary}"),
+        _ => summary,
+    };
 
+    // Mute can change from a shortcut or the window, so the check mark follows the engine.
+    let key = format!("{summary}|{}|{}", state.mic_muted, mic_live);
     let Ok(mut last) = items.last_summary.lock() else { return };
-    if *last == summary {
+    if *last == key {
         return;
     }
     let _ = items.status.set_text(&summary);
     let _ = items.stop_all.set_enabled(!active.is_empty());
-    let _ = items.mute.set_enabled(mic_live);
+    let _ = items.mute.set_checked(state.mic_muted);
+    let _ = items.mute.set_enabled(mic_live || state.mic_muted);
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(format!("SoundPush — {summary}")));
     }
-    *last = summary;
+    *last = key;
 }

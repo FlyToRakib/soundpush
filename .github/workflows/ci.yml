@@ -2,12 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, soundpush-v0.1]
   pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,11 +29,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sound-push-desktop/ui/package-lock.json
       - name: Linux audio and webview dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libdbus-1-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libasound2-dev libpulse-dev libdbus-1-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Build UI (embedded by the desktop crate)
         run: |
           npm --prefix sound-push-desktop/ui ci
@@ -52,7 +60,20 @@ jobs:
       - run: node design/scripts/generate.mjs
       - run: npm --prefix sound-push-desktop/ui ci
       - run: npm --prefix sound-push-desktop/ui run check
+      - run: npm --prefix sound-push-desktop/ui test
       - run: npm --prefix sound-push-desktop/ui run build
+      - name: npm audit (high and critical advisories)
+        run: npm --prefix sound-push-desktop/ui audit --audit-level=high --omit=dev
+
+  dependencies:
+    name: Rust dependencies (licences, advisories, bans)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # deny.toml: GPL-3.0-compatible licences, RustSec advisories, dependency direction, crates.io only.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
 
   android:
     name: Android
@@ -68,6 +89,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
       - run: sdkmanager "ndk;27.2.12479018"
       - run: cargo install cargo-ndk --locked
       - name: Kotlin bindings and native libraries
@@ -75,5 +97,5 @@ jobs:
           cargo build -p sp-ffi
           cargo run -q -p sp-ffi --bin uniffi-bindgen -- generate --library target/debug/libsoundpush_ffi.so --language kotlin --out-dir sound-push-mobile/android/core-engine/src/main/java --no-format
           ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 26 -o sound-push-mobile/android/core-engine/src/main/jniLibs build -p sp-ffi --release
-      - run: ./gradlew assembleDebug lint
+      - run: ./gradlew assembleDebug testDebugUnitTest lint --console=plain
         working-directory: sound-push-mobile/android

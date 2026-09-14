@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget colours from design/tokens (dark). The play/stop glyph stays white on the accent for contrast. -->
+<resources>
+    <color name="sp_widget_background">#FF18181C</color>
+    <color name="sp_widget_border">#FF2C2C33</color>
+    <color name="sp_widget_text">#FFF2F2F5</color>
+    <color name="sp_widget_text_secondary">#FFA3A3AD</color>
+    <color name="sp_widget_accent">#FF2860E6</color>
+</resources>

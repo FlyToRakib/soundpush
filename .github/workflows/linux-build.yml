@@ -1,0 +1,75 @@
+name: Linux build
+
+# Builds the SoundPush desktop app for Linux (x64) as .deb, .rpm and AppImage and uploads them
+# as one artifact. Runs on every push; can also be started from the Actions tab ("Run workflow").
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+
+jobs:
+  linux:
+    name: Linux packages (x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sound-push-desktop/ui/package-lock.json
+
+      # WebKitGTK and the tray for Tauri; ALSA and PulseAudio (also used on PipeWire) for audio;
+      # patchelf, file and xdg-utils for the AppImage.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev pkg-config build-essential patchelf file xdg-utils
+
+      - name: Install UI dependencies and build the UI
+        run: |
+          npm --prefix sound-push-desktop/ui ci
+          npm --prefix sound-push-desktop/ui run build
+
+      # Failures are surfaced as annotations (readable without downloading logs),
+      # and do not block the package build below.
+      - name: Test core and desktop on Linux
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo test -p sp-protocol -p sp-security -p sp-media -p sp-transport -p sp-engine -p sp-audio-io -p sound-push-desktop \
+            --features sp-audio-io/pulse 2>&1 | tee test.log || {
+            grep -E "^error|error\[|panicked|FAILED|^---- " test.log | head -40 | sed 's/^/::error title=Tests::/'
+            exit 1
+          }
+
+      # linuxdeploy runs as an AppImage itself (no FUSE on runners) and its bundled strip fails on
+      # newer toolchains; the release profile already strips the binary.
+      - name: Build packages
+        working-directory: sound-push-desktop
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          NO_STRIP: true
+        run: |
+          set -o pipefail
+          ./ui/node_modules/.bin/tauri build --bundles deb,rpm,appimage 2>&1 | tee ../build.log || {
+            grep -E "^error|error\[| --> |failed to bundle|Error" ../build.log | head -40 | sed 's/^/::error title=Build::/'
+            exit 1
+          }
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundPush-Linux
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error

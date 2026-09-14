@@ -8,11 +8,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import kotlin.math.roundToInt
 import net.soundpush.engine.AudioEffects
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
@@ -28,6 +32,7 @@ import net.soundpush.ui.theme.Tokens
 fun AudioScreen(state: EngineState) {
     val s = state.settings
     val unavailable = stringResource(R.string.effect_unavailable)
+    val output by DeviceStatus.output.collectAsState()
 
     Column(
         Modifier
@@ -47,6 +52,14 @@ fun AudioScreen(state: EngineState) {
                     Choice("stable", stringResource(R.string.latency_stable)),
                 ),
             ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(latency = v)) } }
+            if (output == DeviceStatus.Output.Bluetooth) {
+                Text(
+                    stringResource(R.string.audio_bluetooth_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = Tokens.Space.sm),
+                )
+            }
             Divider()
             SettingChoice(
                 stringResource(R.string.audio_quality),
@@ -99,6 +112,21 @@ fun AudioScreen(state: EngineState) {
             SettingSwitch(stringResource(R.string.audio_pause_on_disconnect), s.output.pauseOnHeadsetDisconnect) { v ->
                 SoundPush.updateSettings { it.copy(output = it.output.copy(pauseOnHeadsetDisconnect = v)) }
             }
+        }
+
+        // Both switches leave the low-latency path for Android's regular player; they apply live.
+        SectionTitle(stringResource(R.string.audio_output_advanced))
+        SpCard {
+            SettingSwitch(
+                stringResource(R.string.audio_compat_output),
+                s.output.compatibilityOutput,
+                stringResource(R.string.audio_compat_output_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(compatibilityOutput = v)) } }
+            SettingSwitch(
+                stringResource(R.string.audio_output_effects),
+                s.output.outputEffects,
+                stringResource(R.string.audio_output_effects_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(outputEffects = v)) } }
         }
 
         SectionTitle(stringResource(R.string.audio_mic))

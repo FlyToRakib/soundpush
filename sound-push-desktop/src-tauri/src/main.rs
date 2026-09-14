@@ -2,8 +2,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod cues;
+mod device_watch;
 mod hooks;
+mod hotkeys;
+#[cfg(target_os = "macos")]
+mod macos;
+mod network;
 mod power;
+mod system;
 mod tray;
 mod usb;
 mod virtual_mic;
@@ -23,6 +30,7 @@ pub struct AppState {
     pub start_error: std::sync::Mutex<Option<String>>,
     pub log_dir: PathBuf,
     pub data_dir: PathBuf,
+    pub hooks: Arc<hooks::DesktopHooks>,
 }
 
 impl AppState {
@@ -67,6 +75,8 @@ pub fn show_main_window(app: &AppHandle) {
         .title("SoundPush")
         .inner_size(1000.0, 700.0)
         .min_inner_size(760.0, 520.0)
+        // Ctrl/Cmd + and − scale the whole UI (text scaling for low vision).
+        .zoom_hotkeys_enabled(true)
         .theme(theme)
         .build()
     {
@@ -98,6 +108,10 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
         .plugin(tauri_plugin_opener::init())
+        // Update manifests are verified against the public key in tauri.conf.json.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(hotkeys::plugin())
         .setup(move |app| {
             let handle = app.handle().clone();
             let hooks = Arc::new(hooks::DesktopHooks::new(handle.clone(), data_dir.clone()));
@@ -106,8 +120,13 @@ fn main() {
                 start_error: std::sync::Mutex::new(None),
                 log_dir: log_dir.clone(),
                 data_dir: data_dir.clone(),
+                hooks: hooks.clone(),
             });
+            app.manage(hotkeys::Hotkeys::default());
             tray::create(app)?;
+            device_watch::start(handle.clone());
+            watch_network(hooks.clone());
+            virtual_mic::restore();
 
             // Show the window right away; the UI displays "Starting…" until the engine is ready.
             let autostarted = std::env::args().any(|a| a == "--autostart");
@@ -191,6 +210,14 @@ fn main() {
             commands::install_virtual_mic,
             commands::uninstall_virtual_mic,
             commands::restart_computer,
+            commands::hotkey_status,
+            commands::set_hotkey,
+            commands::network_status,
+            commands::fix_firewall,
+            commands::system_status,
+            commands::request_microphone,
+            commands::open_system_settings,
+            commands::list_audio_apps,
         ])
         .build(tauri::generate_context!());
 
@@ -242,10 +269,30 @@ fn forward_state(app: AppHandle, engine: EngineHandle, hooks: Arc<hooks::Desktop
         let mut last_autostart = None;
         let mut last_theme = None;
         let mut last_streaming = false;
+        let mut last_hotkeys = None;
+        let mut previous: Option<Arc<EngineState>> = None;
         while rx.changed().await.is_ok() {
             let state = rx.borrow_and_update().clone();
 
             tray::update(&app, &state);
+            if let Some(previous) = &previous
+                && state.settings.audio_cues
+            {
+                cues::play(hooks.backend(), cues::changes(previous, &state));
+            }
+            previous = Some(state.clone());
+
+            // Shortcuts are re-registered only when the saved ones change (see hotkeys::set).
+            let wanted = (
+                state.settings.desktop.mute_hotkey.clone(),
+                state.settings.desktop.push_to_talk_hotkey.clone(),
+            );
+            if last_hotkeys.as_ref() != Some(&wanted) {
+                last_hotkeys = Some(wanted.clone());
+                let handle = app.clone();
+                // Registration waits on the main thread, so it runs off both it and this task.
+                tauri::async_runtime::spawn_blocking(move || hotkeys::apply(&handle, wanted.0.as_deref(), wanted.1.as_deref()));
+            }
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 if let Err(e) = app.emit("engine://state", &*state) {
                     warn!(error = %e, "emit failed");
@@ -278,6 +325,23 @@ fn forward_state(app: AppHandle, engine: EngineHandle, hooks: Arc<hooks::Desktop
             }
         }
     });
+}
+
+/// Re-check the firewall and network profile now and every minute, so connection errors can
+/// point at the firewall fix (`PlatformHooks::inbound_blocked`).
+fn watch_network(hooks: Arc<hooks::DesktopHooks>) {
+    if !cfg!(windows) {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("sp-network-check".into()).spawn(move || {
+        loop {
+            hooks.set_network_status(network::status());
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+    });
+    if let Err(e) = spawned {
+        warn!(error = %e, "could not start network checks");
+    }
 }
 
 fn sync_autostart(app: &AppHandle, enabled: bool) {

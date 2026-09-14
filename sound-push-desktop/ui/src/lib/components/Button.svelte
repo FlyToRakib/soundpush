@@ -7,6 +7,10 @@
     icon,
     disabled = false,
     label,
+    type = "button",
+    expanded,
+    controls,
+    pressed,
     onclick,
     children,
   }: {
@@ -15,12 +19,31 @@
     disabled?: boolean;
     /** Accessible label for icon-only buttons. */
     label?: string;
+    /** "submit" only for the button that sends a form; everything else must not submit by accident. */
+    type?: "button" | "submit";
+    /** For disclosure buttons: whether the section they control is open. */
+    expanded?: boolean;
+    /** Id of the element a disclosure button shows or hides. */
+    controls?: string;
+    /** For toggle buttons: whether they are on. */
+    pressed?: boolean;
     onclick?: (e: MouseEvent) => void;
     children?: Snippet;
   } = $props();
 </script>
 
-<button class="btn {variant}" class:icon-only={!children} {disabled} aria-label={label} title={label} {onclick}>
+<button
+  {type}
+  class="btn {variant}"
+  class:icon-only={!children}
+  {disabled}
+  aria-label={label}
+  aria-expanded={expanded}
+  aria-controls={controls}
+  aria-pressed={pressed}
+  title={label}
+  {onclick}
+>
   {#if icon}<Icon name={icon} size={18} />{/if}
   {#if children}<span>{@render children()}</span>{/if}
 </button>
@@ -71,5 +94,11 @@
   .btn:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+  /* Windows high-contrast themes: keep button edges visible. */
+  @media (forced-colors: active) {
+    .btn {
+      border-color: ButtonText;
+    }
   }
 </style>

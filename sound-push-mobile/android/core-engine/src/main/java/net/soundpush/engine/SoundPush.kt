@@ -45,6 +45,36 @@ object SoundPush {
     val startError: StateFlow<String?> = _startError
     val isStarted get() = ::engine.isInitialized
 
+    @Volatile private var appVersion: String = ""
+    /** Last playback path handed to the native backend (null until the first state). */
+    @Volatile private var platformOutput: Boolean? = null
+
+    /** Remember the app version so any entry point (activity, service, widget, boot) can start the engine. */
+    fun configure(appVersion: String) {
+        this.appVersion = appVersion
+    }
+
+    /**
+     * Start the engine if it isn't running. The engine starts lazily from whatever needs it
+     * (the activity, the streaming service, the widget, "Stay available" after a restart), never
+     * just because the process started for a broadcast.
+     */
+    fun ensureStarted(context: Context) {
+        if (!isStarted) start(context, appVersion)
+    }
+
+    /**
+     * Compatibility output or output audio effects move playback to the platform player
+     * (AudioTrack) so the device's own effects apply; otherwise the low-latency path is used.
+     * Runs on the state thread, so the native call never blocks the UI.
+     */
+    private fun applyPlatformOutput(state: EngineState) {
+        val wanted = state.settings.output.compatibilityOutput || state.settings.output.outputEffects
+        if (platformOutput == wanted) return
+        platformOutput = wanted
+        runCatching { engine.setPlatformOutput(wanted) }.onFailure { Log.w(TAG, "could not switch playback path", it) }
+    }
+
     /**
      * Start the engine on a background thread so the first frame draws immediately
      * (Keystore, native library loading and network setup all take time).
@@ -65,7 +95,10 @@ object SoundPush {
             engine.setListener(object : StateListener {
                 override fun onState(stateJson: String) {
                     runCatching { EngineJson.decodeFromString<EngineState>(stateJson) }
-                        .onSuccess { _state.value = it }
+                        .onSuccess {
+                            applyPlatformOutput(it)
+                            _state.value = it
+                        }
                         .onFailure { Log.e(TAG, "could not decode engine state", it) }
                 }
             })

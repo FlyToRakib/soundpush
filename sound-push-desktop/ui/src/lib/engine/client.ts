@@ -1,6 +1,20 @@
 // Typed client for the Tauri commands exposed by src-tauri/src/commands.rs.
 // Outside Tauri (plain `vite` preview, tests) a mock engine is used instead.
-import type { DeviceProfile, EngineState, NetworkReport, PermissionKind, Policy, RouteKind, Settings } from "./types";
+import type {
+  AudioApps,
+  DeviceProfile,
+  EngineState,
+  HotkeyKind,
+  HotkeyStatus,
+  NetworkReport,
+  NetworkStatus,
+  PermissionKind,
+  Policy,
+  RouteKind,
+  Settings,
+  SettingsTopic,
+  SystemStatus,
+} from "./types";
 import { mockEngine } from "./mock";
 
 type Unlisten = () => void;
@@ -18,7 +32,7 @@ export interface VirtualMicStatus {
   supported: boolean;
   /** Driver files installed; the device may still need a restart (Windows) to appear. */
   installed: boolean;
-  /** "soundpush" = our own driver (macOS), "vbcable" = VB-Audio's VB-CABLE (Windows). */
+  /** "soundpush" = our own (macOS driver, Linux PipeWire/PulseAudio device), "vbcable" = VB-Audio's VB-CABLE (Windows). */
   provider: "soundpush" | "vbcable" | "none";
 }
 
@@ -93,6 +107,16 @@ export const engine = {
   installVirtualMic: () => call<void>("install_virtual_mic"),
   uninstallVirtualMic: () => call<void>("uninstall_virtual_mic"),
   restartComputer: () => call<void>("restart_computer"),
+  listAudioApps: () => call<AudioApps>("list_audio_apps"),
+
+  // desktop platform
+  hotkeyStatus: () => call<HotkeyStatus>("hotkey_status"),
+  setHotkey: (kind: HotkeyKind, accelerator: string | null) => call<void>("set_hotkey", { kind, accelerator }),
+  networkStatus: () => call<NetworkStatus>("network_status"),
+  fixFirewall: (includePublic: boolean) => call<NetworkStatus>("fix_firewall", { includePublic }),
+  systemStatus: () => call<SystemStatus>("system_status"),
+  requestMicrophone: () => call<void>("request_microphone"),
+  openSystemSettings: (topic: SettingsTopic) => call<void>("open_system_settings", { topic }),
 
   // settings & app
   updateSettings: (settings: Settings) => call<Settings>("update_settings", { settings }),

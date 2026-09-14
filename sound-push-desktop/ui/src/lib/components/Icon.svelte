@@ -44,6 +44,7 @@
   stroke-width="1.75"
   stroke-linecap="round"
   stroke-linejoin="round"
+  data-icon={name}
   role={label ? "img" : undefined}
   aria-label={label}
   aria-hidden={label ? undefined : "true"}

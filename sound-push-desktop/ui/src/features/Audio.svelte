@@ -4,7 +4,10 @@
   import Button from "../lib/components/Button.svelte";
   import Card from "../lib/components/Card.svelte";
   import Dialog from "../lib/components/Dialog.svelte";
+  import HotkeyInput from "../lib/components/HotkeyInput.svelte";
+  import { DEFAULT_DEVICE, deviceOptions, isBluetoothOutput } from "../lib/devices";
   import { engine, type VirtualMicStatus } from "../lib/engine/client";
+  import { platform } from "../lib/stores/platform.svelte";
   import { run, toasts } from "../lib/stores/toast.svelte";
   import LevelMeter from "../lib/components/LevelMeter.svelte";
   import Segmented from "../lib/components/Segmented.svelte";
@@ -12,7 +15,7 @@
   import SettingRow from "../lib/components/SettingRow.svelte";
   import Slider from "../lib/components/Slider.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
-  import type { LatencyMode, QualityMode } from "../lib/engine/types";
+  import type { AudioApps, HotkeyKind, LatencyMode, QualityMode } from "../lib/engine/types";
   import { t } from "../lib/i18n";
   import { store } from "../lib/stores/engine.svelte";
   import { updateSettings } from "../lib/stores/settings";
@@ -21,16 +24,66 @@
   const s = $derived(app.settings);
   let advanced = $state(false);
 
-  const DEFAULT = "__default__";
-  const outputs = $derived([
-    { value: DEFAULT, label: t("audio.followDefault") },
-    // Virtual cables are microphone plumbing, not speakers.
-    ...app.audioDevices.filter((d) => !d.isInput && !d.virtualCable).map((d) => ({ value: d.id, label: d.name })),
+  const DEFAULT = DEFAULT_DEVICE;
+  const unavailable = (name: string) => t("audio.deviceUnavailable", name);
+  // Virtual cables are microphone plumbing, not speakers.
+  const speakers = $derived(app.audioDevices.filter((d) => !d.isInput && !d.virtualCable));
+  const sourceOptions = $derived(deviceOptions(speakers, s.capture.systemDevice, t("audio.followDefault"), unavailable));
+  const outputOptions = $derived(deviceOptions(speakers, s.output.device, t("audio.followDefault"), unavailable));
+  const inputs = $derived(
+    deviceOptions(
+      app.audioDevices.filter((d) => d.isInput),
+      s.mic.device,
+      t("audio.followDefault"),
+      unavailable,
+    ),
+  );
+  const isMac = $derived(app.local.platform === "macos");
+  const bluetoothOutput = $derived(
+    platform.system !== null && isBluetoothOutput(s.output.device, platform.system.defaultOutput, platform.system.bluetoothOutputs),
+  );
+  const micPermission = $derived(platform.system?.microphone ?? "unknown");
+
+  /** Apps playing audio, for sending one app (Windows 10 2004+). */
+  const ALL_APPS = "__all__";
+  let apps = $state<AudioApps | null>(null);
+  const appName = (process: string) => process.replace(/\.exe$/i, "");
+  const appOptions = $derived([
+    { value: ALL_APPS, label: t("audio.apps.all") },
+    ...(apps?.apps ?? []).map((a) => ({ value: a.process, label: appName(a.process) })),
+    ...(s.capture.app && !apps?.apps.some((a) => a.process.toLowerCase() === s.capture.app?.toLowerCase())
+      ? [{ value: s.capture.app, label: t("audio.apps.notRunning", appName(s.capture.app)) }]
+      : []),
   ]);
-  const inputs = $derived([
-    { value: DEFAULT, label: t("audio.followDefault") },
-    ...app.audioDevices.filter((d) => d.isInput).map((d) => ({ value: d.id, label: d.name })),
+
+  async function loadApps() {
+    try {
+      apps = await engine.listAudioApps();
+    } catch {
+      apps = null;
+    }
+  }
+
+  const hotkeyRows = $derived([
+    { kind: "mute" as HotkeyKind, label: "audio.muteHotkey", value: s.desktop.muteHotkey },
+    { kind: "pushToTalk" as HotkeyKind, label: "audio.pushToTalkHotkey", value: s.desktop.pushToTalkHotkey },
   ]);
+  let hotkeyErrors = $state<Record<HotkeyKind, string | null>>({ mute: null, pushToTalk: null });
+
+  function hotkeyDescription(kind: HotkeyKind): string {
+    const registered = platform.hotkeys[kind];
+    return hotkeyErrors[kind] ?? (registered ? t(`error.hotkey.${registered}`) : t(`audio.${kind}Hotkey.desc`));
+  }
+
+  async function setHotkey(kind: HotkeyKind, accelerator: string | null) {
+    try {
+      await engine.setHotkey(kind, accelerator);
+      hotkeyErrors[kind] = null;
+    } catch (e) {
+      hotkeyErrors[kind] = t((e as { key?: string }).key ?? "error.hotkey.unavailable");
+    }
+    await platform.refresh();
+  }
   // Only virtual cables can act as a microphone for other apps; real speakers would
   // just play the phone's microphone out loud.
   const cable = navigator.userAgent.includes("Mac")
@@ -46,10 +99,13 @@
     ...(chosenVm && !chosenIsCable ? [{ value: chosenVm, label: t("audio.virtualMic.notCableOption", chosenVm) }] : []),
   ]);
 
-  /** Virtual microphone driver: our own on macOS, VB-CABLE on Windows. */
+  /** Virtual microphone: our own on macOS (driver) and Linux (PipeWire/PulseAudio device), VB-CABLE on Windows. */
   let driver = $state<VirtualMicStatus | null>(null);
+  const isLinux = $derived(app.local.platform === "linux");
   /** i18n key prefix for the driver's texts. */
-  const driverKey = $derived(driver?.provider === "vbcable" ? "audio.virtualMic.vb" : "audio.virtualMic.sp");
+  const driverKey = $derived(
+    driver?.provider === "vbcable" ? "audio.virtualMic.vb" : isLinux ? "audio.virtualMic.linux" : "audio.virtualMic.sp",
+  );
   let installing = $state(false);
   let confirmRestart = $state(false);
 
@@ -85,6 +141,7 @@
   // Pick up virtual microphones installed while the app was running.
   onMount(() => {
     void loadDriver();
+    void loadApps();
     void engine.refreshAudioDevices().catch(() => {});
   });
   const bitrates = [10, 24, 32, 64, 96, 128, 192, 256, 320, 450, 510].map((k) => ({
@@ -155,10 +212,11 @@
       {/if}
     {:else if driver?.supported}
       <div class="vm-setup">
-        <!-- Installed but not detected: Windows needs a restart; macOS usually just a re-check. -->
+        <!-- Installed but not detected: Windows needs a restart; macOS usually just a re-check;
+             Linux loses the device when the sound server restarts, and installing again brings it back. -->
         <p class="muted">{t(`${driverKey}.${driver.installed ? "pending" : "hint"}`)}</p>
         <div class="row">
-          {#if !driver.installed}
+          {#if !driver.installed || isLinux}
             <Button variant="primary" onclick={() => changeDriver(true)}>
               {t(installing ? "audio.virtualMic.installing" : `${driverKey}.install`)}
             </Button>
@@ -186,13 +244,39 @@
         onchange={(v) => updateSettings((x) => (x.desktop.virtualMicDevice = fromSelect(v)))}
       />
     </SettingRow>
+    <SettingRow label={t("audio.virtualMic.autoStart")} description={t("audio.virtualMic.autoStart.desc")}>
+      <Toggle checked={s.desktop.autoStartMic} label={t("audio.virtualMic.autoStart")}
+        onchange={(v) => updateSettings((x) => (x.desktop.autoStartMic = v))} />
+    </SettingRow>
   </Card>
 
   <Card title={t("audio.send")}>
-    <SettingRow label={t("audio.systemSource")}>
-      <Select value={s.capture.systemDevice ?? DEFAULT} label={t("audio.systemSource")} options={outputs}
-        onchange={(v) => updateSettings((x) => (x.capture.systemDevice = fromSelect(v)))} />
-    </SettingRow>
+    {#if apps?.supported}
+      <SettingRow label={t("audio.apps")} description={t("audio.apps.desc")}>
+        <Button variant="ghost" onclick={loadApps}>{t("audio.apps.refresh")}</Button>
+        <Select value={s.capture.app ?? ALL_APPS} label={t("audio.apps")} options={appOptions}
+          onchange={(v) => updateSettings((x) => (x.capture.app = v === ALL_APPS ? null : v))} />
+      </SettingRow>
+      {#if s.capture.app}
+        <SettingRow label={t("audio.apps.mode")}>
+          <Segmented
+            value={s.capture.excludeApp ? "exclude" : "only"}
+            label={t("audio.apps.mode")}
+            options={[
+              { value: "only", label: t("audio.apps.only") },
+              { value: "exclude", label: t("audio.apps.exclude") },
+            ]}
+            onchange={(v) => updateSettings((x) => (x.capture.excludeApp = v === "exclude"))}
+          />
+        </SettingRow>
+      {/if}
+    {/if}
+    {#if !s.capture.app}
+      <SettingRow label={t("audio.systemSource")}>
+        <Select value={s.capture.systemDevice ?? DEFAULT} label={t("audio.systemSource")} options={sourceOptions}
+          onchange={(v) => updateSettings((x) => (x.capture.systemDevice = fromSelect(v)))} />
+      </SettingRow>
+    {/if}
     <SettingRow label={t("audio.muteLocal")}>
       <Toggle checked={s.capture.muteLocalSpeakers} label={t("audio.muteLocal")}
         onchange={(v) => updateSettings((x) => (x.capture.muteLocalSpeakers = v))} />
@@ -200,6 +284,24 @@
   </Card>
 
   <Card title={t("audio.mic")}>
+    {#if micPermission === "denied" || micPermission === "restricted"}
+      <Banner
+        severity="warning"
+        message={t("audio.micDenied")}
+        actionLabel={t("common.openSettings")}
+        onaction={() => run(engine.openSystemSettings("microphone"))}
+      />
+    {:else if micPermission === "notDetermined"}
+      <Banner
+        severity="info"
+        message={t("audio.micAsk")}
+        actionLabel={t("audio.micAllow")}
+        onaction={async () => {
+          await run(engine.requestMicrophone());
+          await platform.refresh();
+        }}
+      />
+    {/if}
     <SettingRow label={t("audio.micDevice")}>
       <Select value={s.mic.device ?? DEFAULT} label={t("audio.micDevice")} options={inputs}
         onchange={(v) => updateSettings((x) => (x.mic.device = fromSelect(v)))} />
@@ -218,11 +320,27 @@
     </SettingRow>
   </Card>
 
+  <Card title={t("audio.hotkeys")} description={t("audio.hotkeys.desc")}>
+    {#each hotkeyRows as row (row.kind)}
+      <SettingRow label={t(row.label)} description={hotkeyDescription(row.kind)}>
+        <HotkeyInput value={row.value} label={t(row.label)} mac={isMac} onchange={(a) => setHotkey(row.kind, a)} />
+      </SettingRow>
+    {/each}
+  </Card>
+
   <Card title={t("audio.playback")}>
     <SettingRow label={t("audio.output")}>
-      <Select value={s.output.device ?? DEFAULT} label={t("audio.output")} options={outputs}
+      <Select value={s.output.device ?? DEFAULT} label={t("audio.output")} options={outputOptions}
         onchange={(v) => updateSettings((x) => (x.output.device = fromSelect(v)))} />
     </SettingRow>
+    {#if bluetoothOutput}
+      <Banner
+        severity="info"
+        message={t("audio.bluetoothHint")}
+        actionLabel={s.stream.latency === "stable" ? undefined : t("trouble.action.setStable")}
+        onaction={() => updateSettings((x) => (x.stream.latency = "stable"))}
+      />
+    {/if}
     <SettingRow label={t("audio.volume")}>
       <Slider value={Math.round(s.output.volume * 100)} min={0} max={200} step={5} label={t("audio.volume")} format={(v) => `${v}%`}
         onchange={(v) => updateSettings((x) => (x.output.volume = v / 100))} />
@@ -231,7 +349,7 @@
     {#if advanced}
       <SettingRow label={t("audio.balance")}>
         <Slider value={Math.round(s.output.balance * 100)} min={-100} max={100} step={5} label={t("audio.balance")}
-          format={(v) => (v === 0 ? "C" : v < 0 ? `L${-v}` : `R${v}`)}
+          format={(v) => (v === 0 ? t("audio.balance.center") : v < 0 ? t("audio.balance.left", -v) : t("audio.balance.right", v))}
           onchange={(v) => updateSettings((x) => (x.output.balance = v / 100))} />
       </SettingRow>
       <SettingRow label={t("audio.mono")}>

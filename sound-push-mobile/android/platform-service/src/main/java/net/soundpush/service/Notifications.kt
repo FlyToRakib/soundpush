@@ -8,11 +8,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.support.v4.media.session.MediaSessionCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.media.app.NotificationCompat.MediaStyle
 import net.soundpush.engine.EngineState
 import net.soundpush.ui.R
+import net.soundpush.ui.components.Labels
+import net.soundpush.service.R as ServiceR
 
 object Notifications {
     const val CHANNEL_STREAMING = "streaming"
@@ -23,6 +27,7 @@ object Notifications {
 
     const val ACTION_STOP_ALL = "net.soundpush.STOP_ALL"
     const val ACTION_TOGGLE_MUTE = "net.soundpush.TOGGLE_MUTE"
+    const val ACTION_TOGGLE_PLAYBACK_MUTE = "net.soundpush.TOGGLE_PLAYBACK_MUTE"
 
     fun ensureChannels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -43,7 +48,7 @@ object Notifications {
         return PendingIntent.getActivity(context, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    private fun serviceAction(context: Context, action: String, code: Int): PendingIntent =
+    fun serviceAction(context: Context, action: String, code: Int): PendingIntent =
         PendingIntent.getService(
             context,
             code,
@@ -51,13 +56,19 @@ object Notifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    fun streaming(context: Context, state: EngineState?, micLive: Boolean) = run {
+    /**
+     * The foreground-service notification. While this phone plays audio it is a media notification
+     * tied to [session], which gives it media controls and, on Android 11+, the system output
+     * switcher. Stop and Mute are always there; the microphone route adds "Microphone in use".
+     */
+    fun streaming(context: Context, state: EngineState?, micLive: Boolean, session: MediaSessionCompat.Token? = null, connecting: Boolean = false) = run {
         val active = state?.routes?.filter { it.status == "active" }.orEmpty()
+        val receiving = state?.routes?.filter { !it.isSending && it.status != "stopped" }.orEmpty()
         val peer = active.firstOrNull()?.peerName ?: state?.connectedPeers?.firstOrNull()?.name ?: ""
-        val title = if (active.isEmpty()) {
-            context.getString(R.string.notif_available)
-        } else {
-            context.getString(R.string.notif_streaming, peer)
+        val title = when {
+            connecting && state?.routes.isNullOrEmpty() -> context.getString(R.string.notif_listen_connecting)
+            active.isEmpty() -> context.getString(R.string.notif_available)
+            else -> context.getString(R.string.notif_streaming, peer)
         }
         val builder = NotificationCompat.Builder(context, CHANNEL_STREAMING)
             .setSmallIcon(R.drawable.ic_notification)
@@ -65,14 +76,47 @@ object Notifications {
             .setContentIntent(openAppIntent(context))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setShowWhen(false)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (active.isNotEmpty()) {
-            builder.addAction(0, context.getString(R.string.route_stop), serviceAction(context, ACTION_STOP_ALL, 1))
+
+        // Every action is shown in the compact media view too (at most three), in the order added.
+        val compact = mutableListOf<Int>()
+        fun action(icon: Int, label: Int, pending: PendingIntent) {
+            compact += compact.size
+            builder.addAction(icon, context.getString(label), pending)
+        }
+        if (session != null && receiving.isNotEmpty()) {
+            val muted = receiving.all { it.muted }
+            builder.setContentText(context.getString(Labels.routeTitle(receiving.first().kind), receiving.first().peerName))
+            action(
+                if (muted) ServiceR.drawable.ic_action_unmute else ServiceR.drawable.ic_action_mute,
+                if (muted) R.string.route_unmute else R.string.route_mute,
+                serviceAction(context, ACTION_TOGGLE_PLAYBACK_MUTE, 3),
+            )
+        }
+        if (active.isNotEmpty() || receiving.isNotEmpty()) {
+            action(ServiceR.drawable.ic_action_stop, R.string.route_stop, serviceAction(context, ACTION_STOP_ALL, 1))
         }
         if (micLive) {
-            builder.setContentText(context.getString(R.string.notif_mic_live))
-            builder.addAction(0, context.getString(R.string.route_mute), serviceAction(context, ACTION_TOGGLE_MUTE, 2))
+            builder.setSubText(context.getString(R.string.notif_mic_live))
+            if (session == null) builder.setContentText(context.getString(R.string.notif_mic_live))
+            val micMuted = state?.routes?.filter { it.isMic && it.isSending }.orEmpty().let { it.isNotEmpty() && it.all { r -> r.muted } }
+            action(
+                ServiceR.drawable.ic_action_mic_off,
+                if (micMuted) R.string.route_unmute_mic else R.string.route_mute_mic,
+                serviceAction(context, ACTION_TOGGLE_MUTE, 2),
+            )
+        }
+        if (session != null && receiving.isNotEmpty()) {
+            builder.setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            builder.setStyle(
+                MediaStyle()
+                    .setMediaSession(session)
+                    .setShowActionsInCompactView(*compact.take(3).toIntArray()),
+            )
+        } else {
+            builder.setCategory(NotificationCompat.CATEGORY_SERVICE)
         }
         builder.build()
     }
@@ -111,5 +155,17 @@ object Notifications {
             .setAutoCancel(true)
             .build()
         post(context, ID_REMINDER, n)
+    }
+
+    /** The widget asked to listen, but no computer connected in time: send the user to the app. */
+    fun listenUnavailable(context: Context) {
+        val n = NotificationCompat.Builder(context, CHANNEL_ATTENTION)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(context.getString(R.string.notif_listen_unavailable))
+            .setContentText(context.getString(R.string.notif_listen_unavailable_body))
+            .setContentIntent(openAppIntent(context))
+            .setAutoCancel(true)
+            .build()
+        post(context, ID_ATTENTION, n)
     }
 }

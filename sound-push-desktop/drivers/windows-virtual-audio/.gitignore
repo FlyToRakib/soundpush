@@ -1,0 +1,14 @@
+# WDK/SDK NuGet packages (restored from packages.config)
+/packages/
+# Build output
+/build/
+/x64/
+/ARM64/
+/src/x64/
+/src/ARM64/
+*.user
+*.vcxproj.user
+.vs/
+# Signing material is generated per build and never committed
+*.pfx
+*.cer

@@ -1,6 +1,7 @@
 //! Desktop implementation of the engine's platform hooks.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -13,9 +14,21 @@ use tracing::warn;
 
 use crate::power::SleepInhibitor;
 
+/// SoundPush's own virtual microphone: the playback side the engine feeds → the recording side
+/// apps pick. Windows (drivers/windows-virtual-audio, test-signed only for now) names endpoints
+/// "<endpoint> (<device>)", kept in sync with its INF strings; Linux uses a null sink feeding a
+/// separate source.
+#[cfg(windows)]
+const OWN_FEED: (&str, Option<&str>) = ("SoundPush Microphone Feed", Some("SoundPush Microphone (SoundPush Virtual Audio)"));
+#[cfg(not(windows))]
+const OWN_FEED: (&str, Option<&str>) = ("SoundPush Microphone Feed", Some("SoundPush Microphone"));
+
 /// Virtual cables in preference order: (part of the playback device name, recording-side
 /// name that apps select as a microphone). `None` when both sides share the device name.
 const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
+    // SoundPush's own virtual microphone (see OWN_FEED). Before the macOS entry, whose name it contains.
+    OWN_FEED,
+    // macOS driver: one device name for both directions.
     ("SoundPush Microphone", None),
     ("CABLE Input", Some("CABLE Output (VB-Audio Virtual Cable)")),
     ("Hi-Fi Cable Input", Some("Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)")),
@@ -50,6 +63,9 @@ pub struct DesktopHooks {
     /// Playback device names and when they were listed.
     outputs_cache: Mutex<(Option<Instant>, Vec<String>)>,
     inhibitor: Mutex<Option<SleepInhibitor>>,
+    /// Last firewall and network profile check (`network.rs`).
+    network: Mutex<crate::network::NetworkStatus>,
+    inbound_blocked: AtomicBool,
 }
 
 impl DesktopHooks {
@@ -68,7 +84,25 @@ impl DesktopHooks {
             backend: Arc::new(CpalBackend::new()),
             outputs_cache: Mutex::new((None, Vec::new())),
             inhibitor: Mutex::new(None),
+            network: Mutex::new(crate::network::NetworkStatus::default()),
+            inbound_blocked: AtomicBool::new(false),
         }
+    }
+
+    pub fn backend(&self) -> Arc<CpalBackend> {
+        self.backend.clone()
+    }
+
+    pub fn set_network_status(&self, status: crate::network::NetworkStatus) {
+        self.inbound_blocked
+            .store(status.firewall_enabled && status.blocked, Ordering::Relaxed);
+        if let Ok(mut current) = self.network.lock() {
+            *current = status;
+        }
+    }
+
+    pub fn network_status(&self) -> crate::network::NetworkStatus {
+        self.network.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
     pub fn set_prevent_sleep(&self, prevent: bool) {
@@ -92,11 +126,15 @@ impl DesktopHooks {
     }
 
     fn detect_virtual_mic(&self) -> Option<String> {
-        let outputs = self.output_names();
-        VIRTUAL_CABLES
-            .iter()
-            .find_map(|(playback, _)| outputs.iter().find(|o| o.contains(playback)).cloned())
+        preferred_virtual_cable(&self.output_names())
     }
+}
+
+/// The playback device of the most preferred virtual cable among `outputs`.
+fn preferred_virtual_cable(outputs: &[String]) -> Option<String> {
+    VIRTUAL_CABLES
+        .iter()
+        .find_map(|(playback, _)| outputs.iter().find(|o| o.contains(playback)).cloned())
 }
 
 impl PlatformHooks for DesktopHooks {
@@ -162,6 +200,34 @@ impl PlatformHooks for DesktopHooks {
             }
         }
         ok
+    }
+
+    fn microphone_permitted(&self) -> bool {
+        !matches!(crate::system::microphone(), "denied" | "restricted")
+    }
+
+    fn virtual_mic_in_use(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            // Recording streams on the SoundPush source (level meters in sound settings excluded).
+            crate::virtual_mic::virtual_mic_in_use()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // The recording side of every virtual cable that is present.
+            let outputs = self.output_names();
+            VIRTUAL_CABLES
+                .iter()
+                .filter_map(|(playback, recording)| {
+                    let output = outputs.iter().find(|o| o.contains(playback))?;
+                    Some(recording.map_or_else(|| output.clone(), str::to_string))
+                })
+                .any(|input| crate::system::capture_device_in_use(&input))
+        }
+    }
+
+    fn inbound_blocked(&self) -> bool {
+        self.inbound_blocked.load(Ordering::Relaxed)
     }
 
     fn keep_alive(&self, _reason: KeepAlive) {
@@ -256,7 +322,34 @@ fn random_key() -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use super::cable_input_name;
+    use super::{cable_input_name, preferred_virtual_cable};
+
+    /// Endpoint names of drivers/windows-virtual-audio ("<endpoint> (<device>)", from its INF).
+    const WINDOWS_FEED: &str = "SoundPush Microphone Feed (SoundPush Virtual Audio)";
+    const WINDOWS_MIC: &str = "SoundPush Microphone (SoundPush Virtual Audio)";
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_soundpush_driver_feeds_its_capture_endpoint() {
+        assert_eq!(cable_input_name(WINDOWS_FEED).as_deref(), Some(WINDOWS_MIC));
+        // The macOS device keeps one name for both sides.
+        assert_eq!(cable_input_name("SoundPush Microphone").as_deref(), Some("SoundPush Microphone"));
+    }
+
+    #[test]
+    fn soundpush_driver_is_preferred_over_vb_cable() {
+        let outputs = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let vb_cable = "CABLE Input (VB-Audio Virtual Cable)";
+        let speakers = "Speakers (Realtek(R) Audio)";
+
+        assert_eq!(
+            preferred_virtual_cable(&outputs(&[speakers, vb_cable, WINDOWS_FEED])).as_deref(),
+            Some(WINDOWS_FEED)
+        );
+        // Without the SoundPush driver, VB-CABLE is used exactly as before.
+        assert_eq!(preferred_virtual_cable(&outputs(&[speakers, vb_cable])).as_deref(), Some(vb_cable));
+        assert_eq!(preferred_virtual_cable(&outputs(&[speakers])), None);
+    }
 
     #[test]
     fn only_virtual_cables_feed_the_virtual_microphone() {
@@ -265,6 +358,14 @@ mod tests {
             Some("CABLE Output (VB-Audio Virtual Cable)")
         );
         assert_eq!(cable_input_name("BlackHole 2ch").as_deref(), Some("BlackHole 2ch"));
+        assert_eq!(cable_input_name("SoundPush Microphone").as_deref(), Some("SoundPush Microphone"));
+        // Linux names (on Windows the feed belongs to SoundPush's own driver instead).
+        #[cfg(not(windows))]
+        assert_eq!(
+            cable_input_name("SoundPush Microphone Feed").as_deref(),
+            Some("SoundPush Microphone")
+        );
+        assert_eq!(cable_input_name("Built-in Audio Analog Stereo"), None);
         assert_eq!(cable_input_name("MacBook Air Speakers"), None);
         assert_eq!(cable_input_name("BenQ EW3270U (NVIDIA High Definition Audio)"), None);
     }

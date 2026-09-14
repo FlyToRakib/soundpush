@@ -23,6 +23,18 @@ Secure pairing, end-to-end encrypted, no accounts, no ads, no telemetry.
 
 The full implementation plan is in [`docs/soundpush-final.md`](docs/soundpush-final.md).
 
+## Using SoundPush
+
+- Download: [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) (with `SHA256SUMS`)
+- [User guide](docs/user-guide.md): install, pairing, every task, virtual microphone per OS, USB, troubleshooting
+- [Privacy policy](PRIVACY.md) · [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md)
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), [architecture decisions](docs/adr/README.md),
+[threat model](docs/security/threat-model.md), [translating](docs/translating.md),
+[release signing](docs/release-signing.md).
+
 ## Building
 
 ```bash
@@ -86,6 +98,44 @@ To build on the Mac itself:
 
 3. The disk image is at `target/release/bundle/dmg/`. The virtual microphone is built in:
    **Audio → Install SoundPush Microphone** (macOS asks for your password).
+
+### Linux desktop app
+
+Easiest: GitHub → **Actions** → **Linux build** → latest run → artifact `SoundPush-Linux` (x86_64):
+
+- Ubuntu, Debian, Linux Mint, Pop!_OS: `sudo apt install ./SoundPush_0.1.0_amd64.deb`
+- Fedora, openSUSE: `sudo dnf install ./SoundPush-0.1.0-1.x86_64.rpm`
+- Other distributions: `chmod +x SoundPush_0.1.0_amd64.AppImage`, then run it.
+
+SoundPush uses PipeWire (the default on current Ubuntu and Fedora) or PulseAudio. The packages
+are built on the GitHub `ubuntu-latest` runner, so they need a distribution at least as new as
+its glibc. The tray icon needs AppIndicator support; on plain GNOME install the
+"AppIndicator and KStatusNotifierItem Support" extension (Ubuntu ships it).
+
+To build on Linux (Ubuntu/Debian):
+
+1. Install the prerequisites (once): [Rust](https://rustup.rs), [Node.js 22](https://nodejs.org), and
+
+   ```bash
+   sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+     libasound2-dev libpulse-dev libdbus-1-dev pkg-config build-essential patchelf file xdg-utils
+   ```
+
+2. Build:
+
+   ```bash
+   git clone https://github.com/FlyToRakib/soundpush.git
+   cd soundpush
+   npm --prefix sound-push-desktop/ui ci
+   cd sound-push-desktop
+   ./ui/node_modules/.bin/tauri build --bundles deb,rpm,appimage
+   ```
+
+3. The packages are in `target/release/bundle/deb/`, `rpm/` and `appimage/`.
+
+Virtual microphone on Linux: **Audio → Install SoundPush Microphone**. No driver or password is
+needed; in Discord, Zoom or Meet choose **SoundPush Microphone**. See
+[`docs/virtual-microphone.md`](docs/virtual-microphone.md).
 
 ## License
 

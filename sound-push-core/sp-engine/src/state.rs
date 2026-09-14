@@ -25,6 +25,8 @@ pub struct EngineState {
     pub mic_level_db: f32,
     /// Running or last network self-test per device.
     pub network_tests: Vec<crate::nettest::NetworkTestView>,
+    /// Microphone mute (tray, global shortcuts): silences every microphone route on this device.
+    pub mic_muted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

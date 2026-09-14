@@ -24,8 +24,13 @@ import net.soundpush.engine.RouteStats
 import net.soundpush.engine.RouteView
 import net.soundpush.engine.Settings
 import net.soundpush.home.HomeScreen
+import net.soundpush.settings.BatteryGuideScreen
 import net.soundpush.settings.SettingsScreen
+import net.soundpush.settings.TroubleshootTopicScreen
+import net.soundpush.settings.TroubleshooterScreen
+import net.soundpush.ui.components.BannerModel
 import net.soundpush.ui.components.ScreenHeader
+import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.SoundPushTheme
 import org.junit.Rule
 import org.junit.Test
@@ -127,4 +132,53 @@ class ScreenshotTest {
     @Test fun audioLight() = capture("audio", "light", "audio") { AudioScreen(connected) }
 
     @Test fun audioDark() = capture("audio", "dark", "audio") { AudioScreen(connected) }
+
+    private val bluetoothBanner = BannerModel(
+        key = "bluetoothLatency",
+        title = "Bluetooth adds delay",
+        message = "Bluetooth headphones and speakers add about 100–300 ms.",
+        actionLabel = "Use Stable",
+        onAction = {},
+        icon = SpIcons.Bluetooth,
+        dismissLabel = "Dismiss",
+        onDismiss = {},
+    )
+
+    @Test fun homeBannersLight() = capture("home-banners", "light", "home") {
+        HomeScreen(connected, onStartRoutes = { _, _ -> }, onPair = {}, onOpenDevices = {}, onShowMessage = {}, banners = listOf(bluetoothBanner))
+    }
+
+    @Test fun troubleshooterLight() = capture("troubleshoot", "light", "troubleshoot") {
+        TroubleshooterScreen(onOpenTopic = {}, onExportDiagnostics = {})
+    }
+
+    @Test fun troubleshootAudioDark() = capture("troubleshoot-audio", "dark", "troubleshoot/{topic}") {
+        TroubleshootTopicScreen("audio", connected, onOpenDevices = {}, onOpenHome = {}, onOpenBatteryGuide = {}, onExportDiagnostics = {})
+    }
+
+    @Test fun batteryGuideLight() = capture("battery", "light", "battery") { BatteryGuideScreen() }
+
+    @Test fun onboardingLight() = captureBare("onboarding", "light") {
+        OnboardingScreen(empty, notificationsEnabled = true, onRequestNotifications = {}, onOpenBatteryGuide = {}, onScan = {}, onEnterAddress = {}, onFinish = {})
+    }
+
+    @Test fun onboardingDark() = captureBare("onboarding", "dark") {
+        OnboardingScreen(empty, notificationsEnabled = true, onRequestNotifications = {}, onOpenBatteryGuide = {}, onScan = {}, onEnterAddress = {}, onFinish = {})
+    }
+
+    /** Largest system font size: nothing may clip. */
+    @Test @Config(qualifiers = "w393dp-h851dp-xxhdpi", fontScale = 2.0f)
+    fun homeConnectedFontScale200() = capture("home-connected-font200", "light", "home", home(connected))
+
+    @Test @Config(qualifiers = "w393dp-h851dp-xxhdpi", fontScale = 2.0f)
+    fun settingsFontScale200() = capture("settings-font200", "light", "settings") { SettingsScreen(connected, onOpenAudio = {}) }
+
+    /** Right-to-left layout (Arabic): mirrored chevrons and back arrow. */
+    @Test @Config(qualifiers = "ar-w393dp-h851dp-xxhdpi")
+    fun homeConnectedRtl() = capture("home-connected-rtl", "light", "home", home(connected))
+
+    private fun captureBare(name: String, theme: String, content: @Composable () -> Unit) {
+        compose.setContent { SoundPushTheme(theme) { content() } }
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/$name-$theme.png")
+    }
 }

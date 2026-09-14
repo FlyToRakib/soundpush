@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/FlyToRakib/soundpush/security/advisories/new
+    about: Please report security problems privately, not as a public issue.
+  - name: Ask a question or get help
+    url: https://github.com/FlyToRakib/soundpush/discussions
+    about: Setup questions and ideas are welcome in Discussions.
+  - name: User guide and troubleshooting
+    url: https://github.com/FlyToRakib/soundpush/blob/HEAD/docs/user-guide.md
+    about: Step-by-step setup for every platform and fixes for common problems.

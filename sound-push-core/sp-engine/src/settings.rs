@@ -193,6 +193,11 @@ pub struct CaptureSettings {
     pub system_device: Option<String>,
     /// Keep the stream at full level while muting local speakers.
     pub mute_local_speakers: bool,
+    /// Send only this app's audio (executable name, e.g. "spotify.exe"); `None` sends everything.
+    /// Windows 10 version 2004 and later.
+    pub app: Option<String>,
+    /// Send everything except `app` instead of only `app`.
+    pub exclude_app: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,6 +211,10 @@ pub struct DesktopSettings {
     pub push_to_talk_hotkey: Option<String>,
     /// Output device used as the virtual microphone feed (compatibility mode).
     pub virtual_mic_device: Option<String>,
+    /// Start the phone microphone when another app opens the virtual microphone.
+    pub auto_start_mic: bool,
+    /// Device the phone microphone was last used with; `auto_start_mic` prefers it.
+    pub last_mic_peer: Option<String>,
 }
 
 impl Default for DesktopSettings {
@@ -218,6 +227,8 @@ impl Default for DesktopSettings {
             mute_hotkey: None,
             push_to_talk_hotkey: None,
             virtual_mic_device: None,
+            auto_start_mic: false,
+            last_mic_peer: None,
         }
     }
 }
@@ -336,6 +347,8 @@ pub struct Settings {
     pub audio_cues: bool,
     /// Per-device stream overrides, keyed by device id (hex).
     pub device_profiles: std::collections::BTreeMap<String, DeviceProfile>,
+    /// Look for a new SoundPush release in the background (GitHub Releases). Never installs by itself.
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -358,6 +371,7 @@ impl Default for Settings {
             dismissed_tips: Vec::new(),
             audio_cues: false,
             device_profiles: std::collections::BTreeMap::new(),
+            check_for_updates: true,
         }
     }
 }
@@ -373,6 +387,7 @@ impl Settings {
         self.stream.opus_bitrate = self.stream.opus_bitrate.clamp(6_000, 510_000);
         self.stream.custom_min_ms = self.stream.custom_min_ms.clamp(5, 500);
         self.stream.custom_max_ms = self.stream.custom_max_ms.clamp(self.stream.custom_min_ms, 1000);
+        self.capture.app = self.capture.app.take().map(|a| a.trim().chars().take(260).collect()).filter(|a: &String| !a.is_empty());
         self.dismissed_tips.truncate(256);
         self.saved_routes.truncate(32);
         self.device_profiles
@@ -448,6 +463,8 @@ mod tests {
         assert!(!recovered);
         assert_eq!(loaded.device_name, "Old");
         assert_eq!(loaded.theme, Theme::System);
+        // Files written before the update check existed keep it on.
+        assert!(loaded.check_for_updates);
     }
 
     #[test]
