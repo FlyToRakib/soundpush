@@ -27,7 +27,8 @@ pub struct NetworkStatus {
     pub allowed_on_public: bool,
 }
 
-/// Name of the inbound rule SoundPush adds.
+/// Name of the inbound rule SoundPush adds (Windows Firewall only).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const RULE_NAME: &str = "SoundPush";
 
 pub fn status() -> NetworkStatus {

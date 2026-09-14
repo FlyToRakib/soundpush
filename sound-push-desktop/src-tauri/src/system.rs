@@ -72,6 +72,8 @@ fn default_output() -> Option<String> {
 }
 
 /// Whether an app other than SoundPush records from the capture device `input` right now.
+/// Linux asks its sound server instead (`virtual_mic::virtual_mic_in_use`).
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn capture_device_in_use(input: &str) -> bool {
     #[cfg(windows)]
     return windows::capture_device_in_use(input);

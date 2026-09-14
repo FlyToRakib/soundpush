@@ -25,6 +25,8 @@ pub struct Change {
 }
 
 impl Change {
+    /// The device list changed; neither default did. Sent by the Windows and macOS watchers.
+    #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
     pub const LIST: Self = Self { default_input: false, default_output: false };
 
     fn merge(&mut self, other: Self) {
