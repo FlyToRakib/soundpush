@@ -326,6 +326,7 @@ mod tests {
 
     /// Endpoint names of drivers/windows-virtual-audio ("<endpoint> (<device>)", from its INF).
     const WINDOWS_FEED: &str = "SoundPush Microphone Feed (SoundPush Virtual Audio)";
+    #[cfg(windows)]
     const WINDOWS_MIC: &str = "SoundPush Microphone (SoundPush Virtual Audio)";
 
     #[cfg(windows)]
