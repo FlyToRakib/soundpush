@@ -42,3 +42,5 @@ sound-push-mobile/android/core-engine/src/main/java/uniffi/
 # VB-CABLE package downloaded at build time (sound-push-desktop/drivers/vbcable/fetch.sh)
 sound-push-desktop/drivers/vbcable/package/
 sound-push-desktop/drivers/vbcable/*.zip
+# Shared debug signing key (not a secret) so every build updates an installed debug build.
+!sound-push-mobile/android/debug.keystore
