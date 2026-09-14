@@ -209,7 +209,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: sdkmanager "ndk;27.2.12479018"
       - run: cargo install cargo-ndk --locked
       # The host build of sp-ffi (needed to generate the Kotlin bindings) links cpal, whose Linux
