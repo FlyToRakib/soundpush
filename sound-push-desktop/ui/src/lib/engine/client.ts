@@ -32,6 +32,16 @@ export async function onState(handler: (s: EngineState) => void): Promise<Unlist
   return unlisten;
 }
 
+/** Why the engine could not start. Also reports a failure that happened before the UI loaded. */
+export async function onStartError(handler: (message: string) => void): Promise<Unlisten> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<string>("engine://error", (e) => handler(e.payload));
+  const earlier = await call<string | null>("get_start_error");
+  if (earlier) handler(earlier);
+  return unlisten;
+}
+
 export const engine = {
   // pairing
   startPairing: () => call<string>("start_pairing"),

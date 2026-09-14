@@ -199,6 +199,7 @@ if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne '{PACKAGE_SHA256
 Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
 $setup = if ($env:PROCESSOR_ARCHITECTURE -eq 'x86') {{ 'VBCABLE_Setup.exe' }} else {{ 'VBCABLE_Setup_x64.exe' }}
 Start-Process -FilePath (Join-Path $dir $setup) -WorkingDirectory $dir -Verb RunAs -Wait
+Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 "#
         );
         let output = Command::new("powershell.exe")
@@ -207,7 +208,9 @@ Start-Process -FilePath (Join-Path $dir $setup) -WorkingDirectory $dir -Verb Run
             .output()
             .map_err(|e| e.to_string())?;
         if output.status.success() {
-            return Ok(());
+            // The setup window closed. Only the driver file proves "Install Driver" was clicked;
+            // closing the window without it is a choice, reported like a declined prompt.
+            return if installed() { Ok(()) } else { Err("cancelled".into()) };
         }
         let stderr = String::from_utf8_lossy(&output.stderr);
         // Declining the UAC prompt: "The operation was canceled by the user."

@@ -1,16 +1,19 @@
 // Reactive engine state shared by all screens (Svelte 5 runes).
-import { onState } from "../engine/client";
+import { onStartError, onState } from "../engine/client";
 import type { EngineState, PeerView, RouteKind } from "../engine/types";
 import { applyTheme } from "../theme/theme";
 
 class EngineStore {
   state = $state<EngineState | null>(null);
+  /** Set when the engine failed to start; the app shows it instead of "Starting…". */
+  startError = $state<string | null>(null);
 
   constructor() {
     void onState((s) => {
       this.state = s;
       applyTheme(s.settings.theme);
     });
+    void onStartError((message) => (this.startError = message));
   }
 
   get trustedPeers(): PeerView[] {

@@ -31,9 +31,14 @@
     if (store.trustedPeers.length > startTrusted) onclose();
   });
 
-  // Regenerate the code when it expires while the dialog is open.
+  // Regenerate the code when it expires while the dialog is open: one attempt per few seconds,
+  // so a failing engine is not asked again on every tick.
+  let lastRenew = 0;
   $effect(() => {
-    if (pairing && !pairing.qrUri && remaining === 0) void run(engine.startPairing());
+    if (pairing && !pairing.qrUri && remaining === 0 && now - lastRenew > 5) {
+      lastRenew = now;
+      void run(engine.startPairing());
+    }
   });
 
   async function connectManual(e: SubmitEvent) {

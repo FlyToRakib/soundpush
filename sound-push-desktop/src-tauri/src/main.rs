@@ -18,6 +18,8 @@ use tracing::{error, info, warn};
 pub struct AppState {
     /// Set once the engine has started (in the background, so the window never waits on it).
     pub engine: std::sync::OnceLock<EngineHandle>,
+    /// Why the engine could not start; the UI shows it instead of "Starting…" forever.
+    pub start_error: std::sync::Mutex<Option<String>>,
     pub log_dir: PathBuf,
     pub data_dir: PathBuf,
 }
@@ -97,6 +99,7 @@ fn main() {
             let hooks = Arc::new(hooks::DesktopHooks::new(handle.clone(), data_dir.clone()));
             app.manage(AppState {
                 engine: std::sync::OnceLock::new(),
+                start_error: std::sync::Mutex::new(None),
                 log_dir: log_dir.clone(),
                 data_dir: data_dir.clone(),
             });
@@ -131,7 +134,14 @@ fn main() {
                         }
                         Err(e) => {
                             error!(error = %e, "engine failed to start");
+                            if let Some(state) = handle.try_state::<AppState>()
+                                && let Ok(mut slot) = state.start_error.lock()
+                            {
+                                *slot = Some(e.to_string());
+                            }
                             let _ = handle.emit("engine://error", e.to_string());
+                            // Autostarted in the tray: a failure must not stay invisible.
+                            show_main_window(&handle);
                         }
                     }
                 })?;
@@ -164,6 +174,7 @@ fn main() {
             commands::refresh_audio_devices,
             commands::update_settings,
             commands::dismiss_notice,
+            commands::get_start_error,
             commands::export_diagnostics,
             commands::open_logs_folder,
             commands::open_url,
@@ -188,6 +199,13 @@ fn main() {
         RunEvent::ExitRequested { api, code, .. } => {
             if code.is_none() {
                 api.prevent_exit();
+            }
+        }
+        // Tauri ends the process right after this without dropping managed state, so the engine
+        // must stop here: unmute the speakers, tell peers, release sleep prevention.
+        RunEvent::Exit => {
+            if let Some(engine) = app.try_state::<AppState>().and_then(|s| s.engine.get().cloned()) {
+                engine.shutdown(std::time::Duration::from_secs(2));
             }
         }
         RunEvent::WindowEvent {

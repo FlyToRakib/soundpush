@@ -18,6 +18,10 @@
     format?: (v: number) => string;
     onchange: (v: number) => void;
   } = $props();
+
+  // The label follows the thumb live; the setting is written once, when the drag ends.
+  // Writable derived: drag overrides it, a new `value` from the engine takes over again.
+  let local = $derived(value);
 </script>
 
 <div class="slider">
@@ -27,12 +31,13 @@
     {min}
     {max}
     {step}
-    {value}
+    value={local}
     aria-label={label}
-    aria-valuetext={format(value)}
-    oninput={(e) => onchange(Number((e.currentTarget as HTMLInputElement).value))}
+    aria-valuetext={format(local)}
+    oninput={(e) => (local = Number((e.currentTarget as HTMLInputElement).value))}
+    onchange={(e) => onchange(Number((e.currentTarget as HTMLInputElement).value))}
   />
-  <span class="value caption">{format(value)}</span>
+  <span class="value caption">{format(local)}</span>
 </div>
 
 <style>

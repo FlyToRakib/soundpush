@@ -2,12 +2,14 @@
 
 use std::process::Child;
 #[cfg(unix)]
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Keeps the system awake while alive.
 pub enum SleepInhibitor {
+    /// `SetThreadExecutionState` is per thread, so a dedicated thread holds the flag and clears
+    /// it when told to stop. The sender is that signal; dropping it also stops the thread.
     #[cfg(windows)]
-    Windows,
+    Windows(std::sync::mpsc::Sender<()>),
     #[allow(dead_code)]
     Process(Child),
 }
@@ -17,18 +19,41 @@ impl SleepInhibitor {
         #[cfg(windows)]
         {
             use windows::Win32::System::Power::{ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState};
-            // SAFETY: plain Win32 call with valid flags.
-            let prev = unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) };
-            return (prev.0 != 0).then_some(Self::Windows);
+            let (stop, stopped) = std::sync::mpsc::channel::<()>();
+            let (ready, is_ready) = std::sync::mpsc::channel::<bool>();
+            let thread = std::thread::Builder::new().name("sp-keep-awake".into()).spawn(move || {
+                // SAFETY: plain Win32 calls with valid flags, on the thread that owns the state.
+                let prev = unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) };
+                let _ = ready.send(prev.0 != 0);
+                // Blocks until the inhibitor is dropped.
+                let _ = stopped.recv();
+                // SAFETY: restores the default state on the same thread.
+                unsafe {
+                    SetThreadExecutionState(ES_CONTINUOUS);
+                }
+            });
+            return match thread {
+                Ok(_) if is_ready.recv().unwrap_or(false) => Some(Self::Windows(stop)),
+                _ => None,
+            };
         }
         #[cfg(target_os = "macos")]
         {
-            return Command::new("caffeinate").arg("-i").spawn().ok().map(Self::Process);
+            // `-w` ends the assertion together with this process, even after a crash.
+            return Command::new("caffeinate")
+                .args(["-i", "-w", &std::process::id().to_string()])
+                .spawn()
+                .ok()
+                .map(Self::Process);
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
+            // The inhibited child is `cat` on a pipe this process owns: it exits when the pipe
+            // closes, so the inhibit ends with SoundPush even after a crash.
             return Command::new("systemd-inhibit")
-                .args(["--what=idle:sleep", "--who=SoundPush", "--why=Streaming audio", "sleep", "infinity"])
+                .args(["--what=idle:sleep", "--who=SoundPush", "--why=Streaming audio", "cat"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
                 .spawn()
                 .ok()
                 .map(Self::Process);
@@ -42,12 +67,8 @@ impl Drop for SleepInhibitor {
     fn drop(&mut self) {
         match self {
             #[cfg(windows)]
-            Self::Windows => {
-                use windows::Win32::System::Power::{ES_CONTINUOUS, SetThreadExecutionState};
-                // SAFETY: plain Win32 call restoring the default state.
-                unsafe {
-                    SetThreadExecutionState(ES_CONTINUOUS);
-                }
+            Self::Windows(stop) => {
+                let _ = stop.send(());
             }
             Self::Process(child) => {
                 let _ = child.kill();
@@ -88,14 +109,21 @@ pub fn set_default_output_muted(muted: bool) -> bool {
 fn windows_mute(muted: bool) -> windows::core::Result<()> {
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender};
-    use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
+    use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
 
     // SAFETY: standard COM initialization and calls on objects we own for this scope.
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
-        let volume: IAudioEndpointVolume = device.Activate(CLSCTX_ALL, None)?;
-        volume.SetMute(windows::Win32::Foundation::BOOL::from(muted), std::ptr::null())
+        let init = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let result = (|| {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
+            let volume: IAudioEndpointVolume = device.Activate(CLSCTX_ALL, None)?;
+            volume.SetMute(windows::Win32::Foundation::BOOL::from(muted), std::ptr::null())
+        })();
+        // Balance a successful initialisation (S_OK or S_FALSE) once the objects above are released.
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        result
     }
 }

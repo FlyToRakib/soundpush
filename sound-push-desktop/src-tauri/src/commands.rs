@@ -172,12 +172,27 @@ pub fn dismiss_notice(state: State<'_, AppState>, id: u64) -> CmdResult<()> {
     Ok(state.engine()?.dismiss_notice(id)?)
 }
 
+/// Why the engine could not start, if it failed; the UI shows it instead of "Starting…".
+#[tauri::command]
+pub fn get_start_error(state: State<'_, AppState>) -> Option<String> {
+    state.start_error.lock().ok().and_then(|e| e.clone())
+}
+
 /// Write a diagnostics report the user can inspect and share. Nothing is uploaded.
 #[tauri::command]
-pub fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<String> {
+pub async fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<String> {
     let snapshot = state.engine()?.state();
+    let data_dir = state.data_dir.clone();
+    let log_dir = state.log_dir.clone();
+    // Reading the log can take a while: keep it off the UI thread.
+    tauri::async_runtime::spawn_blocking(move || write_diagnostics(&snapshot, &data_dir, &log_dir))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()))?
+}
+
+fn write_diagnostics(snapshot: &EngineState, data_dir: &std::path::Path, log_dir: &std::path::Path) -> CmdResult<String> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let dir = state.data_dir.join("diagnostics");
+    let dir = data_dir.join("diagnostics");
     std::fs::create_dir_all(&dir).map_err(|e| EngineError::Storage(e.to_string()))?;
     let path = dir.join(format!("soundpush-diagnostics-{now}.txt"));
 
@@ -189,7 +204,7 @@ pub fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<String> {
         std::env::consts::ARCH
     ));
     // Redact remote addresses; keep only the local device code and peer prefixes.
-    let mut redacted = (*snapshot).clone();
+    let mut redacted = snapshot.clone();
     for peer in &mut redacted.peers {
         peer.addresses = peer.addresses.iter().map(|_| "<redacted>".to_string()).collect();
         peer.device_id.truncate(8);
@@ -197,7 +212,7 @@ pub fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<String> {
     report.push_str("== State ==\n");
     report.push_str(&serde_json::to_string_pretty(&redacted).unwrap_or_default());
     report.push_str("\n\n== Recent log ==\n");
-    if let Some(latest) = latest_log(&state.log_dir) {
+    if let Some(latest) = latest_log(log_dir) {
         if let Ok(file) = std::fs::File::open(latest) {
             let lines: Vec<String> = BufReader::new(file).lines().map_while(Result::ok).collect();
             for line in lines.iter().skip(lines.len().saturating_sub(2000)) {

@@ -40,21 +40,33 @@ pub fn data_dir() -> PathBuf {
         .join("SoundPush")
 }
 
+/// Exists while SoundPush has muted the speakers, so a crash can be undone on the next start.
+const MUTED_MARKER: &str = "speakers-muted";
+
 pub struct DesktopHooks {
     app: AppHandle,
     data_dir: PathBuf,
     backend: Arc<CpalBackend>,
-    virtual_mic_cache: Mutex<(Option<Instant>, Option<String>)>,
+    /// Playback device names and when they were listed.
+    outputs_cache: Mutex<(Option<Instant>, Vec<String>)>,
     inhibitor: Mutex<Option<SleepInhibitor>>,
 }
 
 impl DesktopHooks {
     pub fn new(app: AppHandle, data_dir: PathBuf) -> Self {
+        let marker = data_dir.join(MUTED_MARKER);
+        if marker.exists() {
+            // The previous run muted the speakers to send this computer's audio and never came back.
+            warn!("speakers were left muted by the previous run; unmuting");
+            if crate::power::set_default_output_muted(false) {
+                let _ = std::fs::remove_file(&marker);
+            }
+        }
         Self {
             app,
             data_dir,
             backend: Arc::new(CpalBackend::new()),
-            virtual_mic_cache: Mutex::new((None, None)),
+            outputs_cache: Mutex::new((None, Vec::new())),
             inhibitor: Mutex::new(None),
         }
     }
@@ -65,11 +77,14 @@ impl DesktopHooks {
         }
     }
 
-    fn detect_virtual_mic(&self) -> Option<String> {
-        let mut cache = self.virtual_mic_cache.lock().ok()?;
+    /// Playback device names, listed at most every 10 s (enumeration is slow on some drivers).
+    fn output_names(&self) -> Vec<String> {
+        let Ok(mut cache) = self.outputs_cache.lock() else {
+            return Vec::new();
+        };
         let fresh = cache.0.is_some_and(|t| t.elapsed() < Duration::from_secs(10));
         if !fresh {
-            let outputs: Vec<String> = self
+            let outputs = self
                 .backend
                 .list_devices()
                 .unwrap_or_default()
@@ -77,12 +92,16 @@ impl DesktopHooks {
                 .filter(|d| d.kind == DeviceKind::Output)
                 .map(|d| d.name)
                 .collect();
-            let found = VIRTUAL_CABLES
-                .iter()
-                .find_map(|(playback, _)| outputs.iter().find(|o| o.contains(playback)).cloned());
-            *cache = (Some(Instant::now()), found);
+            *cache = (Some(Instant::now()), outputs);
         }
         cache.1.clone()
+    }
+
+    fn detect_virtual_mic(&self) -> Option<String> {
+        let outputs = self.output_names();
+        VIRTUAL_CABLES
+            .iter()
+            .find_map(|(playback, _)| outputs.iter().find(|o| o.contains(playback)).cloned())
     }
 }
 
@@ -116,10 +135,12 @@ impl PlatformHooks for DesktopHooks {
     }
 
     fn virtual_mic_target(&self, configured: Option<&str>) -> Option<RenderTarget> {
-        // A chosen device counts only if it is a virtual cable: feeding the phone's microphone
-        // into real speakers plays the user's voice out loud and no app can record it.
+        // A chosen device counts only if it is a virtual cable that is present: feeding the
+        // phone's microphone into real speakers plays the user's voice out loud and no app can
+        // record it, and a cable that was removed would make every microphone route fail.
+        let outputs = self.output_names();
         configured
-            .filter(|d| cable_input_name(d).is_some())
+            .filter(|d| cable_input_name(d).is_some() && outputs.iter().any(|o| o == d))
             .map(str::to_string)
             .or_else(|| self.detect_virtual_mic())
             .map(RenderTarget::Output)
@@ -130,13 +151,23 @@ impl PlatformHooks for DesktopHooks {
     }
 
     fn audio_devices_changed(&self) {
-        if let Ok(mut cache) = self.virtual_mic_cache.lock() {
+        if let Ok(mut cache) = self.outputs_cache.lock() {
             cache.0 = None;
         }
     }
 
     fn set_speakers_muted(&self, muted: bool) -> bool {
-        crate::power::set_default_output_muted(muted)
+        let ok = crate::power::set_default_output_muted(muted);
+        if ok {
+            // Remember a mute across a crash so the next start can undo it.
+            let marker = self.data_dir.join(MUTED_MARKER);
+            if muted {
+                let _ = std::fs::write(&marker, b"");
+            } else {
+                let _ = std::fs::remove_file(&marker);
+            }
+        }
+        ok
     }
 
     fn keep_alive(&self, _reason: KeepAlive) {

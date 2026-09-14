@@ -1,5 +1,7 @@
 <script lang="ts">
+  import Button from "./lib/components/Button.svelte";
   import Icon, { type IconName } from "./lib/components/Icon.svelte";
+  import { engine } from "./lib/engine/client";
   import { store } from "./lib/stores/engine.svelte";
   import { setLanguage, t } from "./lib/i18n";
   import Home from "./features/Home.svelte";
@@ -59,6 +61,14 @@
 
   <Overlays />
   {#if onboarding}<Onboarding />{/if}
+{:else if store.startError}
+  <div class="starting" role="alert">
+    <span class="failed-icon" aria-hidden="true"><Icon name="alert" size={26} /></span>
+    <p class="failed-title">{t("app.failed")}</p>
+    <p class="caption failed-reason">{store.startError}</p>
+    <p class="caption">{t("app.failedHint")}</p>
+    <Button variant="primary" onclick={() => void engine.openLogsFolder()}>{t("app.openLogs")}</Button>
+  </div>
 {:else}
   <div class="starting" role="status">
     <span class="spinner" aria-hidden="true"></span>
@@ -148,6 +158,23 @@
     justify-content: center;
     gap: var(--space-sm);
     text-align: center;
+  }
+  .failed-icon {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--color-surface-muted);
+    color: var(--color-accent);
+    margin-bottom: var(--space-sm);
+  }
+  .failed-title {
+    font-weight: 600;
+  }
+  .failed-reason {
+    max-width: 420px;
+    word-break: break-word;
   }
   .spinner {
     width: 28px;
