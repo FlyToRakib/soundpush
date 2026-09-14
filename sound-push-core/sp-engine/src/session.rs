@@ -37,7 +37,7 @@ pub(crate) enum SessionEvent {
     Established(Established),
     Control { conn_id: u64, msg: ControlMsg },
     Closed { conn_id: u64, reason: StopReason },
-    HandshakeFailed { incompatible: bool },
+    HandshakeFailed { conn_id: u64, incompatible: bool },
 }
 
 /// Run a session over an already-authenticated QUIC connection.
@@ -72,12 +72,12 @@ pub(crate) async fn run(
         Ok(Err(e)) => {
             debug!(error = %e, "handshake failed");
             conn.close(1, b"handshake");
-            let _ = events.send(SessionEvent::HandshakeFailed { incompatible: false });
+            let _ = events.send(SessionEvent::HandshakeFailed { conn_id, incompatible: false });
             return;
         }
         Err(_) => {
             conn.close(1, b"timeout");
-            let _ = events.send(SessionEvent::HandshakeFailed { incompatible: false });
+            let _ = events.send(SessionEvent::HandshakeFailed { conn_id, incompatible: false });
             return;
         }
     };
@@ -86,7 +86,7 @@ pub(crate) async fn run(
     let claimed = DeviceId::try_from_slice(&peer_hello.device_id);
     if claimed != Some(conn.peer_fingerprint().device_id()) {
         conn.close(2, b"identity");
-        let _ = events.send(SessionEvent::HandshakeFailed { incompatible: false });
+        let _ = events.send(SessionEvent::HandshakeFailed { conn_id, incompatible: false });
         return;
     }
 
@@ -104,13 +104,13 @@ pub(crate) async fn run(
             ))
             .await;
         conn.close(3, b"version");
-        let _ = events.send(SessionEvent::HandshakeFailed { incompatible: true });
+        let _ = events.send(SessionEvent::HandshakeFailed { conn_id, incompatible: true });
         return;
     }
 
     if let Some(pair) = pair {
         if tx.send(&ControlMsg::new(0, Body::PairRequest(pair))).await.is_err() {
-            let _ = events.send(SessionEvent::HandshakeFailed { incompatible: false });
+            let _ = events.send(SessionEvent::HandshakeFailed { conn_id, incompatible: false });
             return;
         }
     }

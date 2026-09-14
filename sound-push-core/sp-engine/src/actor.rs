@@ -68,7 +68,8 @@ pub(crate) enum Command {
     DismissNotice { id: u64 },
     NetworkChanged,
     SetForeground { foreground: bool },
-    Shutdown,
+    /// `done` is signalled once sessions are closed and everything held has been released.
+    Shutdown { done: Option<std::sync::mpsc::Sender<()>> },
 }
 
 enum Internal {
@@ -175,6 +176,8 @@ struct DialState {
     backoff: Backoff,
     next_attempt: Instant,
     in_flight: bool,
+    /// The dial task in progress, cancelled once a session exists through the other direction.
+    task: Option<tokio::task::AbortHandle>,
 }
 
 pub(crate) struct Actor {
@@ -200,6 +203,8 @@ pub(crate) struct Actor {
     /// Untrusted listener-side connections waiting for a PairRequest.
     unpaired: HashMap<u64, (Established, Instant)>,
     dials: HashMap<DeviceId, DialState>,
+    /// conn_id → trusted device a dial in progress is for; freed when the dial ends either way.
+    dial_targets: HashMap<u64, DeviceId>,
     routes: Vec<Route>,
     requests: HashMap<u64, PendingRequest>,
     next_request_id: u64,
@@ -226,7 +231,8 @@ pub(crate) async fn spawn(
     let data_dir = hooks.data_dir();
     std::fs::create_dir_all(&data_dir).map_err(|e| EngineError::Storage(e.to_string()))?;
     let key = hooks.storage_key();
-    let identity = Arc::new(load_or_create_identity(&data_dir.join("identity.bin"), &key)?);
+    let (identity, identity_reset) = load_or_create_identity(&data_dir.join("identity.bin"), &key)?;
+    let identity = Arc::new(identity);
     let (trust, trust_recovered) = TrustStore::load(data_dir.join("trust.bin"), key)?;
     let settings_store = SettingsStore::new(&data_dir);
     let (mut settings, settings_recovered) = settings_store.load();
@@ -269,6 +275,7 @@ pub(crate) async fn spawn(
         pairings: HashMap::new(),
         unpaired: HashMap::new(),
         dials: HashMap::new(),
+        dial_targets: HashMap::new(),
         routes: Vec::new(),
         requests: HashMap::new(),
         next_request_id: 1,
@@ -285,6 +292,9 @@ pub(crate) async fn spawn(
         peer_speakers_muted: HashMap::new(),
         announced_caps: 0,
     };
+    if identity_reset {
+        actor.notice("notice.identityReset", vec![], Severity::Warning, None);
+    }
     if trust_recovered {
         actor.notice("notice.trustStoreRecovered", vec![], Severity::Warning, None);
     }
@@ -297,12 +307,14 @@ pub(crate) async fn spawn(
     {
         let tx = internal_tx.clone();
         tokio::spawn(async move {
-            while let Some(result) = endpoint.accept().await {
-                if let Ok(conn) = result {
-                    if tx.send(Internal::Incoming(conn)).is_err() {
-                        break;
+            while let Some(handshake) = endpoint.accept().await {
+                // Each handshake on its own task: one stalled peer must not hold up the others.
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    if let Ok(conn) = handshake.finish().await {
+                        let _ = tx.send(Internal::Incoming(conn));
                     }
-                }
+                });
             }
         });
     }
@@ -332,8 +344,11 @@ pub(crate) async fn spawn(
         loop {
             tokio::select! {
                 Some(cmd) = cmd_rx.recv() => {
-                    if matches!(cmd, Command::Shutdown) {
+                    if let Command::Shutdown { done } = cmd {
                         actor.shutdown();
+                        if let Some(done) = done {
+                            let _ = done.send(());
+                        }
                         break;
                     }
                     actor.handle_command(cmd).await;
@@ -597,6 +612,7 @@ impl Actor {
             }
             Command::Disconnect { device_id } => {
                 if let Ok(id) = parse_device(&device_id) {
+                    self.cancel_dial(&id);
                     self.dials.remove(&id);
                     if let Some(s) = self.sessions.remove(&id) {
                         self.conn_index.remove(&s.conn_id);
@@ -745,7 +761,7 @@ impl Actor {
                 self.update_discovery();
             }
             Command::SetForeground { foreground } => self.foreground = foreground,
-            Command::Shutdown => {}
+            Command::Shutdown { .. } => {}
         }
     }
 
@@ -857,7 +873,7 @@ impl Actor {
         let conn_id = self.next_conn_id();
         let endpoint = self.endpoint.clone();
         let tx = self.internal_tx.clone();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let mut last = EngineError::Unreachable;
             for addr in addrs.into_iter().take(8) {
                 match tokio::time::timeout(Duration::from_secs(3), endpoint.connect(addr, pinned)).await {
@@ -878,7 +894,25 @@ impl Actor {
                 error: last,
             });
         });
+        if let Some(id) = target {
+            self.dial_targets.insert(conn_id, id);
+            if let Some(d) = self.dials.get_mut(&id) {
+                d.task = Some(task.abort_handle());
+            }
+        }
         conn_id
+    }
+
+    /// End a dial in progress for `id` (a session exists through the other direction, or the
+    /// device is being disconnected) and free its dial state.
+    fn cancel_dial(&mut self, id: &DeviceId) {
+        if let Some(d) = self.dials.get_mut(id) {
+            if let Some(task) = d.task.take() {
+                task.abort();
+            }
+            d.in_flight = false;
+        }
+        self.dial_targets.retain(|_, target| target != id);
     }
 
     fn try_dial_trusted(&mut self, id: DeviceId) {
@@ -946,10 +980,12 @@ impl Actor {
             }
             Internal::DialFailed { conn_id, target, error } => {
                 self.pair_dials.remove(&conn_id);
+                self.dial_targets.remove(&conn_id);
                 if let Some(id) = target {
                     if self.trust.get(&id).is_some() {
                         let state = self.dials.entry(id).or_insert_with(new_dial);
                         state.in_flight = false;
+                        state.task = None;
                         let delay = state.backoff.next_delay();
                         state.next_attempt = Instant::now() + delay;
                         return;
@@ -984,7 +1020,17 @@ impl Actor {
             SessionEvent::Established(est) => self.on_established(est),
             SessionEvent::Control { conn_id, msg } => self.on_control(conn_id, msg),
             SessionEvent::Closed { conn_id, reason } => self.on_closed(conn_id, reason),
-            SessionEvent::HandshakeFailed { incompatible, .. } => {
+            SessionEvent::HandshakeFailed { conn_id, incompatible } => {
+                self.pair_dials.remove(&conn_id);
+                // A dial whose QUIC handshake worked but whose Hello did not must free its dial
+                // state, or the device is never dialed again.
+                if let Some(id) = self.dial_targets.remove(&conn_id) {
+                    if let Some(d) = self.dials.get_mut(&id) {
+                        d.in_flight = false;
+                        d.task = None;
+                        d.next_attempt = Instant::now() + d.backoff.next_delay();
+                    }
+                }
                 if incompatible {
                     self.error_notice(&EngineError::IncompatibleVersion, vec![]);
                 }
@@ -993,6 +1039,7 @@ impl Actor {
     }
 
     fn on_established(&mut self, est: Established) {
+        self.dial_targets.remove(&est.conn_id);
         let key = est.conn.peer_public_key();
         let id = Fingerprint::of_public_key(&key).device_id();
 
@@ -1022,10 +1069,13 @@ impl Actor {
     }
 
     fn begin_pairing(&mut self, id: DeviceId, est: Established, qr_scanner: bool) {
-        let exporter = est
-            .conn
-            .export_keying_material(SAS_EXPORTER_LABEL, b"")
-            .unwrap_or([0u8; 32]);
+        // The code both users compare comes from the TLS session; without it there is nothing
+        // to verify, so pairing stops rather than showing a predictable code.
+        let Ok(exporter) = est.conn.export_keying_material(SAS_EXPORTER_LABEL, b"") else {
+            let _ = est.tx.send(SessionCmd::Close(StopReason::Unspecified));
+            self.error_notice(&EngineError::Internal("pairing code unavailable".into()), vec![]);
+            return;
+        };
         let code = sas_code(&exporter, &self.identity.fingerprint(), &est.conn.peer_fingerprint());
         if let Some(old) = self.pairings.remove(&id) {
             let _ = old.tx.send(SessionCmd::Close(StopReason::Superseded));
@@ -1111,6 +1161,8 @@ impl Actor {
             if old_preferred && !new_preferred && old.connected_at.elapsed() < Duration::from_secs(5) {
                 let _ = est.tx.send(SessionCmd::Close(StopReason::Superseded));
                 self.sessions.insert(id, old);
+                // The rejected connection may be our own dial: free its dial state.
+                self.cancel_dial(&id);
                 return;
             }
             self.conn_index.remove(&old.conn_id);
@@ -1125,9 +1177,10 @@ impl Actor {
             d.last_addresses.insert(0, addr);
             d.last_addresses.truncate(4);
         });
+        // A dial still walking candidates for this device is now pointless.
+        self.cancel_dial(&id);
         if let Some(d) = self.dials.get_mut(&id) {
             d.backoff.reset();
-            d.in_flight = false;
         }
         self.conn_index.insert(est.conn_id, id);
         self.sessions.insert(
@@ -1165,7 +1218,13 @@ impl Actor {
         match reason {
             StopReason::PermissionDenied | StopReason::PermissionRevoked => {
                 self.remove_routes_for(id);
+                self.cancel_dial(&id);
                 self.dials.remove(&id);
+                // The peer no longer trusts this device: redialing every second would only
+                // repeat the refusal. Stop, and tell the user to pair again.
+                let name = self.peer_name(&id);
+                let _ = self.trust.update(&id, |d| d.auto_connect = false);
+                self.notice("notice.peerForgotUs", vec![name], Severity::Warning, None);
             }
             StopReason::UserStopped | StopReason::Superseded => {
                 self.remove_routes_for(id);
@@ -1708,6 +1767,7 @@ impl Actor {
 
     fn revoke(&mut self, id: DeviceId) {
         self.remove_routes_for(id);
+        self.cancel_dial(&id);
         self.dials.remove(&id);
         if let Some(s) = self.sessions.remove(&id) {
             self.conn_index.remove(&s.conn_id);
@@ -1759,7 +1819,7 @@ impl Actor {
         let Some(r) = self.routes.iter_mut().find(|r| r.key() == key) else {
             return;
         };
-        let total = stats.packets_received + stats.packets_lost;
+        let total = stats.packets_received.saturating_add(stats.packets_lost);
         r.loss_pct = if total > 0 { stats.packets_lost as f64 * 100.0 / total as f64 } else { 0.0 };
         if let (Some(c), Some(p)) = (&r.sender_controls, &r.profile) {
             if p.adaptive_bitrate && p.codec == Codec::Opus as u32 {
@@ -1933,6 +1993,10 @@ impl Actor {
     }
 
     fn shutdown(&mut self) {
+        // Sending this computer's audio may have muted its speakers: never leave them that way.
+        if self.settings.capture.mute_local_speakers && self.routes.iter().any(|r| r.kind == RouteKind::SendSystemAudio) {
+            self.hooks.set_speakers_muted(false);
+        }
         for (_, s) in self.sessions.drain() {
             let _ = s.tx.send(SessionCmd::Close(StopReason::UserStopped));
         }
@@ -2163,6 +2227,7 @@ fn new_dial() -> DialState {
         backoff: Backoff::default(),
         next_attempt: Instant::now(),
         in_flight: false,
+        task: None,
     }
 }
 
@@ -2204,8 +2269,9 @@ fn sanitize_profile(p: &mut StreamProfile) {
         2_500 | 5_000 | 10_000 | 20_000 => p.frame_us,
         _ => 10_000,
     };
-    if p.codec == Codec::PcmS16Le as u32 && p.channels == 2 {
-        p.frame_us = p.frame_us.min(5_000);
+    // PCM frames must fit one datagram: 5 ms stereo or 10 ms mono at 48 kHz.
+    if p.codec == Codec::PcmS16Le as u32 {
+        p.frame_us = p.frame_us.min(if p.channels == 2 { 5_000 } else { 10_000 });
     }
     if p.codec != Codec::PcmS16Le as u32 && p.codec != Codec::Opus as u32 {
         p.codec = Codec::Opus as u32;

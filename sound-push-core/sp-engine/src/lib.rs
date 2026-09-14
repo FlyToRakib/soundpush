@@ -58,7 +58,7 @@ struct Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        let _ = self.commands.send(Command::Shutdown);
+        let _ = self.commands.send(Command::Shutdown { done: None });
         if let Some(rt) = self.runtime.take() {
             rt.shutdown_background();
         }
@@ -96,6 +96,18 @@ impl EngineHandle {
                 state,
             }),
         })
+    }
+
+    /// Stop streaming, tell peers and release what the engine holds (muted speakers, wake locks).
+    /// Waits up to `timeout`. For the moment before the process exits: dropping the handle
+    /// only queues the shutdown and would not wait for any of it.
+    pub fn shutdown(&self, timeout: std::time::Duration) {
+        let (done, finished) = std::sync::mpsc::channel();
+        if self.send(Command::Shutdown { done: Some(done) }).is_ok() {
+            let _ = finished.recv_timeout(timeout);
+            // Give the endpoint a moment to put its close frames on the wire.
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
     }
 
     /// Latest state snapshot.

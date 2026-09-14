@@ -48,8 +48,8 @@ pub fn build_profile(latency: LatencyProfile, quality: Quality, channels: u32, r
         Quality::Opus(bps) => (Codec::Opus, bps.clamp(6_000, 510_000), false),
         Quality::Lossless => (Codec::PcmS16Le, 0, false),
     };
-    // PCM frames must fit in one datagram: 5 ms stereo = 960 bytes.
-    let frame_us = if codec == Codec::PcmS16Le && channels > 1 { frame_us.min(5_000) } else { frame_us };
+    // PCM frames must fit in one datagram: 5 ms stereo or 10 ms mono = 960 bytes.
+    let frame_us = if codec == Codec::PcmS16Le { frame_us.min(if channels > 1 { 5_000 } else { 10_000 }) } else { frame_us };
     StreamProfile {
         codec: codec as u32,
         bitrate,

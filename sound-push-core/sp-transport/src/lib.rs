@@ -16,7 +16,7 @@ mod endpoint;
 mod verifier;
 
 pub use connection::{ControlReceiver, ControlSender, PathStats, SecureConnection};
-pub use endpoint::{DEFAULT_PORT, Endpoint, EndpointConfig};
+pub use endpoint::{DEFAULT_PORT, Endpoint, EndpointConfig, Handshake};
 
 /// ALPN protocol identifier.
 pub const ALPN: &[u8] = b"soundpush/1";

@@ -13,7 +13,9 @@ pub fn local_addresses(port: u16, include_loopback: bool) -> Vec<SocketAddr> {
                 .filter(|i| include_loopback || !i.is_loopback())
                 .map(|i| SocketAddr::new(i.ip(), port))
                 .filter(|a| match a.ip() {
-                    IpAddr::V6(v6) => !v6.is_multicast(),
+                    // Link-local IPv6 is useless to another device: it needs a scope id that
+                    // only means something here.
+                    IpAddr::V6(v6) => !v6.is_multicast() && !v6.is_unicast_link_local(),
                     IpAddr::V4(v4) => !v4.is_multicast(),
                 })
                 .collect()
@@ -26,9 +28,19 @@ pub fn local_addresses(port: u16, include_loopback: bool) -> Vec<SocketAddr> {
     addrs
 }
 
+/// Link-local IPv6 without a scope id can never complete a handshake: the socket picks some
+/// interface, and the peer's replies arrive from a scoped address QUIC treats as a stranger.
+/// Discovery and saved addresses from other devices carry no usable scope, so drop them.
+fn unusable_link_local(a: &SocketAddr) -> bool {
+    match a {
+        SocketAddr::V6(v6) => v6.ip().is_unicast_link_local() && v6.scope_id() == 0,
+        SocketAddr::V4(_) => false,
+    }
+}
+
 /// Order dial candidates best-first. Loopback is kept only when explicitly allowed.
 pub fn sort_candidates(addrs: &mut Vec<SocketAddr>, include_loopback: bool) {
-    addrs.retain(|a| a.port() != 0 && (include_loopback || !a.ip().is_loopback()));
+    addrs.retain(|a| a.port() != 0 && !unusable_link_local(a) && (include_loopback || !a.ip().is_loopback()));
     addrs.sort_by_key(|a| if a.ip().is_loopback() { 254 } else { rank(a) });
     addrs.dedup();
 }
@@ -66,6 +78,18 @@ mod tests {
         assert_eq!(resolve("10.0.0.2:9000", 47650).await, vec!["10.0.0.2:9000".parse().unwrap()]);
         assert_eq!(resolve("[fe80::1]", 1).await, vec!["[fe80::1]:1".parse().unwrap()]);
         assert!(resolve("", 1).await.is_empty());
+    }
+
+    #[test]
+    fn unscoped_link_local_is_dropped() {
+        let mut a: Vec<SocketAddr> = vec![
+            "[fe80::b023:4ff:feac:9b4b]:5".parse().unwrap(),
+            "[fe80::b023:4ff:feac:9b4b%18]:5".parse().unwrap(),
+            "192.168.0.2:5".parse().unwrap(),
+        ];
+        sort_candidates(&mut a, false);
+        assert_eq!(a.len(), 2);
+        assert!(!a.iter().any(|x| matches!(x, SocketAddr::V6(v) if v.scope_id() == 0)));
     }
 
     #[test]

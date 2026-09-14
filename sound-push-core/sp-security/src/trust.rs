@@ -125,20 +125,32 @@ impl TrustStore {
 }
 
 /// Load the local identity, creating and persisting a new one on first run.
-pub fn load_or_create_identity(path: &Path, key: &[u8; 32]) -> Result<DeviceIdentity, SecurityError> {
+///
+/// A file that cannot be decrypted (the storage key changed, the file was damaged) is moved
+/// aside and a new identity is made, so the app still starts; the second value is then
+/// `true`, and the user must pair their devices again.
+pub fn load_or_create_identity(path: &Path, key: &[u8; 32]) -> Result<(DeviceIdentity, bool), SecurityError> {
     match fs::read(path) {
         Ok(bytes) => {
-            let plain = open(key, IDENTITY_AD, &bytes)?;
-            let secret: [u8; 32] = plain.as_slice().try_into().map_err(|_| SecurityError::Corrupted)?;
-            Ok(DeviceIdentity::from_secret_bytes(&secret))
+            let secret = open(key, IDENTITY_AD, &bytes)
+                .and_then(|plain| plain.as_slice().try_into().map_err(|_| SecurityError::Corrupted));
+            match secret {
+                Ok(secret) => Ok((DeviceIdentity::from_secret_bytes(&secret), false)),
+                Err(_) => {
+                    let _ = fs::rename(path, path.with_extension("bin.bad"));
+                    Ok((create_identity(path, key)?, true))
+                }
+            }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let identity = DeviceIdentity::generate();
-            write_atomic(path, &seal(key, IDENTITY_AD, identity.secret_bytes().as_ref()))?;
-            Ok(identity)
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((create_identity(path, key)?, false)),
         Err(e) => Err(e.into()),
     }
+}
+
+fn create_identity(path: &Path, key: &[u8; 32]) -> Result<DeviceIdentity, SecurityError> {
+    let identity = DeviceIdentity::generate();
+    write_atomic(path, &seal(key, IDENTITY_AD, identity.secret_bytes().as_ref()))?;
+    Ok(identity)
 }
 
 #[cfg(test)]
@@ -200,9 +212,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("identity.bin");
         let key = [5u8; 32];
-        let a = load_or_create_identity(&path, &key).unwrap();
-        let b = load_or_create_identity(&path, &key).unwrap();
+        let (a, reset_a) = load_or_create_identity(&path, &key).unwrap();
+        let (b, reset_b) = load_or_create_identity(&path, &key).unwrap();
         assert_eq!(a.public_key(), b.public_key());
-        assert!(load_or_create_identity(&path, &[6u8; 32]).is_err());
+        assert!(!reset_a && !reset_b);
+        // A file the key can't open is moved aside and a fresh identity takes its place.
+        let (c, reset_c) = load_or_create_identity(&path, &[6u8; 32]).unwrap();
+        assert!(reset_c);
+        assert_ne!(c.public_key(), a.public_key());
+        assert!(dir.path().join("identity.bin.bad").exists());
     }
 }

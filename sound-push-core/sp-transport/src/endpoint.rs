@@ -120,21 +120,38 @@ impl Endpoint {
         SecureConnection::new(conn)
     }
 
-    /// Wait for the next incoming connection. Returns `None` when the endpoint is closed.
-    pub async fn accept(&self) -> Option<Result<SecureConnection, TransportError>> {
-        let incoming = self.inner.accept().await?;
-        let remote = incoming.remote_address();
-        Some(match incoming.await {
+    /// Wait for the next connection attempt. Returns `None` when the endpoint is closed.
+    /// The handshake is completed by [`Handshake::finish`], so a caller can run several at
+    /// once and one stalled peer does not hold up the others.
+    pub async fn accept(&self) -> Option<Handshake> {
+        self.inner.accept().await.map(|incoming| Handshake { incoming })
+    }
+
+    pub fn close(&self) {
+        self.inner.close(0u32.into(), b"shutdown");
+    }
+}
+
+/// An accepted connection attempt whose QUIC handshake has not run yet.
+pub struct Handshake {
+    incoming: quinn::Incoming,
+}
+
+impl Handshake {
+    pub fn remote_address(&self) -> SocketAddr {
+        self.incoming.remote_address()
+    }
+
+    /// Complete the handshake (TLS with mutual authentication).
+    pub async fn finish(self) -> Result<SecureConnection, TransportError> {
+        let remote = self.incoming.remote_address();
+        match self.incoming.await {
             Ok(conn) => SecureConnection::new(conn),
             Err(e) => {
                 warn!(%remote, error = %e, "incoming handshake failed");
                 Err(e.into())
             }
-        })
-    }
-
-    pub fn close(&self) {
-        self.inner.close(0u32.into(), b"shutdown");
+        }
     }
 }
 

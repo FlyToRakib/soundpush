@@ -184,7 +184,7 @@ mod tests {
         let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port()).parse().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let conn = server.accept().await.unwrap().unwrap();
+            let conn = server.accept().await.unwrap().finish().await.unwrap();
             let (mut tx, mut rx) = conn.accept_control().await.unwrap();
             let msg = rx.recv().await.unwrap();
             tx.send(&msg).await.unwrap();
@@ -222,7 +222,9 @@ mod tests {
         let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port()).parse().unwrap();
 
         tokio::spawn(async move {
-            let _ = server.accept().await;
+            if let Some(handshake) = server.accept().await {
+                let _ = handshake.finish().await;
+            }
         });
         let wrong = DeviceIdentity::generate().device_id();
         assert!(client.connect(addr, Some(wrong)).await.is_err());
