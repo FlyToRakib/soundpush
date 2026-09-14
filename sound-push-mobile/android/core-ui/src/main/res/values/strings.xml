@@ -429,4 +429,20 @@
     <string name="widget_mute_desc">Mute listening</string>
     <string name="widget_unmute_desc">Unmute listening</string>
     <string name="widget_listening_muted">Muted · %1$s</string>
+
+    <!-- Runtime permissions: denied and blocked states (plan 26.1) -->
+    <string name="settings_permissions">Permissions</string>
+    <string name="perm_label_mic">Microphone</string>
+    <string name="perm_label_camera">Camera</string>
+    <string name="perm_label_notifications">Notifications</string>
+    <string name="perm_status_granted">Allowed</string>
+    <string name="perm_status_not_asked">Asked when you first use it</string>
+    <string name="perm_status_denied">Not allowed · Tap to allow</string>
+    <string name="perm_status_blocked">Turned off · Tap to open settings</string>
+    <string name="perm_mic_blocked_title">Microphone access is off</string>
+    <string name="perm_mic_blocked_body">SoundPush needs the microphone to send your voice to another device. Open app settings, tap Permissions and allow Microphone.</string>
+    <string name="perm_camera_blocked_title">Camera access is off</string>
+    <string name="perm_camera_blocked_body">SoundPush uses the camera only to scan pairing codes. Open app settings, tap Permissions and allow Camera, or pair by entering the computer\'s address instead.</string>
+    <string name="perm_capture_refused_title">Sharing this phone\'s audio wasn\'t allowed</string>
+    <string name="perm_capture_refused_body">Android asks every time SoundPush starts sending this phone\'s audio. Try again and allow it to start.</string>
 </resources>
