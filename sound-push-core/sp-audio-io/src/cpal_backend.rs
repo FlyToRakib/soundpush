@@ -147,6 +147,19 @@ where
     }))
 }
 
+impl CpalBackend {
+    /// Names of the playback devices only. Unlike [`AudioBackend::list_devices`] this never
+    /// inspects an input device: on macOS reading a microphone's stream format counts as
+    /// microphone access, so a periodic check must not touch inputs or the permission prompt
+    /// appears again and again.
+    pub fn output_device_names(&self) -> Vec<String> {
+        host()
+            .output_devices()
+            .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
+            .unwrap_or_default()
+    }
+}
+
 impl AudioBackend for CpalBackend {
     fn name(&self) -> &'static str {
         "cpal"

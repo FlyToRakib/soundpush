@@ -61,8 +61,14 @@ Virtual microphone on Windows: open **Audio → Install VB-CABLE** in the app. S
 ### macOS desktop app
 
 Easiest: GitHub → **Actions** → **macOS build** → latest run → artifact `SoundPush-macOS` (a `.dmg`,
-universal for Apple Silicon and Intel). The app is not notarised yet, so the first time:
-right-click **SoundPush.app → Open** (or System Settings → Privacy & Security → **Open Anyway**).
+universal for Apple Silicon and Intel). The app is not notarised yet, so macOS shows
+*"SoundPush" Not Opened* the first time. Click **Done** (not Move to Trash), then either:
+
+- System Settings → Privacy & Security → **Open Anyway**, or
+- in Terminal: `xattr -dr com.apple.quarantine /Applications/SoundPush.app`
+
+If an older build kept asking for the microphone, reset its permission once after installing the
+new one: `tccutil reset Microphone net.soundpush.desktop`.
 
 To build on the Mac itself:
 

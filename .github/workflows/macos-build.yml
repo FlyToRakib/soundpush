@@ -40,6 +40,15 @@ jobs:
             exit 1
           }
 
+      # macOS remembers "Allow microphone" only for a validly signed app with the audio-input
+      # entitlement; an unsigned bundle asks again and again. Fail the build if that regresses.
+      - name: Verify signature and entitlements
+        run: |
+          app=target/universal-apple-darwin/release/bundle/macos/SoundPush.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --entitlements - "$app" 2>/dev/null | tee entitlements.txt
+          grep -q "com.apple.security.device.audio-input" entitlements.txt
+
       - name: Upload disk image
         uses: actions/upload-artifact@v4
         with:

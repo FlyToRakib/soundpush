@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use rand::RngCore;
 use sp_audio_io::cpal_backend::CpalBackend;
-use sp_audio_io::{AudioBackend, DeviceKind, RenderTarget};
+use sp_audio_io::{AudioBackend, RenderTarget};
 use sp_engine::{KeepAlive, PlatformHooks};
 use tauri::{AppHandle, Manager, UserAttentionType};
 use tracing::warn;
@@ -78,21 +78,15 @@ impl DesktopHooks {
     }
 
     /// Playback device names, listed at most every 10 s (enumeration is slow on some drivers).
+    /// Only outputs are listed: touching microphones here would trigger macOS's microphone
+    /// permission prompt on every refresh.
     fn output_names(&self) -> Vec<String> {
         let Ok(mut cache) = self.outputs_cache.lock() else {
             return Vec::new();
         };
         let fresh = cache.0.is_some_and(|t| t.elapsed() < Duration::from_secs(10));
         if !fresh {
-            let outputs = self
-                .backend
-                .list_devices()
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|d| d.kind == DeviceKind::Output)
-                .map(|d| d.name)
-                .collect();
-            *cache = (Some(Instant::now()), outputs);
+            *cache = (Some(Instant::now()), self.backend.output_device_names());
         }
         cache.1.clone()
     }

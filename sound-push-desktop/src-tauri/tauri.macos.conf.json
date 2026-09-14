@@ -2,6 +2,11 @@
   "bundle": {
     "resources": {
       "../drivers/macos-virtual-mic/build/SoundPushMicrophone.driver": "SoundPushMicrophone.driver"
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "Entitlements.plist"
     }
   }
 }
