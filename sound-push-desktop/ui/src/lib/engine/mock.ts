@@ -265,6 +265,8 @@ export const mockEngine = {
           defaultOutput: "Speakers",
           appCapture: true,
         } as T;
+      case "tethering_status":
+        return { active: false, internetViaPhone: false, peers: [] } as T;
       case "hotkey_status":
         return { mute: null, pushToTalk: null } as T;
       case "set_hotkey": {

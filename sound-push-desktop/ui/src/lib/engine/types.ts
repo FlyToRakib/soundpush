@@ -360,6 +360,15 @@ export interface AudioApps {
   apps: { process: string; active: boolean }[];
 }
 
+/** USB tethering to a phone (src-tauri tethering.rs). */
+export interface TetheringStatus {
+  active: boolean;
+  /** This computer's internet goes through the phone's mobile data. */
+  internetViaPhone: boolean;
+  /** Connected devices reached through the tethering network. */
+  peers: string[];
+}
+
 /** What a diagnostics export contains (src-tauri commands.rs `preview_diagnostics`). */
 export interface DiagnosticsSection {
   id: "system" | "state" | "crashes" | "log";

@@ -610,6 +610,27 @@ pub async fn fix_firewall(
     network_status(state).await
 }
 
+/// USB tethering to a phone, the devices reached through it, and whether it carries this
+/// computer's internet (plan §8.1). Lists network adapters, so off the UI thread.
+#[tauri::command]
+pub async fn tethering_status(
+    state: State<'_, AppState>,
+) -> CmdResult<crate::tethering::TetheringStatus> {
+    let peers: Vec<(String, std::net::IpAddr)> = state
+        .engine()?
+        .state()
+        .peers
+        .iter()
+        .filter_map(|p| {
+            let addr: std::net::SocketAddr = p.remote_address.parse().ok()?;
+            Some((p.device_id.clone(), addr.ip()))
+        })
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || crate::tethering::status(&peers))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
 #[tauri::command]
 pub async fn system_status() -> CmdResult<crate::system::SystemStatus> {
     tauri::async_runtime::spawn_blocking(crate::system::status)

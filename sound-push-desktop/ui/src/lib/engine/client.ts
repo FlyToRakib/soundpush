@@ -15,6 +15,7 @@ import type {
   Settings,
   SettingsTopic,
   SystemStatus,
+  TetheringStatus,
 } from "./types";
 import { mockEngine } from "./mock";
 
@@ -130,6 +131,7 @@ export const engine = {
   networkStatus: () => call<NetworkStatus>("network_status"),
   fixFirewall: (includePublic: boolean) => call<NetworkStatus>("fix_firewall", { includePublic }),
   systemStatus: () => call<SystemStatus>("system_status"),
+  tetheringStatus: () => call<TetheringStatus>("tethering_status"),
   requestMicrophone: () => call<void>("request_microphone"),
   openSystemSettings: (topic: SettingsTopic) => call<void>("open_system_settings", { topic }),
 

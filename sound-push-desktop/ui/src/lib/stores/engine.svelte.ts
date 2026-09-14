@@ -2,6 +2,7 @@
 import { onStartError, onState } from "../engine/client";
 import type { EngineState, PeerView, RouteKind } from "../engine/types";
 import { applyTheme } from "../theme/theme";
+import { history } from "./history.svelte";
 
 class EngineStore {
   state = $state<EngineState | null>(null);
@@ -12,6 +13,7 @@ class EngineStore {
     void onState((s) => {
       this.state = s;
       applyTheme(s.settings.theme);
+      history.record(s.routes);
     });
     void onStartError((message) => (this.startError = message));
   }

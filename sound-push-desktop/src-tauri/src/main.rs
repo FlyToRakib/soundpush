@@ -12,6 +12,7 @@ mod network;
 mod os_events;
 mod power;
 mod system;
+mod tethering;
 mod tray;
 mod usb;
 mod virtual_mic;
@@ -272,6 +273,7 @@ fn main() {
             commands::request_microphone,
             commands::open_system_settings,
             commands::list_audio_apps,
+            commands::tethering_status,
             commands::close_main_window,
             commands::quit_app,
         ])

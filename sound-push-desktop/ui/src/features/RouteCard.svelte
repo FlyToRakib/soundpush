@@ -1,14 +1,18 @@
 <script lang="ts">
   import Button from "../lib/components/Button.svelte";
   import Icon from "../lib/components/Icon.svelte";
+  import LatencyChart from "../lib/components/LatencyChart.svelte";
   import QualityBadge from "../lib/components/QualityBadge.svelte";
   import Slider from "../lib/components/Slider.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
+  import { connectionPath, latencyStages } from "../lib/connection";
   import { engine } from "../lib/engine/client";
   import type { LinkQuality, RouteView } from "../lib/engine/types";
-  import { formatElapsed, t } from "../lib/i18n";
+  import { formatElapsed, formatList, t } from "../lib/i18n";
   import { routeIcon, routeTitle } from "../lib/routes";
   import { store } from "../lib/stores/engine.svelte";
+  import { history } from "../lib/stores/history.svelte";
+  import { platform } from "../lib/stores/platform.svelte";
   import { updateSettings } from "../lib/stores/settings";
   import { run } from "../lib/stores/toast.svelte";
 
@@ -18,6 +22,21 @@
   const peer = $derived(store.state?.peers.find((p) => p.deviceId === route.peerId));
   const quality = $derived<LinkQuality>(peer?.quality ?? "unknown");
   const detailsId = $props.id();
+
+  // Connection details (plan §23.3, §28.2): path, where the delay comes from, recent history.
+  const path = $derived(connectionPath(peer, platform.tethering?.peers.includes(route.peerId) ?? false));
+  const pathText = $derived(
+    [
+      path.transport ? t(`path.transport.${path.transport}`) : "",
+      path.kind ? t(`path.kind.${path.kind}`) : "",
+      path.family ? t("path.family", path.family) : "",
+    ]
+      .filter(Boolean)
+      .join(" · ") || "—",
+  );
+  const stages = $derived(latencyStages(route.stats));
+  const stagesText = $derived(formatList(stages.map((s) => t("stats.stageValue", t(`stats.stage.${s.id}`), Math.round(s.ms)))));
+  const samples = $derived(history.series[route.routeId] ?? []);
 </script>
 
 <article class="route" aria-label={routeTitle(route)}>
@@ -97,6 +116,8 @@
         />
       </div>
       <dl class="stats caption">
+        <div class="wide"><dt>{t("stats.path")}</dt><dd>{pathText}</dd></div>
+        <div class="wide"><dt>{t("stats.address")}</dt><dd class="address">{peer?.remoteAddress || "—"}</dd></div>
         <div><dt>{t("stats.codec")}</dt><dd>{route.stats.codec}{route.stats.bitrateKbps ? ` · ${route.stats.bitrateKbps} kb/s` : ""}</dd></div>
         <div><dt>{t("audio.latency")}</dt><dd>{Math.round(route.stats.latencyMs)} ms</dd></div>
         <div><dt>{t("stats.buffer")}</dt><dd>{Math.round(route.stats.bufferMs)} ms</dd></div>
@@ -106,6 +127,22 @@
         <div><dt>{t("stats.dropouts")}</dt><dd>{route.stats.underruns}</dd></div>
         <div><dt>{t("stats.rtt")}</dt><dd>{peer ? Math.round(peer.rttMs) : 0} ms</dd></div>
       </dl>
+      {#if stages.length > 0}
+        <div class="stages">
+          <span class="caption">{t("stats.breakdown")}</span>
+          <div class="bar" role="img" aria-label={stagesText}>
+            {#each stages as stage (stage.id)}
+              <span class="segment {stage.id}" style:flex-grow={stage.ms}></span>
+            {/each}
+          </div>
+          <ul class="legend caption" aria-hidden="true">
+            {#each stages as stage (stage.id)}
+              <li><span class="swatch {stage.id}"></span>{t("stats.stageValue", t(`stats.stage.${stage.id}`), Math.round(stage.ms))}</li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+      {#if route.status === "active"}<LatencyChart {samples} />{/if}
     </div>
   {/if}
 </article>
@@ -159,6 +196,9 @@
     gap: 8px 16px;
     margin: 4px 0 0;
   }
+  .stats .wide {
+    grid-column: span 2;
+  }
   .stats dt {
     color: var(--color-text-secondary);
   }
@@ -166,5 +206,68 @@
     margin: 0;
     color: var(--color-text-primary);
     font-variant-numeric: tabular-nums;
+  }
+  .address {
+    user-select: text;
+    word-break: break-all;
+  }
+  .stages {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .bar {
+    display: flex;
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    gap: 2px;
+  }
+  .segment,
+  .swatch {
+    background: var(--color-accent);
+  }
+  .segment {
+    min-width: 3px;
+  }
+  .capture {
+    opacity: 0.35;
+  }
+  .encode {
+    opacity: 0.5;
+  }
+  .network {
+    opacity: 0.7;
+  }
+  .buffer {
+    opacity: 1;
+  }
+  .output {
+    background: var(--color-text-secondary);
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  @media (forced-colors: active) {
+    .segment,
+    .swatch {
+      background: CanvasText;
+      forced-color-adjust: none;
+    }
   }
 </style>
