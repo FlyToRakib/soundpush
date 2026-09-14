@@ -36,12 +36,16 @@ windows = { version = "0.58", features = [
     "Win32_System_Variant",
 ] }
 
-# macOS system-audio capture via Core Audio process taps.
+# macOS system-audio capture via Core Audio process taps (14.2+), or ScreenCaptureKit on macOS 13.
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
 objc2-core-audio = "0.3"
+objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
 objc2-core-foundation = { version = "0.3", features = ["CFDictionary"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSString", "NSUUID", "NSValue"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime", "objc2-core-audio-types"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSError", "NSProcessInfo", "NSString", "NSUUID", "NSValue"] }
+objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "SCShareableContent", "SCStream", "block2", "dispatch2", "objc2-core-media"] }
 
 # Linux system-audio capture from sink monitors (works on PipeWire through pipewire-pulse).
 [target.'cfg(target_os = "linux")'.dependencies]

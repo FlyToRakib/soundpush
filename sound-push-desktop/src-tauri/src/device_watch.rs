@@ -2,7 +2,8 @@
 //!
 //! - **Windows:** `IMMNotificationClient` (default device changed, device added/removed/state).
 //! - **macOS:** Core Audio property listeners on the default input/output and the device list.
-//! - **Linux:** no notification source here yet; the PipeWire integration feeds [`Change`]s.
+//! - **Linux:** sound server events (PipeWire through pipewire-pulse, or PulseAudio): devices
+//!   added or removed, default sink or source changed (`sp_audio_io::pulse::watch_devices`).
 //!
 //! Bursts (unplugging a headset changes the default and the list at once) are merged into one
 //! engine call, which refreshes the device list and moves routes that follow the default device.
@@ -44,11 +45,20 @@ pub fn start(app: AppHandle) {
     windows::watch(tx);
     #[cfg(target_os = "macos")]
     crate::macos::watch_devices(tx);
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     {
-        // Linux integration point: send a `Change` on PipeWire/PulseAudio device events.
-        drop(tx);
+        let watched = sp_audio_io::pulse::watch_devices(move |default_input, default_output| {
+            let _ = tx.send(Change {
+                default_input,
+                default_output,
+            });
+        });
+        if let Err(e) = watched {
+            warn!(error = %e, "could not start the audio device watcher");
+        }
     }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    drop(tx);
 
     let spawned = std::thread::Builder::new()
         .name("sp-device-events".into())

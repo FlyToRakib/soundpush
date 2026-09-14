@@ -25,5 +25,9 @@ Android with no C++ build).
   public aggregate device that cpal opens as an input (`sp-audio-io/src/macos_tap.rs`). The tap must be
   public too, or it will not attach to the aggregate. Requires macOS 14.2+ and the System Audio Recording
   permission (`NSAudioCaptureUsageDescription`); without it macOS delivers silence rather than an error.
-- System-audio capture on Linux is unavailable until the PipeWire backend lands (the UI says so).
+  Before macOS 14.2, ScreenCaptureKit records system audio instead (`sp-audio-io/src/macos_sck.rs`).
+- Linux speaks the PulseAudio protocol (PulseAudio, or PipeWire through pipewire-pulse;
+  `sp-audio-io/src/pulse.rs`): system audio from sink monitors, per-app capture by moving streams to a
+  private null sink, device events from server subscriptions. A native `pipewire` backend is not needed
+  for these.
 - The Opus codec uses `unsafe-libopus` (pure-Rust libopus translation) so no CMake/C toolchain is required.

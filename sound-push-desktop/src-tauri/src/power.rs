@@ -102,16 +102,31 @@ pub fn set_default_output_muted(muted: bool) -> bool {
             .status()
             .is_ok_and(|s| s.success());
     }
-    // PulseAudio mutes a sink's monitor together with the sink, so muting would also silence the
-    // system audio being sent: leave the speakers playing there. PipeWire takes monitors before
-    // volume and mute (`monitor.channel-volumes` is off by default). Unmuting is always allowed.
+    // PulseAudio mutes a sink's monitor together with the sink, which would also silence the
+    // system audio being sent: playback moves to a "SoundPush Speakers" null sink instead (see
+    // `pulse::mute_speakers`). PipeWire takes monitors before volume and mute
+    // (`monitor.channel-volumes` is off by default), so the default sink itself is muted there.
     #[cfg(target_os = "linux")]
-    if muted
-        && !sp_audio_io::pulse::Pulse::connect()
-            .and_then(|mut p| p.server())
-            .is_ok_and(|s| s.is_pipewire())
     {
-        return false;
+        use sp_audio_io::pulse;
+        let pipewire = pulse::Pulse::connect()
+            .and_then(|mut p| p.server())
+            .is_ok_and(|s| s.is_pipewire());
+        if !pipewire {
+            let result = if muted {
+                pulse::mute_speakers()
+            } else {
+                pulse::unmute_speakers()
+            };
+            if let Err(e) = &result {
+                tracing::warn!(error = %e, muted, "could not change the speakers");
+            }
+            return result.is_ok();
+        }
+        if !muted {
+            // Speakers muted while the server was still PulseAudio.
+            let _ = pulse::unmute_speakers();
+        }
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
