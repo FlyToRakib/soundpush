@@ -66,6 +66,8 @@ pub fn show_main_window(app: &AppHandle) {
         .title("SoundPush")
         .inner_size(1000.0, 700.0)
         .min_inner_size(760.0, 520.0)
+        // Ctrl/Cmd + and − scale the whole UI (text scaling for low vision).
+        .zoom_hotkeys_enabled(true)
         .theme(theme)
         .build()
     {
@@ -94,6 +96,9 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
         .plugin(tauri_plugin_opener::init())
+        // Update manifests are verified against the public key in tauri.conf.json.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| {
             let handle = app.handle().clone();
             let hooks = Arc::new(hooks::DesktopHooks::new(handle.clone(), data_dir.clone()));

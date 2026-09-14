@@ -119,6 +119,7 @@ export interface Settings {
   savedRoutes: { peerId: string; kind: RouteKind }[];
   dismissedTips: string[];
   audioCues: boolean;
+  checkForUpdates: boolean;
 }
 
 export interface LocalDevice {

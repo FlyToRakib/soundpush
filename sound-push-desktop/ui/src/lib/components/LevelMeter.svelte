@@ -1,10 +1,21 @@
 <script lang="ts">
+  import { t } from "../i18n";
+
   let { db, label }: { db: number; label: string } = $props();
   // Map −60…0 dBFS to 0…100 %.
   const pct = $derived(Math.max(0, Math.min(100, ((db + 60) / 60) * 100)));
+  const rounded = $derived(Math.max(-60, Math.min(0, Math.round(db))));
 </script>
 
-<div class="meter" role="meter" aria-label={label} aria-valuemin={-60} aria-valuemax={0} aria-valuenow={Math.round(db)}>
+<div
+  class="meter"
+  role="meter"
+  aria-label={label}
+  aria-valuemin={-60}
+  aria-valuemax={0}
+  aria-valuenow={rounded}
+  aria-valuetext={t("a11y.level", rounded)}
+>
   <div class="fill" class:hot={db > -3} style="width: {pct}%"></div>
 </div>
 
@@ -23,5 +34,13 @@
   }
   .fill.hot {
     background: var(--color-danger);
+  }
+  @media (forced-colors: active) {
+    .meter {
+      border: 1px solid CanvasText;
+    }
+    .fill {
+      background: Highlight;
+    }
   }
 </style>

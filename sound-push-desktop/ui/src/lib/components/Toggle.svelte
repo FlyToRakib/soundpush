@@ -10,6 +10,7 @@
 
 <button
   {id}
+  type="button"
   class="toggle"
   role="switch"
   aria-checked={checked}
@@ -23,6 +24,7 @@
 <style>
   .toggle {
     position: relative;
+    flex-shrink: 0;
     width: 40px;
     height: 22px;
     border-radius: var(--radius-pill);
@@ -35,7 +37,7 @@
   .thumb {
     position: absolute;
     top: 2px;
-    left: 2px;
+    inset-inline-start: 2px;
     width: 16px;
     height: 16px;
     border-radius: 50%;
@@ -50,8 +52,23 @@
     transform: translateX(18px);
     background: var(--color-on-accent);
   }
+  :global([dir="rtl"]) .toggle[aria-checked="true"] .thumb {
+    transform: translateX(-18px);
+  }
   .toggle:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+  /* Windows high-contrast themes: draw the switch with system colors. */
+  @media (forced-colors: active) {
+    .toggle {
+      border-color: ButtonText;
+    }
+    .thumb {
+      background: ButtonText;
+    }
+    .toggle[aria-checked="true"] .thumb {
+      background: Highlight;
+    }
   }
 </style>

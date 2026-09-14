@@ -52,7 +52,7 @@
   }
   .value {
     min-width: 52px;
-    text-align: right;
+    text-align: end;
     font-variant-numeric: tabular-nums;
   }
 </style>

@@ -5,7 +5,7 @@
   import QualityBadge from "../lib/components/QualityBadge.svelte";
   import { engine } from "../lib/engine/client";
   import type { PeerView } from "../lib/engine/types";
-  import { t } from "../lib/i18n";
+  import { formatList, t, tp } from "../lib/i18n";
   import { TASKS, type Task, platformIcon } from "../lib/routes";
   import { store } from "../lib/stores/engine.svelte";
   import { run, toasts } from "../lib/stores/toast.svelte";
@@ -51,7 +51,7 @@
     );
   }
 
-  const names = (peers: PeerView[]) => peers.map((p) => p.name).join(", ");
+  const names = (peers: PeerView[]) => formatList(peers.map((p) => p.name));
 
   function onTask(task: Task) {
     if (!task.available(app)) {
@@ -133,7 +133,7 @@
         <div class="spacer"></div>
         <Button variant="ghost" icon="plus" onclick={() => (pairing = true)}>{t("devices.pair")}</Button>
       </div>
-      <ul class="peers">
+      <ul class="peers" aria-label={tp("devices.pairedCount", store.trustedPeers.length)}>
         {#each store.trustedPeers as peer (peer.deviceId)}
           <li>
             <button class="peer" onclick={() => onnavigate("devices")}>
@@ -208,7 +208,7 @@
     border-radius: var(--radius-card);
     border: 1px solid var(--color-border);
     background: var(--color-surface);
-    text-align: left;
+    text-align: start;
     cursor: pointer;
     transition: border-color var(--motion-fast);
   }
@@ -274,7 +274,7 @@
     border-radius: var(--radius-control);
     background: transparent;
     cursor: pointer;
-    text-align: left;
+    text-align: start;
   }
   .peer:hover:not(:disabled) {
     background: var(--color-surface-muted);
