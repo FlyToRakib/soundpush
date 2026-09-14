@@ -51,7 +51,7 @@
   "route.stop": "Stop",
   "route.mute": "Mute",
   "route.unmute": "Unmute",
-  "route.mutePc": "Mute PC speakers",
+  "route.mutePeer": "Mute {0}'s speakers",
   "route.details": "Connection details",
   "route.keepRunning": "Keep running after restart",
   "route.latency": "{0} ms",

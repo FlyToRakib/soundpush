@@ -365,6 +365,8 @@ pub(crate) struct Actor {
     keep_alive: KeepAlive,
     foreground: bool,
     peer_speakers_muted: HashMap<DeviceId, bool>,
+    /// Peers that muted this device's speakers remotely; unmuted when the last one leaves.
+    speakers_muted_by: std::collections::HashSet<DeviceId>,
     /// Capability bits last announced to peers; a change is re-announced mid-session.
     announced_caps: u64,
     /// TLS over TCP: loopback listener on desktops (USB via adb reverse), dial-only elsewhere.
@@ -473,6 +475,7 @@ pub(crate) async fn spawn(
         keep_alive: KeepAlive::default(),
         foreground: true,
         peer_speakers_muted: HashMap::new(),
+        speakers_muted_by: std::collections::HashSet::new(),
         announced_caps: 0,
         tcp: tcp.clone(),
         resume: ResumeTokens::default(),
@@ -1193,6 +1196,17 @@ impl Actor {
             }
         }
         self.update_mic_groups();
+        // "Mute this computer's speakers while sending" also applies to a stream already running.
+        if old.capture.mute_local_speakers != self.settings.capture.mute_local_speakers
+            && self.speakers_muted_by.is_empty()
+            && self
+                .routes
+                .iter()
+                .any(|r| r.kind == RouteKind::SendSystemAudio && r.sender_controls.is_some())
+        {
+            self.hooks
+                .set_speakers_muted(self.settings.capture.mute_local_speakers);
+        }
         // Latency, quality and redundancy, global or per device.
         self.reconfigure_routes(old);
         if old.resume_routes_on_start != self.settings.resume_routes_on_start {
@@ -1789,6 +1803,7 @@ impl Actor {
         }
         self.sessions.remove(&id);
         info!(peer = %id.short(), ?reason, "session closed");
+        self.forget_speaker_mutes(id);
         self.end_network_test(id, EngineError::Unreachable);
 
         match reason {
@@ -2244,7 +2259,10 @@ impl Actor {
         if let Some(reply) = route.reply.take() {
             let _ = reply.send(Err(EngineError::RouteNotFound));
         }
-        if route.kind == RouteKind::SendSystemAudio && self.settings.capture.mute_local_speakers {
+        if route.kind == RouteKind::SendSystemAudio
+            && self.settings.capture.mute_local_speakers
+            && self.speakers_muted_by.is_empty()
+        {
             self.hooks.set_speakers_muted(false);
         }
         // Saved routes: "Keep running" entries go only when the user stops the route; entries
@@ -2377,6 +2395,23 @@ impl Actor {
             self.conn_index.remove(&s.conn_id);
             let _ = s.tx.send(SessionCmd::Close(StopReason::PermissionRevoked));
         }
+        self.forget_speaker_mutes(id);
+    }
+
+    /// The session with `id` ended: its "Mute PC" in either direction ends with it, so a phone
+    /// that disconnects never leaves this computer's speakers muted.
+    fn forget_speaker_mutes(&mut self, id: DeviceId) {
+        self.peer_speakers_muted.remove(&id);
+        if self.speakers_muted_by.remove(&id) && self.speakers_muted_by.is_empty() {
+            let sending_muted = self.settings.capture.mute_local_speakers
+                && self
+                    .routes
+                    .iter()
+                    .any(|r| r.kind == RouteKind::SendSystemAudio);
+            if !sending_muted {
+                self.hooks.set_speakers_muted(false);
+            }
+        }
     }
 
     fn on_remote_volume(&mut self, peer: DeviceId, v: VolumeSet) {
@@ -2397,6 +2432,11 @@ impl Actor {
             return;
         }
         if m.target == ControlTarget::DeviceSpeakers as i32 {
+            if m.muted {
+                self.speakers_muted_by.insert(peer);
+            } else {
+                self.speakers_muted_by.remove(&peer);
+            }
             if !self.hooks.set_speakers_muted(m.muted) {
                 let name = self.peer_name(&peer);
                 self.notice(
@@ -2639,12 +2679,14 @@ impl Actor {
     }
 
     fn shutdown(&mut self) {
-        // Sending this computer's audio may have muted its speakers: never leave them that way.
-        if self.settings.capture.mute_local_speakers
-            && self
-                .routes
-                .iter()
-                .any(|r| r.kind == RouteKind::SendSystemAudio)
+        // Sending this computer's audio, or a peer's "Mute PC", may have muted its speakers:
+        // never leave them that way.
+        if !self.speakers_muted_by.is_empty()
+            || self.settings.capture.mute_local_speakers
+                && self
+                    .routes
+                    .iter()
+                    .any(|r| r.kind == RouteKind::SendSystemAudio)
         {
             self.hooks.set_speakers_muted(false);
         }
@@ -2729,10 +2771,11 @@ impl Actor {
                     stats.underruns = c.underruns.load(Ordering::Relaxed);
                     stats.drift_ppm = c.drift_ppm.load(Ordering::Relaxed);
                     stats.level_db = c.level_db.get();
-                    stats.latency_ms = stats.buffer_ms
-                        + frame_ms
-                        + c.device_latency_ms.load(Ordering::Relaxed) as f64
-                        + rtt / 2.0;
+                    stats.encode_ms = frame_ms;
+                    stats.network_ms = rtt / 2.0;
+                    stats.output_ms = c.device_latency_ms.load(Ordering::Relaxed) as f64;
+                    stats.latency_ms =
+                        stats.buffer_ms + stats.encode_ms + stats.output_ms + stats.network_ms;
                 }
                 if let Some(c) = &r.sender_controls {
                     stats.level_db = c.level_db.get();
@@ -2741,10 +2784,15 @@ impl Actor {
                         stats.jitter_ms = remote.jitter_us as f64 / 1000.0;
                         stats.underruns = remote.underruns as u64;
                         stats.drift_ppm = remote.drift_ppm;
-                        stats.latency_ms = remote.buffer_ms as f64
-                            + frame_ms * 2.0
-                            + remote.output_latency_ms as f64
-                            + rtt / 2.0;
+                        stats.capture_ms = frame_ms;
+                        stats.encode_ms = frame_ms;
+                        stats.network_ms = rtt / 2.0;
+                        stats.output_ms = remote.output_latency_ms as f64;
+                        stats.latency_ms = stats.buffer_ms
+                            + stats.capture_ms
+                            + stats.encode_ms
+                            + stats.output_ms
+                            + stats.network_ms;
                     }
                 }
                 RouteView {
@@ -2914,6 +2962,11 @@ impl Actor {
                 None => "",
             }
             .to_string(),
+            remote_address: session
+                .map(|s| s.conn.remote_address().to_string())
+                .unwrap_or_default(),
+            speakers_muted: session.is_some()
+                && self.peer_speakers_muted.get(&id).copied().unwrap_or(false),
         }
     }
 }

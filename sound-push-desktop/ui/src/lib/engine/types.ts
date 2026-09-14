@@ -215,6 +215,10 @@ export interface PeerView {
   hasVirtualMic: boolean;
   /** "quic" or "tcp" (USB) while connected, "" otherwise. */
   transport: "" | "quic" | "tcp";
+  /** Other end of the connection ("192.168.1.20:47650", "[fe80::1%3]:47650"), "" while disconnected. */
+  remoteAddress: string;
+  /** This computer asked the device to mute its speakers. */
+  speakersMuted: boolean;
 }
 
 export interface RouteStats {
@@ -227,6 +231,11 @@ export interface RouteStats {
   underruns: number;
   driftPpm: number;
   levelDb: number;
+  /** Parts of latencyMs; the jitter buffer is bufferMs. */
+  captureMs: number;
+  encodeMs: number;
+  networkMs: number;
+  outputMs: number;
 }
 
 export interface RouteView {

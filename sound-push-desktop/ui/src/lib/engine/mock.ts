@@ -84,6 +84,8 @@ let state: EngineState = {
       canPlay: true,
       hasVirtualMic: false,
       transport: "quic",
+      remoteAddress: "192.168.1.23:47650",
+      speakersMuted: false,
     },
   ],
   routes: [],
@@ -187,7 +189,21 @@ export const mockEngine = {
               volume: 1,
               muted: false,
               keepRunning: false,
-              stats: { codec: "Opus", bitrateKbps: 128, latencyMs: 48, bufferMs: 30, jitterMs: 2, lossPct: 0, underruns: 0, driftPpm: 12, levelDb: -18 },
+              stats: {
+                codec: "Opus",
+                bitrateKbps: 128,
+                latencyMs: 52,
+                bufferMs: 30,
+                jitterMs: 2,
+                lossPct: 0,
+                underruns: 0,
+                driftPpm: 12,
+                levelDb: -18,
+                captureMs: 10,
+                encodeMs: 10,
+                networkMs: 2,
+                outputMs: 0,
+              },
             },
           ],
         });
@@ -220,6 +236,9 @@ export const mockEngine = {
       }
       case "usb_status":
         return { adbFound: true, devices: [{ serial: "mock123", model: "Redmi Note 9 Pro", authorized: true }], tcpPort: state.local.tcpPort } as T;
+      case "set_peer_speakers_muted":
+        emit({ peers: state.peers.map((p) => (p.deviceId === args?.deviceId ? { ...p, speakersMuted: Boolean(args?.muted) } : p)) });
+        return undefined as T;
       case "set_mic_muted":
         emit({ micMuted: Boolean(args?.muted) });
         return undefined as T;

@@ -490,7 +490,11 @@ impl Actor {
         if let Some(reply) = route.reply.take() {
             let _ = reply.send(Err(error.clone()));
         }
-        if route.kind == RouteKind::SendSystemAudio && self.settings.capture.mute_local_speakers {
+        // A peer's "Mute PC" keeps the speakers muted until it is turned off or the peer leaves.
+        if route.kind == RouteKind::SendSystemAudio
+            && self.settings.capture.mute_local_speakers
+            && self.speakers_muted_by.is_empty()
+        {
             self.hooks.set_speakers_muted(false);
         }
         let name = self.peer_name(&peer);

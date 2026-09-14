@@ -9,15 +9,14 @@
   import { formatElapsed, t } from "../lib/i18n";
   import { routeIcon, routeTitle } from "../lib/routes";
   import { store } from "../lib/stores/engine.svelte";
+  import { updateSettings } from "../lib/stores/settings";
   import { run } from "../lib/stores/toast.svelte";
 
   let { route }: { route: RouteView } = $props();
   let expanded = $state(false);
-  let pcMuted = $state(false);
 
   const peer = $derived(store.state?.peers.find((p) => p.deviceId === route.peerId));
   const quality = $derived<LinkQuality>(peer?.quality ?? "unknown");
-  const sending = $derived(route.kind.startsWith("send"));
   const detailsId = $props.id();
 </script>
 
@@ -68,16 +67,24 @@
           />
         </div>
       {/if}
-      {#if sending && route.kind === "sendSystemAudio"}
+      {#if route.kind === "sendSystemAudio"}
+        <!-- Sending this computer's sound: its own speakers are the ones to mute. -->
         <div class="row">
-          <span class="grow">{t("route.mutePc")}</span>
+          <span class="grow">{t("audio.muteLocal")}</span>
           <Toggle
-            checked={pcMuted}
-            label={t("route.mutePc")}
-            onchange={(v) => {
-              pcMuted = v;
-              void run(engine.setPeerSpeakersMuted(store.state!.local.deviceId, v));
-            }}
+            checked={store.state?.settings.capture.muteLocalSpeakers ?? false}
+            label={t("audio.muteLocal")}
+            onchange={(v) => updateSettings((x) => (x.capture.muteLocalSpeakers = v))}
+          />
+        </div>
+      {:else if route.kind === "receiveSystemAudio" && peer?.connection === "connected"}
+        <!-- Another computer's sound plays here: mute that computer's speakers. -->
+        <div class="row">
+          <span class="grow">{t("route.mutePeer", route.peerName)}</span>
+          <Toggle
+            checked={peer.speakersMuted}
+            label={t("route.mutePeer", route.peerName)}
+            onchange={(v) => run(engine.setPeerSpeakersMuted(route.peerId, v))}
           />
         </div>
       {/if}
