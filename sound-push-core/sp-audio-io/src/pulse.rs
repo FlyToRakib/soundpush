@@ -385,6 +385,8 @@ pub fn output_names() -> Result<Vec<String>, AudioError> {
 fn capture_device(pulse: &mut Pulse, source: &CaptureSource) -> Result<Option<String>, AudioError> {
     match source {
         CaptureSource::DefaultInput => Ok(None),
+        // Per-app capture is Windows-only for now (WASAPI process loopback).
+        CaptureSource::Application { .. } => Err(AudioError::LoopbackUnsupported),
         CaptureSource::Input(id) => find(&pulse.sources()?, id)
             .map(|d| Some(d.name.clone()))
             .ok_or_else(|| AudioError::DeviceNotFound(id.clone())),
