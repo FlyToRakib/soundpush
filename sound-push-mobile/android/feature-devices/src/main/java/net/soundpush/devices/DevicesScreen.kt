@@ -138,7 +138,7 @@ private fun DeviceRow(peer: PeerView, actionLabel: String? = null, onClick: () -
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.heightIn(min = 64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(SpIcons.forPlatform(peer.platform), active = peer.trusted && peer.connection == "connected")
+            IconTile(SpIcons.forPlatform(peer.platform), active = peer.trusted && peer.isConnected)
             Spacer(Modifier.width(Tokens.Space.md))
             Column(Modifier.weight(1f)) {
                 Text(peer.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -275,7 +275,7 @@ private fun NetworkTestCard(peer: PeerView, test: NetworkTestView?) {
             }
         } else {
             OutlinedButton(
-                enabled = peer.connection == "connected",
+                enabled = peer.isConnected,
                 onClick = { SoundPush.command { runNetworkTest(peer.deviceId) } },
             ) { Text(stringResource(R.string.nettest_run)) }
         }
@@ -337,7 +337,7 @@ private fun DeviceSheet(peer: PeerView, profile: DeviceProfile, test: NetworkTes
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconTile(SpIcons.forPlatform(peer.platform), active = peer.connection == "connected")
+                IconTile(SpIcons.forPlatform(peer.platform), active = peer.isConnected)
                 Spacer(Modifier.width(Tokens.Space.md))
                 Column(Modifier.weight(1f)) {
                     Text(peer.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -348,7 +348,7 @@ private fun DeviceSheet(peer: PeerView, profile: DeviceProfile, test: NetworkTes
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (peer.connection == "connected") {
+                if (peer.isConnected) {
                     OutlinedButton(onClick = { SoundPush.command { disconnect(peer.deviceId) } }) {
                         Text(stringResource(R.string.devices_disconnect))
                     }

@@ -25,7 +25,7 @@ data class EngineState(
     val networkTests: List<NetworkTestView> = emptyList(),
 ) {
     val trustedPeers get() = peers.filter { it.trusted }
-    val connectedPeers get() = trustedPeers.filter { it.connection == "connected" }
+    val connectedPeers get() = trustedPeers.filter { it.isConnected }
     val nearbyUntrusted get() = peers.filter { !it.trusted && it.online }
 }
 
@@ -78,7 +78,10 @@ data class PeerView(
     val hasVirtualMic: Boolean = false,
     /** "quic" or "tcp" (USB) while connected. */
     val transport: String = "",
-)
+) {
+    /** A session exists: "connected", or "degraded" (connected with high loss or jitter). */
+    val isConnected get() = connection == "connected" || connection == "degraded"
+}
 
 @Serializable
 data class Recommendation(

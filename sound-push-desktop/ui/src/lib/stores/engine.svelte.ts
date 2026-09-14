@@ -1,4 +1,5 @@
 // Reactive engine state shared by all screens (Svelte 5 runes).
+import { isConnected } from "../devices";
 import { onStartError, onState } from "../engine/client";
 import type { EngineState, PeerView, RouteKind } from "../engine/types";
 import { applyTheme } from "../theme/theme";
@@ -21,7 +22,7 @@ class EngineStore {
   }
 
   get connectedPeers(): PeerView[] {
-    return this.trustedPeers.filter((p) => p.connection === "connected");
+    return this.trustedPeers.filter((p) => isConnected(p.connection));
   }
 
   get nearbyUntrusted(): PeerView[] {

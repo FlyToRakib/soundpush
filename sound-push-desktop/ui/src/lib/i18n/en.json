@@ -62,6 +62,7 @@
   "quality.unknown": "—",
 
   "status.connected": "Connected",
+  "status.degraded": "Weak connection",
   "status.connecting": "Connecting…",
   "status.reconnecting": "Reconnecting…",
   "status.waitingForDevice": "Waiting for device",
@@ -341,6 +342,7 @@
   "notice.peerForgotUs": "{0} no longer recognises this computer. Pair again to reconnect.",
   "notice.settingsRecovered": "Settings were reset because the settings file was damaged.",
   "notice.muteSpeakersUnsupported": "This device can't mute its speakers remotely.",
+  "notice.unstableConnection": "The connection to {0} keeps dropping, so its streams use the Stable latency setting for now. A stronger Wi-Fi signal or USB helps.",
   "notice.autoMicStarted": "An app is using the virtual microphone, so {0}'s microphone was started.",
   "error.device.notFound": "Device not found",
   "error.network.unreachable": "Couldn't reach the device. Check that it's on and on the same network.",

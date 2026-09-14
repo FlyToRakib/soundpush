@@ -117,9 +117,7 @@ pub fn update(app: &AppHandle, state: &EngineState) {
             let connected = state
                 .peers
                 .iter()
-                .filter(|p| {
-                    p.trusted && p.connection == sp_engine::state::ConnectionStatus::Connected
-                })
+                .filter(|p| p.trusted && p.connection.is_connected())
                 .count();
             if connected == 0 {
                 "Not streaming".to_string()

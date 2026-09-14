@@ -38,7 +38,7 @@ impl Actor {
         }
     }
 
-    fn reconfigure_route(&mut self, key: &str) {
+    pub(super) fn reconfigure_route(&mut self, key: &str) {
         let Some(r) = self.routes.iter().find(|r| r.key() == key) else {
             return;
         };

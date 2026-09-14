@@ -1,6 +1,7 @@
 // Guided troubleshooter (plan §28.2): each topic runs automatic checks against the engine state
 // and the OS status before asking the user anything. Pure logic, so it is unit-tested.
 import type { EngineState, NetworkStatus, SystemStatus } from "./engine/types";
+import { isConnected } from "./devices";
 
 export type Topic = "noDevices" | "disconnects" | "noSound" | "micApps" | "crackles";
 export const TOPICS: Topic[] = ["noDevices", "disconnects", "noSound", "micApps", "crackles"];
@@ -62,7 +63,7 @@ export function diagnose(topic: Topic, ctx: Context): Step[] {
   const { state } = ctx;
   const s = state.settings;
   const trusted = state.peers.filter((p) => p.trusted);
-  const connected = trusted.filter((p) => p.connection === "connected");
+  const connected = trusted.filter((p) => isConnected(p.connection));
   const poor = connected.filter((p) => p.quality === "poor");
   const active = state.routes.filter((r) => r.status === "active");
   const steps: Step[] = [];

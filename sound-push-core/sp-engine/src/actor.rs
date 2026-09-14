@@ -33,6 +33,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
 use crate::error::{ErrorView, Severity};
+use crate::health::LinkHealth;
 use crate::net::{local_addresses, resolve, sort_candidates};
 use crate::nettest::NetworkReport;
 use crate::pipeline::monitor::MicMonitor;
@@ -40,10 +41,12 @@ use crate::pipeline::receiver::{PacketSink, Receiver, ReceiverConfig};
 use crate::pipeline::sender::{Sender, SenderConfig, Subscriber, Subscription};
 use crate::pipeline::{ReceiverControls, SenderControls};
 use crate::platform::{KeepAlive, PlatformHooks};
-use crate::reconnect::Backoff;
+use crate::reconnect::{Backoff, FlapDetector};
 use crate::resume::ResumeTokens;
 use crate::session::{self, Established, SessionCmd, SessionEvent};
-use crate::settings::{DeviceProfile, MicMode, SavedRoute, Settings, SettingsStore, Visibility};
+use crate::settings::{
+    DeviceProfile, LatencyMode, MicMode, SavedRoute, Settings, SettingsStore, Visibility,
+};
 use crate::state::*;
 use crate::{EngineConfig, EngineError};
 
@@ -63,6 +66,9 @@ const TRUST_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const USB_FALLBACK_DELAY: Duration = Duration::from_secs(2);
 /// Time to open audio devices once a route is accepted.
 const PIPELINE_START_DEADLINE: Duration = Duration::from_secs(20);
+/// Anti-flap (plan §20): a device held on the Stable profile returns to its own latency setting
+/// after this long without another reconnect.
+const STABLE_HOLD: Duration = Duration::from_secs(600);
 
 pub(crate) enum Command {
     StartPairing(Reply<String>),
@@ -236,6 +242,10 @@ struct Session {
     tx: mpsc::UnboundedSender<SessionCmd>,
     next_route: u8,
     connected_at: Instant,
+    /// `Degraded` detection, and the path counters it last saw.
+    health: LinkHealth,
+    path_sent: u64,
+    path_lost: u64,
 }
 
 impl Session {
@@ -381,6 +391,10 @@ pub(crate) struct Actor {
     last_publish: Instant,
     trust_flushed_at: Instant,
     local_audio: local_audio::LocalAudio,
+    /// Anti-flap (plan §20): recent reconnects per device, and devices streaming with the Stable
+    /// profile since their last reconnect.
+    flaps: HashMap<DeviceId, FlapDetector>,
+    stabilized: HashMap<DeviceId, Instant>,
 }
 
 pub(crate) async fn spawn(
@@ -486,6 +500,8 @@ pub(crate) async fn spawn(
         last_publish: Instant::now(),
         trust_flushed_at: Instant::now(),
         local_audio: local_audio::LocalAudio::default(),
+        flaps: HashMap::new(),
+        stabilized: HashMap::new(),
     };
     actor.refresh_local_addresses();
     if identity_reset {
@@ -665,7 +681,8 @@ impl Actor {
             .with(Capabilities::FEATURE_MIC_MONITOR)
             .with(Capabilities::FEATURE_SESSION_RESUME)
             .with(Capabilities::FEATURE_NETWORK_TEST)
-            .with(Capabilities::FEATURE_ROUTE_RECONFIGURE);
+            .with(Capabilities::FEATURE_ROUTE_RECONFIGURE)
+            .with(Capabilities::FEATURE_DTX);
         if self.tcp.as_ref().is_some_and(|t| t.local_port() != 0) {
             bits = bits.with(Capabilities::TRANSPORT_TCP);
         }
@@ -964,6 +981,8 @@ impl Actor {
                     }
                     self.remove_routes_for(id);
                     self.end_network_test(id, EngineError::Unreachable);
+                    self.flaps.remove(&id);
+                    self.stabilized.remove(&id);
                     // Suppress auto reconnect for this device until the user connects again.
                     let _ = self.trust.update(&id, |d| d.auto_connect = false);
                 }
@@ -1744,6 +1763,7 @@ impl Actor {
             d.backoff.reset();
         }
         self.conn_index.insert(est.conn_id, id);
+        let path = est.conn.stats();
         let session = Session {
             conn_id: est.conn_id,
             conn: est.conn,
@@ -1752,6 +1772,9 @@ impl Actor {
             tx: est.tx,
             next_route: if est.dialed { 2 } else { 1 },
             connected_at: Instant::now(),
+            health: LinkHealth::default(),
+            path_sent: path.sent_packets,
+            path_lost: path.lost_packets,
         };
         // A token to resume this session after a network interruption (plan §20).
         if Capabilities(session.hello.capabilities).has(Capabilities::FEATURE_SESSION_RESUME) {
@@ -1808,12 +1831,98 @@ impl Actor {
             // one may already be established (or about to be) and resumes the paused routes.
             _ => {
                 self.pause_routes_for(id);
+                // A superseded connection was replaced on purpose; it is not a drop.
+                if reason != StopReason::Superseded {
+                    self.record_reconnect(id);
+                }
                 if self.trust.get(&id).is_some_and(|d| d.auto_connect) {
                     let state = self.dials.entry(id).or_insert_with(new_dial);
                     state.in_flight = false;
                     state.backoff.reset();
                     state.next_attempt = Instant::now() + Duration::from_millis(300);
                 }
+            }
+        }
+    }
+
+    /// Anti-flap (plan §20): more than five drops in two minutes switch the device's routes to
+    /// the Stable profile until it has stayed connected for [`STABLE_HOLD`]. Paused routes pick
+    /// it up when they resume ([`Self::profile_for`]).
+    fn record_reconnect(&mut self, id: DeviceId) {
+        let now = Instant::now();
+        let flapping = self.flaps.entry(id).or_default().record(now);
+        if let Some(since) = self.stabilized.get_mut(&id) {
+            *since = now;
+            return;
+        }
+        if flapping {
+            self.stabilized.insert(id, now);
+            warn!(peer = %id.short(), "connection keeps dropping; switching to the Stable profile");
+            let name = self.peer_name(&id);
+            self.notice(
+                "notice.unstableConnection",
+                vec![name],
+                Severity::Warning,
+                None,
+            );
+        }
+    }
+
+    /// Devices held on the Stable profile that have been connected long enough go back to their
+    /// own latency setting; running routes are reconfigured live.
+    fn expire_stable_holds(&mut self, now: Instant) {
+        let expired: Vec<DeviceId> = self
+            .stabilized
+            .iter()
+            .filter(|(_, since)| now.duration_since(**since) >= STABLE_HOLD)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in expired {
+            self.stabilized.remove(&id);
+            self.flaps.remove(&id);
+            info!(peer = %id.short(), "connection stable again; restoring its latency profile");
+            let keys: Vec<String> = self
+                .routes
+                .iter()
+                .filter(|r| r.peer == id && r.status == RouteStatus::Active)
+                .map(Route::key)
+                .collect();
+            for key in keys {
+                self.reconfigure_route(&key);
+            }
+        }
+    }
+
+    /// Once per second: a session is `Degraded` while loss or jitter stays above the threshold
+    /// (plan §19.1). Loss is the worse of the QUIC path and the session's routes.
+    fn update_link_health(&mut self) {
+        for (id, s) in &mut self.sessions {
+            let path = s.conn.stats();
+            let sent = path.sent_packets.saturating_sub(s.path_sent);
+            let lost = path.lost_packets.saturating_sub(s.path_lost);
+            s.path_sent = path.sent_packets;
+            s.path_lost = path.lost_packets;
+            // Keep-alives alone are too few packets to say anything about loss.
+            let mut loss = if sent >= 20 {
+                lost as f64 * 100.0 / sent as f64
+            } else {
+                0.0
+            };
+            let mut jitter = 0.0f64;
+            for r in self
+                .routes
+                .iter()
+                .filter(|r| r.peer == *id && r.status == RouteStatus::Active)
+            {
+                loss = loss.max(r.loss_pct);
+                if let Some(c) = &r.receiver_controls {
+                    jitter = jitter.max(c.jitter_ms.get() as f64);
+                } else if let Some(remote) = &r.remote_stats {
+                    jitter = jitter.max(remote.jitter_us as f64 / 1000.0);
+                }
+            }
+            if s.health.update(loss, jitter) {
+                info!(peer = %id.short(), degraded = s.health.is_degraded(), loss, jitter, "connection quality changed");
             }
         }
     }
@@ -2028,7 +2137,12 @@ impl Actor {
 
     /// Profile proposed for a route with `peer`: global stream settings plus the device's profile.
     fn profile_for(&self, kind: RouteKind, peer: &DeviceId) -> StreamProfile {
-        let s = self.settings.stream_for(&peer.to_hex());
+        let mut s = self.settings.stream_for(&peer.to_hex());
+        // Anti-flap: a connection that keeps dropping streams with the Stable profile for a
+        // while. A custom buffer is the user's explicit choice and stays.
+        if self.stabilized.contains_key(peer) && s.latency != LatencyMode::Custom {
+            s.latency = LatencyMode::Stable;
+        }
         let channels = if kind.is_mic() { 1 } else { 2 };
         let mut p = build_profile(s.latency_profile(), s.quality(), channels, s.redundancy);
         if kind.is_mic() && p.frame_us < 10_000 {
@@ -2367,6 +2481,8 @@ impl Actor {
     }
 
     fn revoke(&mut self, id: DeviceId) {
+        self.flaps.remove(&id);
+        self.stabilized.remove(&id);
         self.remove_routes_for(id);
         self.cancel_dial(&id);
         self.dials.remove(&id);
@@ -2543,6 +2659,9 @@ impl Actor {
                 r.last_bytes = bytes;
             }
         }
+
+        self.update_link_health();
+        self.expire_stable_holds(now);
 
         // Capabilities can change while connected (e.g. a virtual microphone was installed).
         // Re-send Hello so peers enable or disable the matching tasks without reconnecting.
@@ -2836,8 +2955,12 @@ impl Actor {
             .map(|s| Capabilities(s.hello.capabilities))
             .or_else(|| advert.map(|a| a.capabilities))
             .unwrap_or_default();
-        let connection = if session.is_some() {
-            ConnectionStatus::Connected
+        let connection = if let Some(s) = session {
+            if s.health.is_degraded() {
+                ConnectionStatus::Degraded
+            } else {
+                ConnectionStatus::Connected
+            }
         } else if self.pairings.contains_key(&id) {
             ConnectionStatus::PairingRequired
         } else if let Some(d) = self.dials.get(&id) {

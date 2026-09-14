@@ -8,6 +8,7 @@
 mod actor;
 pub mod crash;
 pub mod error;
+mod health;
 mod net;
 pub mod nettest;
 pub mod pipeline;

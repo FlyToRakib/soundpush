@@ -50,6 +50,7 @@
     <string name="quality_poor">Poor</string>
 
     <string name="status_connected">Connected</string>
+    <string name="status_degraded">Weak connection</string>
     <string name="status_connecting">Connecting…</string>
     <string name="status_reconnecting">Reconnecting…</string>
     <string name="status_waitingForDevice">Waiting for device</string>
@@ -216,6 +217,7 @@
     <string name="notice_identity_reset">This phone\'s identity was reset because its stored key was damaged. Pair your devices again.</string>
     <string name="notice_trust_store_recovered">Paired devices were reset because the stored list was damaged.</string>
     <string name="notice_settings_recovered">Settings were reset because the stored file was damaged.</string>
+    <string name="notice_unstable_connection">The connection to %1$s keeps dropping, so its streams use the Stable latency setting for now. A stronger Wi-Fi signal or USB helps.</string>
     <string name="notice_mute_speakers_unsupported">Muting the computer\'s speakers isn\'t supported there.</string>
     <string name="notice_generic">SoundPush needs your attention.</string>
 

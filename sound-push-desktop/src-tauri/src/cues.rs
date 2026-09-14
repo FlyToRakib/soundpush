@@ -10,7 +10,7 @@ use std::time::Duration;
 use sp_audio_io::cpal_backend::CpalBackend;
 use sp_audio_io::{AudioBackend, RenderTarget};
 use sp_engine::EngineState;
-use sp_engine::state::{ConnectionStatus, RouteStatus};
+use sp_engine::state::RouteStatus;
 
 const RATE: f32 = 48_000.0;
 /// Quiet on purpose: about -20 dBFS.
@@ -60,7 +60,7 @@ pub fn changes(previous: &EngineState, current: &EngineState) -> Vec<Cue> {
     let connected = |s: &EngineState| {
         s.peers
             .iter()
-            .filter(|p| p.trusted && p.connection == ConnectionStatus::Connected)
+            .filter(|p| p.trusted && p.connection.is_connected())
             .count()
     };
     let active = |s: &EngineState| {

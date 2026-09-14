@@ -1,6 +1,11 @@
-import type { AudioDeviceView } from "./engine/types";
+import type { AudioDeviceView, ConnectionStatus } from "./engine/types";
 
 export const DEFAULT_DEVICE = "__default__";
+
+/** A session exists: connected, or connected with high loss or jitter ("degraded"). */
+export function isConnected(status: ConnectionStatus): boolean {
+  return status === "connected" || status === "degraded";
+}
 
 export interface Option {
   value: string;

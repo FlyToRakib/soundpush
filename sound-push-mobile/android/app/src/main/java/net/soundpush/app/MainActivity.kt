@@ -397,7 +397,7 @@ class MainActivity : ComponentActivity() {
                         onShowMessage = showMessage,
                         banners = banners,
                         peerLabel = { peer ->
-                            val viaUsb = network.usbTethering && peer.connection == "connected" && peer.addresses.any(network::isTetherAddress)
+                            val viaUsb = network.usbTethering && peer.isConnected && peer.addresses.any(network::isTetherAddress)
                             if (viaUsb) usbLabel else null
                         },
                     )

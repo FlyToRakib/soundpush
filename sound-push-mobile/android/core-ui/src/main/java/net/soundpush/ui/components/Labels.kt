@@ -11,6 +11,7 @@ object Labels {
     @StringRes
     fun status(connection: String): Int = when (connection) {
         "connected" -> R.string.status_connected
+        "degraded" -> R.string.status_degraded
         "connecting" -> R.string.status_connecting
         "reconnecting" -> R.string.status_reconnecting
         "waitingForDevice" -> R.string.status_waitingForDevice
@@ -57,6 +58,7 @@ object Labels {
         "notice.settingsRecovered" -> R.string.notice_settings_recovered
         "notice.muteSpeakersUnsupported" -> R.string.notice_mute_speakers_unsupported
         "notice.crashReport" -> R.string.notice_crash_report
+        "notice.unstableConnection" -> R.string.notice_unstable_connection
         else -> R.string.notice_generic
     }
 

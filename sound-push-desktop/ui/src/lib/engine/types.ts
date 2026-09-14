@@ -30,6 +30,8 @@ export type ConnectionStatus =
   | "connecting"
   | "pairingRequired"
   | "connected"
+  /** Connected, but loss or jitter is high; streams keep running. */
+  | "degraded"
   | "reconnecting"
   | "waitingForDevice"
   | "incompatible";
