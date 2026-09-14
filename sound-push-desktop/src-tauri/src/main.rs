@@ -15,9 +15,11 @@ mod system;
 mod tray;
 mod usb;
 mod virtual_mic;
+mod window_state;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use sp_engine::{EngineConfig, EngineHandle, EngineState};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -43,6 +45,10 @@ impl AppState {
 }
 
 pub const MAIN_WINDOW: &str = "main";
+/// How long a normal launch waits for the engine before showing the window with "Starting…".
+const ENGINE_WAIT: Duration = Duration::from_millis(1500);
+/// Settings tip id recorded once the "SoundPush keeps running" hint was shown.
+const CLOSE_HINT_TIP: &str = "closeToTray";
 
 fn init_logging(dir: &std::path::Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     std::fs::create_dir_all(dir).ok()?;
@@ -64,6 +70,9 @@ fn init_logging(dir: &std::path::Path) -> Option<tracing_appender::non_blocking:
 
 /// Show the main window, creating it if it was destroyed when closed.
 pub fn show_main_window(app: &AppHandle) {
+    // Several threads may ask at once (first launch, engine failure, tray); create one window.
+    static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _opening = OPENING.lock();
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -78,12 +87,19 @@ pub fn show_main_window(app: &AppHandle) {
         .title("SoundPush")
         .inner_size(1000.0, 700.0)
         .min_inner_size(760.0, 520.0)
+        .center()
+        // Sized and placed like last time before it appears.
+        .visible(false)
         // Ctrl/Cmd + and − scale the whole UI (text scaling for low vision).
         .zoom_hotkeys_enabled(true)
         .theme(theme)
         .build()
     {
         Ok(window) => {
+            if let Some(saved) = app.try_state::<window_state::WindowState>() {
+                saved.restore(&window);
+            }
+            let _ = window.show();
             let _ = window.set_focus();
         }
         Err(e) => error!(error = %e, "failed to open window"),
@@ -131,17 +147,29 @@ fn main() {
                 hooks: hooks.clone(),
             });
             app.manage(hotkeys::Hotkeys::default());
-            tray::create(app)?;
+            app.manage(window_state::WindowState::load(&data_dir));
+            if let Err(e) = tray::create(app) {
+                // A desktop without tray support must not stop SoundPush; the window stays reachable.
+                warn!(error = %e, "could not create the tray icon");
+            }
             device_watch::start(handle.clone());
             watch_network(hooks.clone());
             os_events::start(handle.clone(), hooks.clone());
             os_events::register_restart();
             virtual_mic::restore();
 
-            // Show the window right away; the UI displays "Starting…" until the engine is ready.
+            // The engine starts first (plan §13.1): a normal launch opens the window once it is
+            // ready, or after ENGINE_WAIT with "Starting…" when the OS holds it up (Keychain prompt).
             let autostarted = std::env::args().any(|a| a == "--autostart");
+            let (ready, engine_ready) = std::sync::mpsc::channel::<()>();
             if !autostarted {
-                show_main_window(&handle);
+                let handle = handle.clone();
+                std::thread::Builder::new()
+                    .name("sp-first-window".into())
+                    .spawn(move || {
+                        let _ = engine_ready.recv_timeout(ENGINE_WAIT);
+                        show_main_window(&handle);
+                    })?;
             }
 
             // The engine may wait on the OS (e.g. a Keychain prompt), so never start it on the main thread.
@@ -157,10 +185,23 @@ fn main() {
                             if let Some(state) = handle.try_state::<AppState>() {
                                 let _ = state.engine.set(engine.clone());
                             }
+                            let _ = ready.send(());
                             let settings = engine.state().settings.clone();
                             sync_autostart(&handle, settings.desktop.launch_at_login);
-                            if autostarted && !settings.desktop.start_minimized {
-                                show_main_window(&handle);
+                            if autostarted {
+                                // Plan §24: after sign-in the window opens only when asked to or
+                                // while onboarding is unfinished.
+                                let onboarded =
+                                    settings.dismissed_tips.iter().any(|t| t == "onboarding");
+                                if !settings.desktop.start_minimized || !onboarded {
+                                    show_main_window(&handle);
+                                } else if !tray::available(&handle) {
+                                    // No tray on this desktop: a minimized window keeps SoundPush reachable.
+                                    show_main_window(&handle);
+                                    if let Some(window) = handle.get_webview_window(MAIN_WINDOW) {
+                                        let _ = window.minimize();
+                                    }
+                                }
                             }
                             let _ = handle.emit("engine://state", &*engine.state());
                             forward_state(handle, engine, hooks);
@@ -173,6 +214,8 @@ fn main() {
                                 *slot = Some(e.to_string());
                             }
                             let _ = handle.emit("engine://error", e.to_string());
+                            let _ = ready.send(());
+                            tray::show_error(&handle, &e.to_string());
                             // Autostarted in the tray: a failure must not stay invisible.
                             show_main_window(&handle);
                         }
@@ -228,6 +271,8 @@ fn main() {
             commands::request_microphone,
             commands::open_system_settings,
             commands::list_audio_apps,
+            commands::close_main_window,
+            commands::quit_app,
         ])
         .build(tauri::generate_context!());
 
@@ -250,6 +295,9 @@ fn main() {
         // Tauri ends the process right after this without dropping managed state, so the engine
         // must stop here: unmute the speakers, tell peers, release sleep prevention.
         RunEvent::Exit => {
+            if let Some(saved) = app.try_state::<window_state::WindowState>() {
+                saved.save();
+            }
             if let Some(engine) = app
                 .try_state::<AppState>()
                 .and_then(|s| s.engine.get().cloned())
@@ -257,26 +305,55 @@ fn main() {
                 engine.shutdown(std::time::Duration::from_secs(2));
             }
         }
-        RunEvent::WindowEvent {
-            label,
-            event: WindowEvent::CloseRequested { .. },
-            ..
-        } if label == MAIN_WINDOW => {
-            let close_to_tray = app
-                .try_state::<AppState>()
-                .and_then(|s| {
-                    s.engine
-                        .get()
-                        .map(|e| e.state().settings.desktop.close_to_tray)
-                })
-                .unwrap_or(true);
-            if !close_to_tray {
-                app.exit(0);
+        RunEvent::WindowEvent { label, event, .. } if label == MAIN_WINDOW => match event {
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                if let (Some(saved), Some(window)) = (
+                    app.try_state::<window_state::WindowState>(),
+                    app.get_webview_window(MAIN_WINDOW),
+                ) {
+                    saved.track(&window);
+                }
             }
-            // Otherwise the window closes and its webview is destroyed, freeing its memory.
-        }
+            WindowEvent::CloseRequested { api, .. } => on_close_requested(app, &api),
+            _ => {}
+        },
         _ => {}
     });
+}
+
+/// Closing the window (plan §24): quits when "Keep running when the window is closed" is off.
+/// Otherwise the webview is destroyed, freeing its memory, and SoundPush stays in the tray. The
+/// first time the window stays open for a one-time explanation; on desktops without a tray the
+/// window is minimized instead of disappearing.
+fn on_close_requested(app: &AppHandle, api: &tauri::CloseRequestApi) {
+    if let Some(saved) = app.try_state::<window_state::WindowState>() {
+        saved.save();
+    }
+    let Some(state) = app
+        .try_state::<AppState>()
+        .and_then(|s| s.engine.get().map(|e| e.state()))
+    else {
+        return;
+    };
+    if !state.settings.desktop.close_to_tray {
+        app.exit(0);
+        return;
+    }
+    let tray = tray::available(app);
+    if !state
+        .settings
+        .dismissed_tips
+        .iter()
+        .any(|t| t == CLOSE_HINT_TIP)
+    {
+        api.prevent_close();
+        let _ = app.emit_to(MAIN_WINDOW, "window://close-hint", tray);
+    } else if !tray {
+        api.prevent_close();
+        if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            let _ = window.minimize();
+        }
+    }
 }
 
 /// Push engine state to the UI and tray; apply desktop-side settings.

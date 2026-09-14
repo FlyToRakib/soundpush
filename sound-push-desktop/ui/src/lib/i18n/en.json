@@ -324,6 +324,14 @@
   "onboarding.skip": "Skip",
   "onboarding.done": "Done",
 
+  "closeHint.title": "SoundPush keeps running",
+  "closeHint.body": "Closing the window leaves SoundPush running in the tray, so your devices can still connect and streams keep playing. Open it again or quit from the tray icon.",
+  "closeHint.bodyMac": "Closing the window leaves SoundPush running in the menu bar, so your devices can still connect and streams keep playing. Open it again or quit from the menu bar icon.",
+  "closeHint.noTray": "This desktop doesn't show tray icons, so SoundPush stays in the taskbar as a minimized window while it runs. Quit SoundPush to stop it completely.",
+  "closeHint.ok": "Keep running",
+  "closeHint.minimize": "Minimize",
+  "closeHint.quit": "Quit SoundPush",
+
   "common.cancel": "Cancel",
   "common.close": "Close",
   "common.save": "Save",

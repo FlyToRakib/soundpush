@@ -64,6 +64,20 @@ export async function onStartError(handler: (message: string) => void): Promise<
   return unlisten;
 }
 
+/** The window was closed for the first time while SoundPush keeps running (`tray`: an icon is visible). */
+export async function onCloseHint(handler: (tray: boolean) => void): Promise<Unlisten> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<boolean>("window://close-hint", (e) => handler(e.payload));
+}
+
+/** The OS reported a network change or a wake from sleep (src-tauri/src/os_events.rs). */
+export async function onNetworkChanged(handler: () => void): Promise<Unlisten> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("platform://network-changed", () => handler());
+}
+
 export const engine = {
   // pairing
   startPairing: () => call<string>("start_pairing"),
@@ -124,4 +138,6 @@ export const engine = {
   exportDiagnostics: () => call<string>("export_diagnostics"),
   openLogsFolder: () => call<void>("open_logs_folder"),
   openUrl: (url: string) => call<void>("open_url", { url }),
+  closeMainWindow: () => call<void>("close_main_window"),
+  quitApp: () => call<void>("quit_app"),
 };

@@ -11,7 +11,7 @@ use sp_engine::{
     DeviceProfile, EngineError, EngineState, ErrorView, NetworkReport, PermissionKind, Policy,
     Severity,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::AppState;
@@ -548,6 +548,28 @@ pub async fn list_audio_apps() -> CmdResult<AudioApps> {
     })
     .await
     .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
+/// Close the main window after the one-time "still running" hint: into the tray, or minimized
+/// on desktops without a tray, where a closed window would leave nothing to click.
+#[tauri::command]
+pub async fn close_main_window(app: AppHandle) {
+    let Some(window) = app.get_webview_window(crate::MAIN_WINDOW) else {
+        return;
+    };
+    if crate::tray::available(&app) {
+        if let Some(saved) = app.try_state::<crate::window_state::WindowState>() {
+            saved.save();
+        }
+        let _ = window.destroy();
+    } else {
+        let _ = window.minimize();
+    }
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
