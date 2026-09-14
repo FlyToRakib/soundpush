@@ -122,7 +122,11 @@ mod tests {
 
     #[test]
     fn disjoint_fails() {
-        assert!(range((1, 0), (1, 1)).negotiate(range((2, 0), (2, 3))).is_err());
+        assert!(
+            range((1, 0), (1, 1))
+                .negotiate(range((2, 0), (2, 3)))
+                .is_err()
+        );
     }
 
     #[test]

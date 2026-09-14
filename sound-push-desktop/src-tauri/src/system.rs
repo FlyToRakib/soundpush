@@ -30,7 +30,11 @@ pub struct SystemStatus {
 /// Microphone permission only (cheap; checked before microphone routes start).
 pub fn microphone() -> &'static str {
     #[cfg(windows)]
-    return if windows::microphone_denied() { "denied" } else { "granted" };
+    return if windows::microphone_denied() {
+        "denied"
+    } else {
+        "granted"
+    };
     #[cfg(target_os = "macos")]
     return crate::macos::microphone_permission();
     #[allow(unreachable_code)]
@@ -99,8 +103,12 @@ pub fn settings_url(topic: &str) -> Option<&'static str> {
     };
     #[cfg(target_os = "macos")]
     return match topic {
-        "microphone" => Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"),
-        "systemAudio" => Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"),
+        "microphone" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        }
+        "systemAudio" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        }
         "sound" => Some("x-apple.systempreferences:com.apple.Sound-Settings.extension"),
         "network" => Some("x-apple.systempreferences:com.apple.Network-Settings.extension"),
         _ => None,
@@ -117,34 +125,49 @@ mod windows {
     use std::path::PathBuf;
 
     use windows::Win32::Media::Audio::{
-        AudioSessionStateActive, DEVICE_STATE_ACTIVE, EDataFlow, IAudioSessionControl2, IAudioSessionManager2,
-        IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eRender,
+        AudioSessionStateActive, DEVICE_STATE_ACTIVE, EDataFlow, IAudioSessionControl2,
+        IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, eCapture,
+        eRender,
     };
     use windows::Win32::System::Com::{
-        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize, STGM_READ,
+        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+        STGM_READ,
     };
     use windows::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_BINARY, RRF_RT_REG_SZ, RegGetValueW,
+        HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_BINARY,
+        RRF_RT_REG_SZ, RegGetValueW,
     };
     use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
     use windows::core::{GUID, HSTRING, Interface};
 
     /// `PKEY_Device_FriendlyName`.
-    const FRIENDLY_NAME: PROPERTYKEY =
-        PROPERTYKEY { fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0), pid: 14 };
+    const FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
+        fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
+        pid: 14,
+    };
     /// `DEVPKEY_Device_EnumeratorName` ("BTHENUM", "BTHHFENUM", "BTHLEDEVICE" for Bluetooth).
-    const ENUMERATOR_NAME: PROPERTYKEY =
-        PROPERTYKEY { fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0), pid: 24 };
-    const CONSENT_STORE: &str =
-        r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+    const ENUMERATOR_NAME: PROPERTYKEY = PROPERTYKEY {
+        fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
+        pid: 24,
+    };
+    const CONSENT_STORE: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
 
     fn registry(root: HKEY, path: &str, name: &str, kind: REG_ROUTINE_FLAGS) -> Option<Vec<u8>> {
         let (path, name) = (HSTRING::from(path), HSTRING::from(name));
         let mut buf = vec![0u8; 512];
         let mut size = buf.len() as u32;
         // SAFETY: the buffer and its byte size are valid for the call.
-        let status =
-            unsafe { RegGetValueW(root, &path, &name, kind, None, Some(buf.as_mut_ptr().cast()), Some(&mut size)) };
+        let status = unsafe {
+            RegGetValueW(
+                root,
+                &path,
+                &name,
+                kind,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut size),
+            )
+        };
         if status.is_err() {
             return None;
         }
@@ -154,27 +177,37 @@ mod windows {
 
     fn registry_string(root: HKEY, path: &str, name: &str) -> Option<String> {
         let bytes = registry(root, path, name, RRF_RT_REG_SZ)?;
-        let wide: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let wide: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         let len = wide.iter().position(|&c| c == 0).unwrap_or(wide.len());
         Some(String::from_utf16_lossy(&wide[..len]))
     }
 
     /// Settings → Privacy → Microphone: off for the device, for this user, or for desktop apps.
     pub fn microphone_denied() -> bool {
-        let deny =
-            |root, path: &str| registry_string(root, path, "Value").is_some_and(|v| v.eq_ignore_ascii_case("Deny"));
+        let deny = |root, path: &str| {
+            registry_string(root, path, "Value").is_some_and(|v| v.eq_ignore_ascii_case("Deny"))
+        };
         deny(HKEY_LOCAL_MACHINE, CONSENT_STORE)
             || deny(HKEY_CURRENT_USER, CONSENT_STORE)
             || deny(HKEY_CURRENT_USER, &format!(r"{CONSENT_STORE}\NonPackaged"))
     }
 
     pub fn edition() -> Option<String> {
-        registry_string(HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "EditionID")
+        registry_string(
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            "EditionID",
+        )
     }
 
     /// Media Foundation ships with every Windows edition except N/KN without the Media Feature Pack.
     pub fn media_feature_pack_missing() -> bool {
-        let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let system = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
         !system.join(r"System32\mfplat.dll").exists()
     }
 
@@ -195,9 +228,12 @@ mod windows {
         unsafe {
             let init = CoInitializeEx(None, COINIT_MULTITHREADED);
             let devices = (|| -> windows::core::Result<Vec<IMMDevice>> {
-                let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+                let enumerator: IMMDeviceEnumerator =
+                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
                 let collection = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)?;
-                (0..collection.GetCount()?).map(|i| collection.Item(i)).collect()
+                (0..collection.GetCount()?)
+                    .map(|i| collection.Item(i))
+                    .collect()
             })();
             let result = devices.map(f).unwrap_or_default();
             if init.is_ok() {
@@ -220,7 +256,10 @@ mod windows {
         with_devices(eRender, |devices| {
             devices
                 .iter()
-                .filter(|d| property(d, &ENUMERATOR_NAME).is_some_and(|e| e.to_ascii_uppercase().starts_with("BTH")))
+                .filter(|d| {
+                    property(d, &ENUMERATOR_NAME)
+                        .is_some_and(|e| e.to_ascii_uppercase().starts_with("BTH"))
+                })
                 .filter_map(|d| property(d, &FRIENDLY_NAME))
                 .collect()
         })
@@ -229,21 +268,32 @@ mod windows {
     pub fn capture_device_in_use(input: &str) -> bool {
         let own = std::process::id();
         with_devices(eCapture, |devices| {
-            devices.iter().filter(|d| property(d, &FRIENDLY_NAME).is_some_and(|n| n == input)).any(|device| {
-                // SAFETY: session enumeration on a live device.
-                unsafe {
-                    let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else {
-                        return false;
-                    };
-                    let Ok(sessions) = manager.GetSessionEnumerator() else { return false };
-                    (0..sessions.GetCount().unwrap_or(0)).any(|i| {
-                        sessions.GetSession(i).and_then(|s| s.cast::<IAudioSessionControl2>()).is_ok_and(|s| {
-                            s.GetState().is_ok_and(|state| state == AudioSessionStateActive)
-                                && s.GetProcessId().is_ok_and(|pid| pid != own)
+            devices
+                .iter()
+                .filter(|d| property(d, &FRIENDLY_NAME).is_some_and(|n| n == input))
+                .any(|device| {
+                    // SAFETY: session enumeration on a live device.
+                    unsafe {
+                        let Ok(manager) =
+                            device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
+                        else {
+                            return false;
+                        };
+                        let Ok(sessions) = manager.GetSessionEnumerator() else {
+                            return false;
+                        };
+                        (0..sessions.GetCount().unwrap_or(0)).any(|i| {
+                            sessions
+                                .GetSession(i)
+                                .and_then(|s| s.cast::<IAudioSessionControl2>())
+                                .is_ok_and(|s| {
+                                    s.GetState()
+                                        .is_ok_and(|state| state == AudioSessionStateActive)
+                                        && s.GetProcessId().is_ok_and(|pid| pid != own)
+                                })
                         })
-                    })
-                }
-            })
+                    }
+                })
         })
     }
 
@@ -255,8 +305,14 @@ mod windows {
         fn reads_system_state_without_admin() {
             assert!(edition().is_some());
             assert!(!media_feature_pack_missing() || edition().is_some_and(|e| e.ends_with('N')));
-            let _ = (microphone_denied(), autostart_disabled_by_os(), bluetooth_outputs());
-            assert!(!capture_device_in_use("SoundPush test device that does not exist"));
+            let _ = (
+                microphone_denied(),
+                autostart_disabled_by_os(),
+                bluetooth_outputs(),
+            );
+            assert!(!capture_device_in_use(
+                "SoundPush test device that does not exist"
+            ));
         }
     }
 }

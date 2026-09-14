@@ -32,7 +32,9 @@ pub fn install(data_dir: &Path, app_version: &str) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         // Never let reporting itself fail loudly: a panic inside a panic hook aborts.
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| write_report(&dir, &version, info)));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            write_report(&dir, &version, info)
+        }));
         previous(info);
     }));
 }
@@ -48,7 +50,10 @@ fn write_report(dir: &Path, version: &str, info: &std::panic::PanicHookInfo<'_>)
         .location()
         .map(|l| format!("{}:{}", l.file(), l.line()))
         .unwrap_or_default();
-    let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+    let thread = std::thread::current()
+        .name()
+        .unwrap_or("unnamed")
+        .to_string();
     let backtrace = std::backtrace::Backtrace::force_capture().to_string();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -174,7 +179,10 @@ fn flush_token(token: &mut String, out: &mut String) {
                 .iter()
                 .all(|p| !p.is_empty() && p.len() <= 3 && p.chars().all(|c| c.is_ascii_digit()))
     };
-    let is_ipv6 = colons >= 2 && t.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') && t.len() >= 6;
+    let is_ipv6 = colons >= 2
+        && t.chars()
+            .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+        && t.len() >= 6;
     let hex_run = t.len() >= 16 && t.chars().all(|c| c.is_ascii_hexdigit());
     out.push_str(lead);
     if is_ipv4 || is_ipv6 {

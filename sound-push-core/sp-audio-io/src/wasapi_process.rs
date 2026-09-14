@@ -15,14 +15,18 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK, AUDIOCLIENT_ACTIVATION_PARAMS,
-    AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
-    ActivateAudioInterfaceAsync, DEVICE_STATE_ACTIVE, IActivateAudioInterfaceAsyncOperation,
-    IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient,
-    IAudioClient, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
-    PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX, eRender,
+    AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync, DEVICE_STATE_ACTIVE,
+    IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
+    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
+    IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
+    PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+    WAVEFORMATEX, eRender,
 };
-use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
+use windows::Win32::System::Com::{
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -104,10 +108,17 @@ fn processes() -> Vec<ProcessEntry> {
         let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
             return out;
         };
-        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
         let mut ok = Process32FirstW(snapshot, &mut entry).is_ok();
         while ok {
-            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
             out.push(ProcessEntry {
                 pid: entry.th32ProcessID,
                 parent: entry.th32ParentProcessID,
@@ -135,37 +146,51 @@ fn find_process(exe: &str) -> Option<u32> {
 /// SoundPush itself and the system sounds session are left out.
 pub fn audio_apps() -> Vec<AudioApp> {
     let own = std::process::id();
-    let names: std::collections::HashMap<u32, String> = processes().into_iter().map(|p| (p.pid, p.exe)).collect();
+    let names: std::collections::HashMap<u32, String> =
+        processes().into_iter().map(|p| (p.pid, p.exe)).collect();
     let mut apps: Vec<AudioApp> = Vec::new();
     with_com(|| {
         // SAFETY: COM calls on objects created and released within this scope.
         let result: windows::core::Result<()> = unsafe {
             (|| {
-                let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+                let enumerator: IMMDeviceEnumerator =
+                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
                 let devices = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)?;
                 for i in 0..devices.GetCount()? {
-                    let Ok(manager) =
-                        devices.Item(i).and_then(|d| d.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None))
+                    let Ok(manager) = devices
+                        .Item(i)
+                        .and_then(|d| d.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None))
                     else {
                         continue;
                     };
                     let sessions = manager.GetSessionEnumerator()?;
                     for j in 0..sessions.GetCount()? {
-                        let Ok(session) = sessions.GetSession(j).and_then(|s| s.cast::<IAudioSessionControl2>()) else {
+                        let Ok(session) = sessions
+                            .GetSession(j)
+                            .and_then(|s| s.cast::<IAudioSessionControl2>())
+                        else {
                             continue;
                         };
                         let pid = session.GetProcessId().unwrap_or(0);
-                        if pid == 0 || pid == own || session.IsSystemSoundsSession() == windows::Win32::Foundation::S_OK
+                        if pid == 0
+                            || pid == own
+                            || session.IsSystemSoundsSession() == windows::Win32::Foundation::S_OK
                         {
                             continue;
                         }
                         let Some(exe) = names.get(&pid) else { continue };
-                        let active = session
-                            .GetState()
-                            .is_ok_and(|s| s == windows::Win32::Media::Audio::AudioSessionStateActive);
-                        match apps.iter_mut().find(|a| a.process.eq_ignore_ascii_case(exe)) {
+                        let active = session.GetState().is_ok_and(|s| {
+                            s == windows::Win32::Media::Audio::AudioSessionStateActive
+                        });
+                        match apps
+                            .iter_mut()
+                            .find(|a| a.process.eq_ignore_ascii_case(exe))
+                        {
                             Some(app) => app.active |= active,
-                            None => apps.push(AudioApp { process: exe.clone(), active }),
+                            None => apps.push(AudioApp {
+                                process: exe.clone(),
+                                active,
+                            }),
                         }
                     }
                 }
@@ -176,7 +201,11 @@ pub fn audio_apps() -> Vec<AudioApp> {
             warn!(error = %e, "could not list apps playing audio");
         }
     });
-    apps.sort_by(|a, b| b.active.cmp(&a.active).then_with(|| a.process.to_lowercase().cmp(&b.process.to_lowercase())));
+    apps.sort_by(|a, b| {
+        b.active
+            .cmp(&a.active)
+            .then_with(|| a.process.to_lowercase().cmp(&b.process.to_lowercase()))
+    });
     apps
 }
 
@@ -245,12 +274,16 @@ fn activate(pid: u32, exclude: bool) -> Result<IAudioClient, AudioError> {
     .map_err(backend)?;
 
     let (done, signal) = &*state;
-    let guard = done.lock().map_err(|_| AudioError::Backend("activation lock poisoned".into()))?;
+    let guard = done
+        .lock()
+        .map_err(|_| AudioError::Backend("activation lock poisoned".into()))?;
     let (guard, _) = signal
         .wait_timeout_while(guard, Duration::from_secs(5), |done| !*done)
         .map_err(|_| AudioError::Backend("activation lock poisoned".into()))?;
     if !*guard {
-        return Err(AudioError::Backend("per-app capture did not start in time".into()));
+        return Err(AudioError::Backend(
+            "per-app capture did not start in time".into(),
+        ));
     }
     drop(guard);
 
@@ -259,7 +292,10 @@ fn activate(pid: u32, exclude: bool) -> Result<IAudioClient, AudioError> {
     // SAFETY: both out pointers are valid; activation has completed.
     unsafe { operation.GetActivateResult(&mut result, &mut unknown) }.map_err(backend)?;
     result.ok().map_err(backend)?;
-    unknown.ok_or_else(|| AudioError::Backend("no audio client".into()))?.cast::<IAudioClient>().map_err(backend)
+    unknown
+        .ok_or_else(|| AudioError::Backend("no audio client".into()))?
+        .cast::<IAudioClient>()
+        .map_err(backend)
 }
 
 struct ProcessStream {
@@ -295,7 +331,8 @@ pub fn open(
     if !process_loopback_supported() {
         return Err(AudioError::LoopbackUnsupported);
     }
-    let pid = find_process(process).ok_or_else(|| AudioError::DeviceNotFound(process.to_string()))?;
+    let pid =
+        find_process(process).ok_or_else(|| AudioError::DeviceNotFound(process.to_string()))?;
     let running = Arc::new(AtomicBool::new(true));
     let (ready_tx, ready_rx) = mpsc::channel();
     let thread = {
@@ -304,7 +341,11 @@ pub fn open(
         std::thread::Builder::new()
             .name("sp-app-capture".into())
             .spawn(move || {
-                with_com(|| capture_thread(&process, pid, exclude, channels, &running, &ready_tx, on_audio, on_error));
+                with_com(|| {
+                    capture_thread(
+                        &process, pid, exclude, channels, &running, &ready_tx, on_audio, on_error,
+                    )
+                });
             })
             .map_err(|e| AudioError::Backend(e.to_string()))?
     };
@@ -410,7 +451,11 @@ fn capture_thread(
                         scratch.resize(samples, 0.0);
                     } else {
                         let bytes = std::slice::from_raw_parts(data, samples * 4);
-                        scratch.extend(bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+                        scratch.extend(
+                            bytes
+                                .chunks_exact(4)
+                                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+                        );
                     }
                     capture.ReleaseBuffer(frames)?;
                     on_audio(converter.process(&scratch));
@@ -434,12 +479,17 @@ mod tests {
 
     #[test]
     fn blob_variant_matches_propvariant_layout() {
-        assert_eq!(std::mem::size_of::<BlobVariant>(), std::mem::size_of::<PROPVARIANT>());
+        assert_eq!(
+            std::mem::size_of::<BlobVariant>(),
+            std::mem::size_of::<PROPVARIANT>()
+        );
     }
 
     #[test]
     fn finds_this_process_and_reads_the_build() {
-        let exe = std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
         if let Some(exe) = exe {
             assert!(find_process(&exe).is_some());
         }

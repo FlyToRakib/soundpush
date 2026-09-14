@@ -6,7 +6,8 @@
 use sp_protocol::Codec;
 use sp_protocol::control::StreamProfile;
 use sp_protocol::media::{MAX_ACCEPTED_MEDIA_PAYLOAD, MAX_MEDIA_PAYLOAD};
-#[allow(clippy::unsafe_removed_from_name)] // every call site below is still an explicit `unsafe` block
+#[allow(clippy::unsafe_removed_from_name)]
+// every call site below is still an explicit `unsafe` block
 use unsafe_libopus as opus;
 
 use crate::{MediaError, SAMPLE_RATE, samples_per_frame};
@@ -35,12 +36,20 @@ pub enum OpusApplication {
     Voip,
 }
 
-pub fn encoder_for(profile: &StreamProfile, app: OpusApplication) -> Result<Box<dyn Encoder>, MediaError> {
+pub fn encoder_for(
+    profile: &StreamProfile,
+    app: OpusApplication,
+) -> Result<Box<dyn Encoder>, MediaError> {
     let channels = profile.channels.clamp(1, 2) as usize;
     let frame = samples_per_frame(profile.frame_us);
     match Codec::try_from(profile.codec as u8).map_err(|_| MediaError::InvalidParameter("codec"))? {
         Codec::PcmS16Le => Ok(Box::new(PcmEncoder { channels })),
-        Codec::Opus => Ok(Box::new(OpusEncoder::new(channels, frame, profile.bitrate, app)?)),
+        Codec::Opus => Ok(Box::new(OpusEncoder::new(
+            channels,
+            frame,
+            profile.bitrate,
+            app,
+        )?)),
     }
 }
 
@@ -120,18 +129,31 @@ pub struct OpusEncoder {
 unsafe impl Send for OpusEncoder {}
 
 impl OpusEncoder {
-    pub fn new(channels: usize, frame: usize, bitrate: u32, app: OpusApplication) -> Result<Self, MediaError> {
+    pub fn new(
+        channels: usize,
+        frame: usize,
+        bitrate: u32,
+        app: OpusApplication,
+    ) -> Result<Self, MediaError> {
         let application = match app {
             OpusApplication::LowDelay => opus::OPUS_APPLICATION_RESTRICTED_LOWDELAY,
             OpusApplication::Voip => opus::OPUS_APPLICATION_VOIP,
         };
         let mut err = 0i32;
         // SAFETY: valid sample rate/channel count; `err` outlives the call.
-        let st = unsafe { opus::opus_encoder_create(SAMPLE_RATE as i32, channels as i32, application, &mut err) };
+        let st = unsafe {
+            opus::opus_encoder_create(SAMPLE_RATE as i32, channels as i32, application, &mut err)
+        };
         if st.is_null() || err != opus::OPUS_OK {
-            return Err(MediaError::Codec(format!("opus_encoder_create failed ({err})")));
+            return Err(MediaError::Codec(format!(
+                "opus_encoder_create failed ({err})"
+            )));
         }
-        let mut enc = Self { st, channels, frame };
+        let mut enc = Self {
+            st,
+            channels,
+            frame,
+        };
         enc.set_bitrate(bitrate.max(6_000));
         // SAFETY: `st` is a live encoder.
         unsafe {
@@ -173,15 +195,27 @@ impl Encoder for OpusEncoder {
     fn set_bitrate(&mut self, bps: u32) {
         // SAFETY: `st` is a live encoder.
         unsafe {
-            opus::opus_encoder_ctl!(self.st, opus::OPUS_SET_BITRATE_REQUEST, bps.clamp(6_000, 510_000) as i32);
+            opus::opus_encoder_ctl!(
+                self.st,
+                opus::OPUS_SET_BITRATE_REQUEST,
+                bps.clamp(6_000, 510_000) as i32
+            );
         }
     }
 
     fn set_expected_loss(&mut self, percent: u8) {
         // SAFETY: `st` is a live encoder.
         unsafe {
-            opus::opus_encoder_ctl!(self.st, opus::OPUS_SET_PACKET_LOSS_PERC_REQUEST, percent.min(100) as i32);
-            opus::opus_encoder_ctl!(self.st, opus::OPUS_SET_INBAND_FEC_REQUEST, i32::from(percent > 0));
+            opus::opus_encoder_ctl!(
+                self.st,
+                opus::OPUS_SET_PACKET_LOSS_PERC_REQUEST,
+                percent.min(100) as i32
+            );
+            opus::opus_encoder_ctl!(
+                self.st,
+                opus::OPUS_SET_INBAND_FEC_REQUEST,
+                i32::from(percent > 0)
+            );
         }
     }
 }
@@ -206,11 +240,18 @@ impl OpusDecoder {
     pub fn new(channels: usize, frame: usize) -> Result<Self, MediaError> {
         let mut err = 0i32;
         // SAFETY: valid sample rate/channel count; `err` outlives the call.
-        let st = unsafe { opus::opus_decoder_create(SAMPLE_RATE as i32, channels as i32, &mut err) };
+        let st =
+            unsafe { opus::opus_decoder_create(SAMPLE_RATE as i32, channels as i32, &mut err) };
         if st.is_null() || err != opus::OPUS_OK {
-            return Err(MediaError::Codec(format!("opus_decoder_create failed ({err})")));
+            return Err(MediaError::Codec(format!(
+                "opus_decoder_create failed ({err})"
+            )));
         }
-        Ok(Self { st, channels, frame })
+        Ok(Self {
+            st,
+            channels,
+            frame,
+        })
     }
 }
 
@@ -243,7 +284,16 @@ impl Decoder for OpusDecoder {
     fn conceal(&mut self, out: &mut [f32]) -> usize {
         let frame = self.frame.min(out.len() / self.channels);
         // SAFETY: a null payload requests packet loss concealment for `frame` samples.
-        let n = unsafe { opus::opus_decode_float(self.st, std::ptr::null(), 0, out.as_mut_ptr(), frame as i32, 0) };
+        let n = unsafe {
+            opus::opus_decode_float(
+                self.st,
+                std::ptr::null(),
+                0,
+                out.as_mut_ptr(),
+                frame as i32,
+                0,
+            )
+        };
         if n < 0 {
             out[..frame * self.channels].fill(0.0);
             return frame;

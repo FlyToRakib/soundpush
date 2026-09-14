@@ -16,8 +16,8 @@ use tracing::{info, warn};
 
 use crate::convert::{CaptureConverter, RenderConverter};
 use crate::{
-    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, DeviceKind, ErrorCallback,
-    RenderCallback, RenderTarget, StreamInfo,
+    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, DeviceKind,
+    ErrorCallback, RenderCallback, RenderTarget, StreamInfo,
 };
 
 pub struct CpalBackend;
@@ -73,7 +73,9 @@ fn find_input_when_ready(host: &Host, name: &str) -> Result<Device, AudioError> 
 fn map_build_error(e: cpal::BuildStreamError) -> AudioError {
     match e {
         cpal::BuildStreamError::DeviceNotAvailable => AudioError::DeviceLost,
-        cpal::BuildStreamError::StreamConfigNotSupported => AudioError::FormatUnsupported("stream config".into()),
+        cpal::BuildStreamError::StreamConfigNotSupported => {
+            AudioError::FormatUnsupported("stream config".into())
+        }
         other => {
             let text = other.to_string();
             if text.to_lowercase().contains("permission") || text.contains("denied") {
@@ -147,9 +149,13 @@ where
         Ok(result) => result?,
         Err(mpsc::RecvTimeoutError::Timeout) => {
             warn!("audio device did not start in time");
-            return Err(AudioError::Backend("audio device did not start in time".into()));
+            return Err(AudioError::Backend(
+                "audio device did not start in time".into(),
+            ));
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => return Err(AudioError::Backend("audio thread exited".into())),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return Err(AudioError::Backend("audio thread exited".into()));
+        }
     };
     Ok(Box::new(ThreadStream {
         stop: Some(stop_tx),
@@ -202,7 +208,9 @@ impl AudioBackend for CpalBackend {
                 if internal(&name) {
                     continue;
                 }
-                let Ok(cfg) = d.default_input_config() else { continue };
+                let Ok(cfg) = d.default_input_config() else {
+                    continue;
+                };
                 out.push(DeviceInfo {
                     id: name.clone(),
                     is_default: default_in.as_deref() == Some(&name),
@@ -219,7 +227,9 @@ impl AudioBackend for CpalBackend {
                 if internal(&name) {
                     continue;
                 }
-                let Ok(cfg) = d.default_output_config() else { continue };
+                let Ok(cfg) = d.default_output_config() else {
+                    continue;
+                };
                 out.push(DeviceInfo {
                     id: name.clone(),
                     is_default: default_out.as_deref() == Some(&name),
@@ -275,12 +285,16 @@ impl AudioBackend for CpalBackend {
             let (device, supported) = match &source {
                 CaptureSource::DefaultInput => {
                     let d = find_device(&host, DeviceKind::Input, None)?;
-                    let c = d.default_input_config().map_err(|e| AudioError::Backend(e.to_string()))?;
+                    let c = d
+                        .default_input_config()
+                        .map_err(|e| AudioError::Backend(e.to_string()))?;
                     (d, c)
                 }
                 CaptureSource::Input(id) => {
                     let d = find_device(&host, DeviceKind::Input, Some(id))?;
-                    let c = d.default_input_config().map_err(|e| AudioError::Backend(e.to_string()))?;
+                    let c = d
+                        .default_input_config()
+                        .map_err(|e| AudioError::Backend(e.to_string()))?;
                     (d, c)
                 }
                 #[cfg(target_os = "macos")]
@@ -288,7 +302,9 @@ impl AudioBackend for CpalBackend {
                     // Process tap wrapped in a temporary aggregate input device.
                     let tap = crate::macos_tap::SystemTap::create().map_err(AudioError::Backend)?;
                     let d = find_input_when_ready(&host, crate::macos_tap::TAP_DEVICE_NAME)?;
-                    let c = d.default_input_config().map_err(|e| AudioError::Backend(e.to_string()))?;
+                    let c = d
+                        .default_input_config()
+                        .map_err(|e| AudioError::Backend(e.to_string()))?;
                     guard = Some(Box::new(tap));
                     (d, c)
                 }
@@ -296,7 +312,9 @@ impl AudioBackend for CpalBackend {
                 CaptureSource::SystemLoopback(id) => {
                     // WASAPI: building an input stream on an output device captures its mix.
                     let d = find_device(&host, DeviceKind::Output, id.as_deref())?;
-                    let c = d.default_output_config().map_err(|e| AudioError::Backend(e.to_string()))?;
+                    let c = d
+                        .default_output_config()
+                        .map_err(|e| AudioError::Backend(e.to_string()))?;
                     (d, c)
                 }
                 // Handled before the stream thread starts.

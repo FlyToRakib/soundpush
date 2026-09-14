@@ -34,7 +34,12 @@ impl CaptureConverter {
         if self.device_channels == self.out_channels {
             self.mixed.extend_from_slice(input);
         } else {
-            downmix(input, self.device_channels, self.out_channels, &mut self.mixed);
+            downmix(
+                input,
+                self.device_channels,
+                self.out_channels,
+                &mut self.mixed,
+            );
         }
         match self.resampler.as_mut() {
             None => &self.mixed,
@@ -89,7 +94,8 @@ impl RenderConverter {
             let wanted = (out.len() - written) / dev_ch;
             let frames = available.min(wanted.max(1));
             for f in 0..frames {
-                let src = &self.pending[self.pending_pos + f * self.in_channels..][..self.in_channels];
+                let src =
+                    &self.pending[self.pending_pos + f * self.in_channels..][..self.in_channels];
                 let dst = &mut out[written + f * dev_ch..][..dev_ch];
                 map_channels(src, dst);
             }

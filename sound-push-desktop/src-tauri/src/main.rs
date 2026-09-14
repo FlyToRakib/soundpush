@@ -35,7 +35,9 @@ pub struct AppState {
 
 impl AppState {
     pub fn engine(&self) -> Result<&EngineHandle, commands::CommandError> {
-        self.engine.get().ok_or_else(|| sp_engine::EngineError::Starting.into())
+        self.engine
+            .get()
+            .ok_or_else(|| sp_engine::EngineError::Starting.into())
     }
 }
 
@@ -105,8 +107,13 @@ fn main() {
     info!(version = env!("CARGO_PKG_VERSION"), "SoundPush starting");
 
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app)
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .plugin(tauri_plugin_opener::init())
         // Update manifests are verified against the public key in tauri.conf.json.
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -240,7 +247,10 @@ fn main() {
         // Tauri ends the process right after this without dropping managed state, so the engine
         // must stop here: unmute the speakers, tell peers, release sleep prevention.
         RunEvent::Exit => {
-            if let Some(engine) = app.try_state::<AppState>().and_then(|s| s.engine.get().cloned()) {
+            if let Some(engine) = app
+                .try_state::<AppState>()
+                .and_then(|s| s.engine.get().cloned())
+            {
                 engine.shutdown(std::time::Duration::from_secs(2));
             }
         }
@@ -251,7 +261,11 @@ fn main() {
         } if label == MAIN_WINDOW => {
             let close_to_tray = app
                 .try_state::<AppState>()
-                .and_then(|s| s.engine.get().map(|e| e.state().settings.desktop.close_to_tray))
+                .and_then(|s| {
+                    s.engine
+                        .get()
+                        .map(|e| e.state().settings.desktop.close_to_tray)
+                })
                 .unwrap_or(true);
             if !close_to_tray {
                 app.exit(0);
@@ -291,7 +305,9 @@ fn forward_state(app: AppHandle, engine: EngineHandle, hooks: Arc<hooks::Desktop
                 last_hotkeys = Some(wanted.clone());
                 let handle = app.clone();
                 // Registration waits on the main thread, so it runs off both it and this task.
-                tauri::async_runtime::spawn_blocking(move || hotkeys::apply(&handle, wanted.0.as_deref(), wanted.1.as_deref()));
+                tauri::async_runtime::spawn_blocking(move || {
+                    hotkeys::apply(&handle, wanted.0.as_deref(), wanted.1.as_deref())
+                });
             }
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 if let Err(e) = app.emit("engine://state", &*state) {
@@ -333,12 +349,14 @@ fn watch_network(hooks: Arc<hooks::DesktopHooks>) {
     if !cfg!(windows) {
         return;
     }
-    let spawned = std::thread::Builder::new().name("sp-network-check".into()).spawn(move || {
-        loop {
-            hooks.set_network_status(network::status());
-            std::thread::sleep(std::time::Duration::from_secs(60));
-        }
-    });
+    let spawned = std::thread::Builder::new()
+        .name("sp-network-check".into())
+        .spawn(move || {
+            loop {
+                hooks.set_network_status(network::status());
+                std::thread::sleep(std::time::Duration::from_secs(60));
+            }
+        });
     if let Err(e) = spawned {
         warn!(error = %e, "could not start network checks");
     }

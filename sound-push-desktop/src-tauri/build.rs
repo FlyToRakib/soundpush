@@ -17,5 +17,8 @@ fn build_macos_virtual_mic() {
         .arg(dir.join("build.sh"))
         .status()
         .unwrap_or_else(|e| panic!("could not run the virtual microphone build: {e}"));
-    assert!(status.success(), "building SoundPushMicrophone.driver failed");
+    assert!(
+        status.success(),
+        "building SoundPushMicrophone.driver failed"
+    );
 }

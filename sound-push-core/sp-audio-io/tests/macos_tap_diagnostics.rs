@@ -11,12 +11,24 @@ fn dump(label: &str) {
     let host = cpal::default_host();
     println!("== {label}");
     for device in host.devices().expect("devices") {
-        let name = device.name().unwrap_or_else(|e| format!("<name error {e}>"));
-        let input = device.default_input_config().map(|c| format!("{c:?}")).unwrap_or_else(|e| format!("none ({e})"));
-        let output = device.default_output_config().map(|c| format!("{} ch", c.channels())).unwrap_or_else(|_| "none".into());
+        let name = device
+            .name()
+            .unwrap_or_else(|e| format!("<name error {e}>"));
+        let input = device
+            .default_input_config()
+            .map(|c| format!("{c:?}"))
+            .unwrap_or_else(|e| format!("none ({e})"));
+        let output = device
+            .default_output_config()
+            .map(|c| format!("{} ch", c.channels()))
+            .unwrap_or_else(|_| "none".into());
         println!("  {name:?}\n    input: {input}\n    output: {output}");
     }
-    let inputs: Vec<String> = host.input_devices().expect("inputs").filter_map(|d| d.name().ok()).collect();
+    let inputs: Vec<String> = host
+        .input_devices()
+        .expect("inputs")
+        .filter_map(|d| d.name().ok())
+        .collect();
     println!("  input_devices(): {inputs:?}");
 }
 

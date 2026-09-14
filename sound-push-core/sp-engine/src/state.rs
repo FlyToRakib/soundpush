@@ -144,7 +144,10 @@ impl RouteKind {
     pub fn local_is_source(self) -> bool {
         matches!(
             self,
-            Self::SendSystemAudio | Self::SendAppAudio | Self::SendMicToVirtualMic | Self::SendMicToSpeaker
+            Self::SendSystemAudio
+                | Self::SendAppAudio
+                | Self::SendMicToVirtualMic
+                | Self::SendMicToSpeaker
         )
     }
 
@@ -180,13 +183,20 @@ impl RouteKind {
             ("mic", "speaker") => Self::SendMicToSpeaker,
             _ => return None,
         };
-        Some(if local_is_source { send } else { send.mirrored() })
+        Some(if local_is_source {
+            send
+        } else {
+            send.mirrored()
+        })
     }
 
     pub fn is_mic(self) -> bool {
         matches!(
             self,
-            Self::SendMicToVirtualMic | Self::SendMicToSpeaker | Self::ReceiveMicToVirtualMic | Self::ReceiveMicToSpeaker
+            Self::SendMicToVirtualMic
+                | Self::SendMicToSpeaker
+                | Self::ReceiveMicToVirtualMic
+                | Self::ReceiveMicToSpeaker
         )
     }
 }
@@ -299,7 +309,10 @@ mod tests {
         ] {
             let (src, sink) = kind.endpoints();
             assert_eq!(RouteKind::from_endpoints(src, sink, true), Some(kind));
-            assert_eq!(RouteKind::from_endpoints(src, sink, false), Some(kind.mirrored()));
+            assert_eq!(
+                RouteKind::from_endpoints(src, sink, false),
+                Some(kind.mirrored())
+            );
             assert_eq!(kind.mirrored().mirrored(), kind);
             assert!(kind.local_is_source());
             assert!(!kind.mirrored().local_is_source());
@@ -309,7 +322,10 @@ mod tests {
 
     #[test]
     fn quality_thresholds() {
-        assert_eq!(LinkQuality::from_stats(3.0, 0.0, 1.0), LinkQuality::Excellent);
+        assert_eq!(
+            LinkQuality::from_stats(3.0, 0.0, 1.0),
+            LinkQuality::Excellent
+        );
         assert_eq!(LinkQuality::from_stats(30.0, 0.0, 1.0), LinkQuality::Good);
         assert_eq!(LinkQuality::from_stats(3.0, 5.0, 1.0), LinkQuality::Poor);
     }

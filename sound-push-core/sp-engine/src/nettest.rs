@@ -127,7 +127,12 @@ pub(crate) fn summarize(sent: u32, rtts_ms: &[f64]) -> (f64, f64, f64, f64) {
 }
 
 /// Turn measurements into suggested settings.
-pub fn recommend(rtt_p95_ms: f64, jitter_ms: f64, loss_pct: f64, achievable_kbps: u32) -> Recommendation {
+pub fn recommend(
+    rtt_p95_ms: f64,
+    jitter_ms: f64,
+    loss_pct: f64,
+    achievable_kbps: u32,
+) -> Recommendation {
     let mut tips = Vec::new();
     let latency = if loss_pct > 3.0 || jitter_ms > 20.0 || rtt_p95_ms > 60.0 {
         LatencyMode::Stable
@@ -284,7 +289,12 @@ pub(crate) async fn run(
     }
 }
 
-fn drain(echoes: &mut mpsc::Receiver<ProbeEcho>, epoch: Instant, test_id: u32, mut on: impl FnMut(u32, f64)) {
+fn drain(
+    echoes: &mut mpsc::Receiver<ProbeEcho>,
+    epoch: Instant,
+    test_id: u32,
+    mut on: impl FnMut(u32, f64),
+) {
     while let Ok(e) = echoes.try_recv() {
         if let Some(rtt) = rtt_of(&e, epoch, test_id) {
             on(e.probe.seq, rtt);
@@ -313,7 +323,9 @@ fn rtt_of(e: &ProbeEcho, epoch: Instant, test_id: u32) -> Option<f64> {
     }
     let arrived = e.received.checked_duration_since(epoch)?.as_micros() as u64;
     // A forged or corrupted sent_us from the future is not a measurement.
-    arrived.checked_sub(e.probe.sent_us).map(|us| us as f64 / 1000.0)
+    arrived
+        .checked_sub(e.probe.sent_us)
+        .map(|us| us as f64 / 1000.0)
 }
 
 #[cfg(test)]
@@ -416,8 +428,21 @@ mod tests {
             drop_every: 5,
             counter: Mutex::new(0),
         });
-        let report = run(sink, "tcp", 1100, 5, rx, Arc::new(AtomicU32::new(0)), quick_plan()).await;
-        assert!((report.loss_pct - 20.0).abs() < 3.0, "loss {}", report.loss_pct);
+        let report = run(
+            sink,
+            "tcp",
+            1100,
+            5,
+            rx,
+            Arc::new(AtomicU32::new(0)),
+            quick_plan(),
+        )
+        .await;
+        assert!(
+            (report.loss_pct - 20.0).abs() < 3.0,
+            "loss {}",
+            report.loss_pct
+        );
         assert_eq!(report.achievable_kbps, 0);
         assert!(report.recommendation.redundancy);
     }

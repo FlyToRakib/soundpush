@@ -205,7 +205,11 @@ fn publish(mdns: &mut MdnsAdvertiser, identity: &DeviceIdentity, config: &Discov
 }
 
 async fn send_beacon(socket: &UdpSocket, identity: &DeviceIdentity, config: &DiscoveryConfig) {
-    let flags = if config.visibility == Visibility::Everyone { 0 } else { FLAG_NAME_HIDDEN };
+    let flags = if config.visibility == Visibility::Everyone {
+        0
+    } else {
+        FLAG_NAME_HIDDEN
+    };
     let beacon = Beacon {
         public_key: identity.public_key(),
         port: config.port,

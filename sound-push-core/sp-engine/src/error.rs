@@ -104,7 +104,10 @@ impl EngineError {
 
     pub fn severity(&self) -> Severity {
         match self {
-            Self::DeviceNotFound | Self::RouteNotFound | Self::InvalidInput(_) | Self::Cancelled => Severity::Warning,
+            Self::DeviceNotFound
+            | Self::RouteNotFound
+            | Self::InvalidInput(_)
+            | Self::Cancelled => Severity::Warning,
             _ => Severity::Error,
         }
     }

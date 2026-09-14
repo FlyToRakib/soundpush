@@ -21,8 +21,8 @@ use std::time::{Duration, Instant};
 
 use sp_engine::settings::{LatencyMode, QualityMode};
 use sp_engine::sp_audio_io::{
-    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, DeviceKind, ErrorCallback,
-    RenderCallback, RenderTarget, StreamInfo,
+    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, DeviceKind,
+    ErrorCallback, RenderCallback, RenderTarget, StreamInfo,
 };
 use sp_engine::state::{ConnectionStatus, RouteKind, RouteStatus};
 use sp_engine::{EngineConfig, EngineHandle, EngineState, PlatformHooks};
@@ -109,7 +109,10 @@ struct Probe {
 impl Probe {
     fn expire(&self, now: Instant) {
         if let Ok(mut e) = self.emissions.lock() {
-            while e.front().is_some_and(|t| now.duration_since(*t) > MISSED_AFTER) {
+            while e
+                .front()
+                .is_some_and(|t| now.duration_since(*t) > MISSED_AFTER)
+            {
                 e.pop_front();
                 self.missed.fetch_add(1, Ordering::Relaxed);
             }
@@ -287,7 +290,11 @@ impl PlatformHooks for Hooks {
 
 // ------------------------------------------------------------------ run
 
-fn wait_for(engine: &EngineHandle, what: &str, pred: impl Fn(&EngineState) -> bool) -> Result<Arc<EngineState>, Error> {
+fn wait_for(
+    engine: &EngineHandle,
+    what: &str,
+    pred: impl Fn(&EngineState) -> bool,
+) -> Result<Arc<EngineState>, Error> {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let state = engine.state();
@@ -341,23 +348,24 @@ fn run() -> Result<bool, Error> {
     let base = std::env::temp_dir().join(format!("soundpush-soak-{}", std::process::id()));
     let probe = Arc::new(Probe::default());
     let backend = Arc::new(ProbeBackend(probe.clone()));
-    let start_engine = |name: &'static str, platform: &'static str, include_loopback: bool, tcp_listener: bool| {
-        EngineHandle::start(
-            Arc::new(Hooks {
-                dir: base.join(name),
-                name,
-                platform,
-                backend: backend.clone(),
-            }),
-            EngineConfig {
-                app_version: "soak".into(),
-                port: 0,
-                discovery: false,
-                include_loopback,
-                tcp_listener,
-            },
-        )
-    };
+    let start_engine =
+        |name: &'static str, platform: &'static str, include_loopback: bool, tcp_listener: bool| {
+            EngineHandle::start(
+                Arc::new(Hooks {
+                    dir: base.join(name),
+                    name,
+                    platform,
+                    backend: backend.clone(),
+                }),
+                EngineConfig {
+                    app_version: "soak".into(),
+                    port: 0,
+                    discovery: false,
+                    include_loopback,
+                    tcp_listener,
+                },
+            )
+        };
     let sender = start_engine("sender", "linux", true, true)?;
     // Over TCP the receiver acts as a phone on USB: no usable network candidates.
     let receiver = if o.tcp {
@@ -414,7 +422,9 @@ fn run() -> Result<bool, Error> {
         }
         None => None,
     };
-    println!("elapsed  p50ms  p95ms  maxms  sent  missed  underruns  loss%  jitter  buffer  drift  rssKB");
+    println!(
+        "elapsed  p50ms  p95ms  maxms  sent  missed  underruns  loss%  jitter  buffer  drift  rssKB"
+    );
 
     let started = Instant::now();
     let total = Duration::from_secs_f64(o.minutes * 60.0);
@@ -440,7 +450,10 @@ fn run() -> Result<bool, Error> {
             return Ok(false);
         };
         let s = &route.stats;
-        let (sent, missed) = (probe.sent.load(Ordering::Relaxed), probe.missed.load(Ordering::Relaxed));
+        let (sent, missed) = (
+            probe.sent.load(Ordering::Relaxed),
+            probe.missed.load(Ordering::Relaxed),
+        );
         let rss = rss_kb();
         println!(
             "{:>7.0}  {:>5.1}  {:>5.1}  {:>5.1}  {:>4}  {:>6}  {:>9}  {:>5.2}  {:>6.1}  {:>6.1}  {:>5}  {:>5}",

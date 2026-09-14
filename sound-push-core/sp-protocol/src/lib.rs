@@ -37,5 +37,8 @@ pub enum ProtocolError {
     #[error("unknown stream frame type {0}")]
     UnknownFrameKind(u8),
     #[error("no common protocol version (local {local}, peer {peer})")]
-    NoCommonVersion { local: VersionRange, peer: VersionRange },
+    NoCommonVersion {
+        local: VersionRange,
+        peer: VersionRange,
+    },
 }

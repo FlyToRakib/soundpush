@@ -9,8 +9,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::{
-    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, DeviceKind, ErrorCallback,
-    RenderCallback, RenderTarget, StreamInfo,
+    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, DeviceKind,
+    ErrorCallback, RenderCallback, RenderTarget, StreamInfo,
 };
 
 #[derive(Default)]
@@ -103,7 +103,11 @@ impl AudioBackend for NullBackend {
         let (running, thread) = spawn_ticker(move |n| {
             for (i, frame) in buf.chunks_exact_mut(ch).enumerate() {
                 let t = (n * 480 + i as u64) as f32 / 48_000.0;
-                let v = if freq > 0.0 { (2.0 * std::f32::consts::PI * freq * t).sin() * 0.3 } else { 0.0 };
+                let v = if freq > 0.0 {
+                    (2.0 * std::f32::consts::PI * freq * t).sin() * 0.3
+                } else {
+                    0.0
+                };
                 frame.fill(v);
             }
             on_audio(&buf);

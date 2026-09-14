@@ -54,18 +54,22 @@ pub fn fix_firewall(include_public: bool) -> Result<(), String> {
 mod windows {
     use windows::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, VARIANT_BOOL};
     use windows::Win32::NetworkManagement::WindowsFirewall::{
-        INetFwPolicy2, INetFwRule, NET_FW_ACTION_ALLOW, NET_FW_ACTION_BLOCK, NET_FW_IP_PROTOCOL_ANY,
-        NET_FW_IP_PROTOCOL_UDP, NET_FW_PROFILE_TYPE2, NET_FW_PROFILE2_PUBLIC, NET_FW_RULE_DIR_IN, NetFwPolicy2,
+        INetFwPolicy2, INetFwRule, NET_FW_ACTION_ALLOW, NET_FW_ACTION_BLOCK,
+        NET_FW_IP_PROTOCOL_ANY, NET_FW_IP_PROTOCOL_UDP, NET_FW_PROFILE_TYPE2,
+        NET_FW_PROFILE2_PUBLIC, NET_FW_RULE_DIR_IN, NetFwPolicy2,
     };
     use windows::Win32::Networking::NetworkListManager::{
-        INetwork, INetworkListManager, NLM_ENUM_NETWORK_CONNECTED, NLM_NETWORK_CATEGORY_PUBLIC, NetworkListManager,
+        INetwork, INetworkListManager, NLM_ENUM_NETWORK_CONNECTED, NLM_NETWORK_CATEGORY_PUBLIC,
+        NetworkListManager,
     };
     use windows::Win32::System::Com::{
         CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     };
     use windows::Win32::System::Ole::IEnumVARIANT;
     use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
-    use windows::Win32::UI::Shell::{SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+    use windows::Win32::UI::Shell::{
+        SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    };
     use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
     use windows::core::{HSTRING, IUnknown, Interface, PCWSTR, VARIANT, w};
 
@@ -91,8 +95,14 @@ mod windows {
         let mut expanded = rule_path.to_string();
         for (key, value) in std::env::vars() {
             let pattern = format!("%{key}%");
-            if expanded.to_ascii_lowercase().contains(&pattern.to_ascii_lowercase()) {
-                let start = expanded.to_ascii_lowercase().find(&pattern.to_ascii_lowercase()).unwrap_or(0);
+            if expanded
+                .to_ascii_lowercase()
+                .contains(&pattern.to_ascii_lowercase())
+            {
+                let start = expanded
+                    .to_ascii_lowercase()
+                    .find(&pattern.to_ascii_lowercase())
+                    .unwrap_or(0);
                 expanded.replace_range(start..start + pattern.len(), &value);
             }
         }
@@ -102,7 +112,9 @@ mod windows {
     fn connected_networks() -> Vec<(bool, String)> {
         // SAFETY: COM calls on objects created and released in this scope.
         unsafe {
-            let Ok(list) = CoCreateInstance::<_, INetworkListManager>(&NetworkListManager, None, CLSCTX_ALL) else {
+            let Ok(list) =
+                CoCreateInstance::<_, INetworkListManager>(&NetworkListManager, None, CLSCTX_ALL)
+            else {
                 return Vec::new();
             };
             let Ok(networks) = list.GetNetworks(NLM_ENUM_NETWORK_CONNECTED) else {
@@ -116,7 +128,9 @@ mod windows {
                     break;
                 }
                 let Some(network) = item[0].take() else { break };
-                let public = network.GetCategory().is_ok_and(|c| c == NLM_NETWORK_CATEGORY_PUBLIC);
+                let public = network
+                    .GetCategory()
+                    .is_ok_and(|c| c == NLM_NETWORK_CATEGORY_PUBLIC);
                 let name = network.GetName().map(|n| n.to_string()).unwrap_or_default();
                 out.push((public, name));
             }
@@ -138,13 +152,15 @@ mod windows {
                     let policy: INetFwPolicy2 = CoCreateInstance(&NetFwPolicy2, None, CLSCTX_ALL)?;
                     let profiles = policy.CurrentProfileTypes()?;
                     let active = [1, 2, 4].into_iter().filter(|p| profiles & p != 0);
-                    let enabled: Vec<i32> =
-                        active.filter(|p| truthy(policy.get_FirewallEnabled(NET_FW_PROFILE_TYPE2(*p)))).collect();
+                    let enabled: Vec<i32> = active
+                        .filter(|p| truthy(policy.get_FirewallEnabled(NET_FW_PROFILE_TYPE2(*p))))
+                        .collect();
                     if enabled.is_empty() {
                         return Ok((false, false, false));
                     }
-                    let shields_up =
-                        enabled.iter().any(|p| truthy(policy.get_BlockAllInboundTraffic(NET_FW_PROFILE_TYPE2(*p))));
+                    let shields_up = enabled.iter().any(|p| {
+                        truthy(policy.get_BlockAllInboundTraffic(NET_FW_PROFILE_TYPE2(*p)))
+                    });
 
                     // Profiles covered by an enabled inbound allow rule for this program (UDP or any
                     // protocol), and whether a block rule for it applies to a current profile.
@@ -159,10 +175,14 @@ mod windows {
                         if enumerator.Next(&mut item, &mut fetched).is_err() || fetched == 0 {
                             break;
                         }
-                        let Ok(rule) = IUnknown::try_from(&item[0]).and_then(|u| u.cast::<INetFwRule>()) else {
+                        let Ok(rule) =
+                            IUnknown::try_from(&item[0]).and_then(|u| u.cast::<INetFwRule>())
+                        else {
                             continue;
                         };
-                        let Ok(app) = rule.ApplicationName() else { continue };
+                        let Ok(app) = rule.ApplicationName() else {
+                            continue;
+                        };
                         if app.is_empty() || !same_program(&app.to_string(), &exe) {
                             continue;
                         }
@@ -170,7 +190,8 @@ mod windows {
                         let protocol = rule.Protocol().unwrap_or(0);
                         if !inbound
                             || !truthy(rule.Enabled())
-                            || (protocol != NET_FW_IP_PROTOCOL_UDP.0 && protocol != NET_FW_IP_PROTOCOL_ANY.0)
+                            || (protocol != NET_FW_IP_PROTOCOL_UDP.0
+                                && protocol != NET_FW_IP_PROTOCOL_ANY.0)
                         {
                             continue;
                         }
@@ -203,7 +224,9 @@ mod windows {
                 firewall_enabled,
                 blocked,
                 public_network: public.is_some(),
-                public_network_name: public.map(|(_, name)| name.clone()).filter(|n| !n.is_empty()),
+                public_network_name: public
+                    .map(|(_, name)| name.clone())
+                    .filter(|n| !n.is_empty()),
                 allowed_on_public,
             }
         })
@@ -211,7 +234,11 @@ mod windows {
 
     /// `netsh` arguments that replace this program's inbound rules with SoundPush's rule.
     pub(super) fn commands(exe: &str, include_public: bool) -> String {
-        let profiles = if include_public { "private,domain,public" } else { "private,domain" };
+        let profiles = if include_public {
+            "private,domain,public"
+        } else {
+            "private,domain"
+        };
         // Deleting by program also removes the block rules Windows adds when its firewall prompt
         // is dismissed; netsh fails that step harmlessly when there is nothing to delete.
         format!(
@@ -245,7 +272,11 @@ mod windows {
         // waited on and closed below.
         unsafe {
             if let Err(e) = ShellExecuteExW(&mut info) {
-                return Err(if e.code() == ERROR_CANCELLED.to_hresult() { "cancelled".into() } else { e.message() });
+                return Err(if e.code() == ERROR_CANCELLED.to_hresult() {
+                    "cancelled".into()
+                } else {
+                    e.message()
+                });
             }
             if info.hProcess.is_invalid() {
                 return Err("the firewall helper did not start".into());
@@ -255,7 +286,11 @@ mod windows {
             let exited = GetExitCodeProcess(info.hProcess, &mut code);
             let _ = CloseHandle(info.hProcess);
             exited.map_err(|e| e.message())?;
-            if code == 0 { Ok(()) } else { Err(format!("netsh exited with code {code}")) }
+            if code == 0 {
+                Ok(())
+            } else {
+                Err(format!("netsh exited with code {code}"))
+            }
         }
     }
 
@@ -275,8 +310,14 @@ mod windows {
         #[test]
         fn rule_paths_expand_environment_variables() {
             if let Ok(root) = std::env::var("SystemRoot") {
-                assert!(same_program(r"%SystemRoot%\x.exe", &format!(r"{root}\x.exe")));
-                assert!(same_program(&format!(r"{}\X.EXE", root.to_uppercase()), &format!(r"{root}\x.exe")));
+                assert!(same_program(
+                    r"%SystemRoot%\x.exe",
+                    &format!(r"{root}\x.exe")
+                ));
+                assert!(same_program(
+                    &format!(r"{}\X.EXE", root.to_uppercase()),
+                    &format!(r"{root}\x.exe")
+                ));
             }
         }
 

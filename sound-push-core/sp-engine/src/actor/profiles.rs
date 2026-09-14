@@ -64,10 +64,9 @@ impl Actor {
         if next == current {
             return;
         }
-        let peer_reconfigures = self
-            .sessions
-            .get(&peer)
-            .is_some_and(|s| Capabilities(s.hello.capabilities).has(Capabilities::FEATURE_ROUTE_RECONFIGURE));
+        let peer_reconfigures = self.sessions.get(&peer).is_some_and(|s| {
+            Capabilities(s.hello.capabilities).has(Capabilities::FEATURE_ROUTE_RECONFIGURE)
+        });
         if encoding_changed(&current, &next) && !peer_reconfigures {
             // A 1.0 peer cannot switch codec or frame size mid-route: start it again instead.
             self.restart_route(key);
@@ -88,7 +87,9 @@ impl Actor {
     /// Live profile change from the peer.
     pub(super) fn on_route_update(&mut self, peer: DeviceId, update: RouteUpdate) {
         let key = route_key(&peer, update.route as u8);
-        let (Some(r), Some(mut next)) = (self.routes.iter().find(|r| r.key() == key), update.profile) else {
+        let (Some(r), Some(mut next)) =
+            (self.routes.iter().find(|r| r.key() == key), update.profile)
+        else {
             return;
         };
         let Some(current) = r.profile.clone() else {
@@ -111,7 +112,10 @@ impl Actor {
             return;
         };
         let r = &mut self.routes[pos];
-        let rebuild = r.profile.as_ref().is_some_and(|c| encoding_changed(c, &next));
+        let rebuild = r
+            .profile
+            .as_ref()
+            .is_some_and(|c| encoding_changed(c, &next));
         r.profile = Some(next.clone());
         if let Some(c) = &r.receiver_controls {
             c.jitter_min_ms.store(next.jitter_min_ms, Ordering::Relaxed);
@@ -139,13 +143,19 @@ impl Actor {
         let Some(r) = self.routes.iter().find(|r| r.key() == key) else {
             return;
         };
-        let (peer, kind, keep, requested_locally) = (r.peer, r.kind, r.keep_running, r.requested_locally);
+        let (peer, kind, keep, requested_locally) =
+            (r.peer, r.kind, r.keep_running, r.requested_locally);
         // `Superseded`: replaced by a new route, so saved-route entries stay.
         self.stop_route_by_key(key, StopReason::Superseded, true);
         if requested_locally {
             let (tx, _rx) = oneshot::channel();
             self.start_route(peer, kind, tx);
-            if let Some(r) = self.routes.iter_mut().rev().find(|r| r.peer == peer && r.kind == kind) {
+            if let Some(r) = self
+                .routes
+                .iter_mut()
+                .rev()
+                .find(|r| r.peer == peer && r.kind == kind)
+            {
                 r.keep_running = keep;
             }
         }

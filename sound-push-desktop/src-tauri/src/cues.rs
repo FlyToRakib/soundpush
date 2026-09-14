@@ -57,9 +57,18 @@ fn render(cue: Cue) -> Vec<f32> {
 
 /// The cues a state change should play, in order.
 pub fn changes(previous: &EngineState, current: &EngineState) -> Vec<Cue> {
-    let connected =
-        |s: &EngineState| s.peers.iter().filter(|p| p.trusted && p.connection == ConnectionStatus::Connected).count();
-    let active = |s: &EngineState| s.routes.iter().filter(|r| r.status == RouteStatus::Active).count();
+    let connected = |s: &EngineState| {
+        s.peers
+            .iter()
+            .filter(|p| p.trusted && p.connection == ConnectionStatus::Connected)
+            .count()
+    };
+    let active = |s: &EngineState| {
+        s.routes
+            .iter()
+            .filter(|r| r.status == RouteStatus::Active)
+            .count()
+    };
     let mut cues = Vec::new();
     match connected(current).cmp(&connected(previous)) {
         std::cmp::Ordering::Greater => cues.push(Cue::Connected),
@@ -73,7 +82,11 @@ pub fn changes(previous: &EngineState, current: &EngineState) -> Vec<Cue> {
         _ => {}
     }
     if current.mic_muted != previous.mic_muted {
-        cues.push(if current.mic_muted { Cue::Muted } else { Cue::Unmuted });
+        cues.push(if current.mic_muted {
+            Cue::Muted
+        } else {
+            Cue::Unmuted
+        });
     }
     cues
 }
@@ -83,34 +96,37 @@ pub fn play(backend: Arc<CpalBackend>, cues: Vec<Cue>) {
     if cues.is_empty() {
         return;
     }
-    let _ = std::thread::Builder::new().name("sp-cue".into()).spawn(move || {
-        for cue in cues {
-            let samples = render(cue);
-            let duration = Duration::from_millis(samples.len() as u64 * 1000 / RATE as u64 + 80);
-            let mut position = 0;
-            let stream = backend.open_render(
-                &RenderTarget::DefaultOutput,
-                1,
-                Box::new(move |out: &mut [f32]| {
-                    for s in out.iter_mut() {
-                        *s = samples.get(position).copied().unwrap_or(0.0);
-                        position += 1;
+    let _ = std::thread::Builder::new()
+        .name("sp-cue".into())
+        .spawn(move || {
+            for cue in cues {
+                let samples = render(cue);
+                let duration =
+                    Duration::from_millis(samples.len() as u64 * 1000 / RATE as u64 + 80);
+                let mut position = 0;
+                let stream = backend.open_render(
+                    &RenderTarget::DefaultOutput,
+                    1,
+                    Box::new(move |out: &mut [f32]| {
+                        for s in out.iter_mut() {
+                            *s = samples.get(position).copied().unwrap_or(0.0);
+                            position += 1;
+                        }
+                    }),
+                    Box::new(|_| {}),
+                );
+                match stream {
+                    Ok(stream) => {
+                        std::thread::sleep(duration);
+                        drop(stream);
                     }
-                }),
-                Box::new(|_| {}),
-            );
-            match stream {
-                Ok(stream) => {
-                    std::thread::sleep(duration);
-                    drop(stream);
-                }
-                Err(e) => {
-                    tracing::debug!(error = %e, "could not play audio cue");
-                    return;
+                    Err(e) => {
+                        tracing::debug!(error = %e, "could not play audio cue");
+                        return;
+                    }
                 }
             }
-        }
-    });
+        });
 }
 
 #[cfg(test)]
@@ -119,8 +135,14 @@ mod tests {
 
     #[test]
     fn cues_are_short_quiet_and_click_free() {
-        for cue in [Cue::Connected, Cue::Disconnected, Cue::StreamStarted, Cue::StreamStopped, Cue::Muted, Cue::Unmuted]
-        {
+        for cue in [
+            Cue::Connected,
+            Cue::Disconnected,
+            Cue::StreamStarted,
+            Cue::StreamStopped,
+            Cue::Muted,
+            Cue::Unmuted,
+        ] {
             let s = render(cue);
             assert!(!s.is_empty() && s.len() < RATE as usize / 4);
             assert!(s.iter().all(|v| v.abs() <= LEVEL));
@@ -131,7 +153,10 @@ mod tests {
     #[test]
     fn mute_change_plays_a_cue() {
         let before = EngineState::default();
-        let after = EngineState { mic_muted: true, ..EngineState::default() };
+        let after = EngineState {
+            mic_muted: true,
+            ..EngineState::default()
+        };
         assert_eq!(changes(&before, &after), vec![Cue::Muted]);
         assert!(changes(&after, &after).is_empty());
     }

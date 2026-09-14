@@ -51,7 +51,8 @@ impl SecureConnection {
             .and_then(|id| id.downcast::<Vec<CertificateDer<'static>>>().ok())
             .ok_or(TransportError::PeerIdentity)?;
         let leaf = certs.first().ok_or(TransportError::PeerIdentity)?;
-        let peer_key = public_key_from_cert(leaf.as_ref()).map_err(|_| TransportError::PeerIdentity)?;
+        let peer_key =
+            public_key_from_cert(leaf.as_ref()).map_err(|_| TransportError::PeerIdentity)?;
         Ok(Self {
             inner: Inner::Quic(conn),
             peer_key,
@@ -162,7 +163,11 @@ impl SecureConnection {
 
     /// Keying material bound to this TLS session, used to derive the pairing SAS.
     /// Over TCP only the labels in `tcp::EXPORTED_LABELS` are available.
-    pub fn export_keying_material(&self, label: &[u8], context: &[u8]) -> Result<[u8; 32], TransportError> {
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: &[u8],
+    ) -> Result<[u8; 32], TransportError> {
         let failed = || TransportError::Tls("keying material export failed".into());
         match &self.inner {
             Inner::Quic(c) => {
@@ -343,7 +348,9 @@ mod tests {
     /// Echo one control message and every datagram until the connection closes.
     async fn echo_server(conn: SecureConnection) -> ([u8; 32], [u8; 32]) {
         let (mut tx, mut rx) = conn.accept_control().await.unwrap();
-        let sas = conn.export_keying_material(SAS_EXPORTER_LABEL, b"").unwrap();
+        let sas = conn
+            .export_keying_material(SAS_EXPORTER_LABEL, b"")
+            .unwrap();
         let echo = conn.clone();
         tokio::spawn(async move {
             while let Ok(msg) = rx.recv().await {
@@ -376,7 +383,9 @@ mod tests {
         let client_id = DeviceIdentity::generate();
         let server = Endpoint::bind(&server_id, &config()).unwrap();
         let client = Endpoint::bind(&client_id, &config()).unwrap();
-        let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port()).parse().unwrap();
+        let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port())
+            .parse()
+            .unwrap();
 
         let server_task = tokio::spawn(async move {
             let conn = server.accept().await.unwrap().finish().await.unwrap();
@@ -384,12 +393,17 @@ mod tests {
             (result, server)
         });
 
-        let conn = client.connect(addr, Some(server_id.device_id())).await.unwrap();
+        let conn = client
+            .connect(addr, Some(server_id.device_id()))
+            .await
+            .unwrap();
         assert_eq!(conn.peer_public_key(), server_id.public_key());
         assert_eq!(conn.transport(), TransportKind::Quic);
         exercise(&conn).await;
 
-        let client_sas = conn.export_keying_material(SAS_EXPORTER_LABEL, b"").unwrap();
+        let client_sas = conn
+            .export_keying_material(SAS_EXPORTER_LABEL, b"")
+            .unwrap();
         conn.close(0, b"done");
         let ((seen_client_key, server_sas), _server) = server_task.await.unwrap();
         assert_eq!(seen_client_key, client_id.public_key());
@@ -401,7 +415,9 @@ mod tests {
         let server_id = DeviceIdentity::generate();
         let server = Endpoint::bind(&server_id, &config()).unwrap();
         let client = Endpoint::bind(&DeviceIdentity::generate(), &config()).unwrap();
-        let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port()).parse().unwrap();
+        let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port())
+            .parse()
+            .unwrap();
 
         let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
         let server_task = tokio::spawn(async move {
@@ -417,7 +433,10 @@ mod tests {
             server
         });
 
-        let conn = client.connect(addr, Some(server_id.device_id())).await.unwrap();
+        let conn = client
+            .connect(addr, Some(server_id.device_id()))
+            .await
+            .unwrap();
         let (mut tx, mut rx) = conn.open_control().await.unwrap();
         tx.send(&ping(1)).await.unwrap();
         assert_eq!(rx.recv().await.unwrap(), ping(1));
@@ -426,14 +445,21 @@ mod tests {
         // The client moves to a new socket (new source port): the same connection continues.
         client.rebind_for_test().unwrap();
         tx.send(&ping(2)).await.unwrap();
-        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).await.unwrap(), ping(2));
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).await.unwrap(),
+            ping(2)
+        );
         conn.send_datagram(Bytes::from_static(b"after")).unwrap();
         assert_eq!(&conn.read_datagram().await.unwrap()[..], b"after");
         let mut after = before;
         while after == before {
             after = seen_rx.recv().await.unwrap();
         }
-        assert_ne!(after.port(), before.port(), "server follows the migrated path");
+        assert_ne!(
+            after.port(),
+            before.port(),
+            "server follows the migrated path"
+        );
         conn.close(0, b"done");
         let _ = server_task.await;
     }
@@ -443,7 +469,9 @@ mod tests {
         let server_id = DeviceIdentity::generate();
         let server = Endpoint::bind(&server_id, &config()).unwrap();
         let client = Endpoint::bind(&DeviceIdentity::generate(), &config()).unwrap();
-        let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port()).parse().unwrap();
+        let addr: SocketAddr = format!("127.0.0.1:{}", server.local_port())
+            .parse()
+            .unwrap();
 
         tokio::spawn(async move {
             if let Some(handshake) = server.accept().await {
@@ -471,19 +499,28 @@ mod tests {
             (result, server)
         });
 
-        let conn = client.connect(addr, Some(server_id.device_id())).await.unwrap();
+        let conn = client
+            .connect(addr, Some(server_id.device_id()))
+            .await
+            .unwrap();
         assert_eq!(conn.peer_public_key(), server_id.public_key());
         exercise(&conn).await;
         // Media larger than the frame limit is refused, not truncated.
-        assert!(conn.send_datagram(Bytes::from(vec![0u8; MAX_MEDIA_FRAME + 1])).is_err());
+        assert!(
+            conn.send_datagram(Bytes::from(vec![0u8; MAX_MEDIA_FRAME + 1]))
+                .is_err()
+        );
 
-        let client_sas = conn.export_keying_material(SAS_EXPORTER_LABEL, b"").unwrap();
+        let client_sas = conn
+            .export_keying_material(SAS_EXPORTER_LABEL, b"")
+            .unwrap();
         assert!(conn.export_keying_material(b"other", b"").is_err());
         conn.close(0, b"done");
-        let ((seen_client_key, server_sas), _server) = tokio::time::timeout(Duration::from_secs(5), server_task)
-            .await
-            .unwrap()
-            .unwrap();
+        let ((seen_client_key, server_sas), _server) =
+            tokio::time::timeout(Duration::from_secs(5), server_task)
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(seen_client_key, client_id.public_key());
         assert_eq!(client_sas, server_sas);
         assert!(conn.is_closed());
@@ -516,7 +553,10 @@ mod tests {
                 .await
                 .is_err()
         );
-        let conn = client.connect(addr, Some(server_id.device_id())).await.unwrap();
+        let conn = client
+            .connect(addr, Some(server_id.device_id()))
+            .await
+            .unwrap();
         let (conns, _server) = accepted.await.unwrap();
         // Keep-alives measure RTT and keep an idle link open.
         tokio::time::sleep(Duration::from_millis(2500)).await;

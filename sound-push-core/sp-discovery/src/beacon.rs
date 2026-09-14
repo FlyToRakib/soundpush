@@ -33,7 +33,14 @@ pub struct Beacon {
 
 impl Beacon {
     pub fn encode(&self, identity: &DeviceIdentity) -> Vec<u8> {
-        let name = truncate_utf8(if self.flags & FLAG_NAME_HIDDEN != 0 { "" } else { &self.name }, MAX_NAME);
+        let name = truncate_utf8(
+            if self.flags & FLAG_NAME_HIDDEN != 0 {
+                ""
+            } else {
+                &self.name
+            },
+            MAX_NAME,
+        );
         let platform = truncate_utf8(&self.platform, MAX_PLATFORM);
         let mut out = Vec::with_capacity(MAX_BEACON_LEN);
         out.extend_from_slice(MAGIC);
@@ -61,7 +68,10 @@ impl Beacon {
             return Err(DiscoveryError::MalformedBeacon);
         }
         let mut r = Reader { buf: body, pos: 4 };
-        let public_key: [u8; 32] = r.take(32)?.try_into().map_err(|_| DiscoveryError::MalformedBeacon)?;
+        let public_key: [u8; 32] = r
+            .take(32)?
+            .try_into()
+            .map_err(|_| DiscoveryError::MalformedBeacon)?;
         let port = u16::from_be_bytes(r.array()?);
         let capabilities = Capabilities(u64::from_be_bytes(r.array()?));
         let protocol_max = u32::from_be_bytes(r.array()?);
@@ -73,7 +83,9 @@ impl Beacon {
         if r.pos != body.len() {
             return Err(DiscoveryError::MalformedBeacon);
         }
-        let sig: [u8; 64] = sig.try_into().map_err(|_| DiscoveryError::MalformedBeacon)?;
+        let sig: [u8; 64] = sig
+            .try_into()
+            .map_err(|_| DiscoveryError::MalformedBeacon)?;
         if !verify_signature(&public_key, body, &sig) {
             return Err(DiscoveryError::BadSignature);
         }
@@ -100,14 +112,22 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], DiscoveryError> {
-        let end = self.pos.checked_add(n).ok_or(DiscoveryError::MalformedBeacon)?;
-        let slice = self.buf.get(self.pos..end).ok_or(DiscoveryError::MalformedBeacon)?;
+        let end = self
+            .pos
+            .checked_add(n)
+            .ok_or(DiscoveryError::MalformedBeacon)?;
+        let slice = self
+            .buf
+            .get(self.pos..end)
+            .ok_or(DiscoveryError::MalformedBeacon)?;
         self.pos = end;
         Ok(slice)
     }
 
     fn array<const N: usize>(&mut self) -> Result<[u8; N], DiscoveryError> {
-        self.take(N)?.try_into().map_err(|_| DiscoveryError::MalformedBeacon)
+        self.take(N)?
+            .try_into()
+            .map_err(|_| DiscoveryError::MalformedBeacon)
     }
 
     fn u8(&mut self) -> Result<u8, DiscoveryError> {
@@ -169,7 +189,10 @@ mod tests {
         let id = DeviceIdentity::generate();
         let mut wire = beacon("Desk", 0).encode(&id);
         wire[37] ^= 0xFF; // port byte
-        assert!(matches!(Beacon::decode(&wire), Err(DiscoveryError::BadSignature)));
+        assert!(matches!(
+            Beacon::decode(&wire),
+            Err(DiscoveryError::BadSignature)
+        ));
     }
 
     #[test]

@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 use bytes::{Bytes, BytesMut};
 use rustls::pki_types::ServerName;
 use sp_protocol::ProtocolError;
-use sp_protocol::framing::{MAX_MEDIA_FRAME, StreamFrameDecoder, StreamFrameKind, encode_stream_frame};
+use sp_protocol::framing::{
+    MAX_MEDIA_FRAME, StreamFrameDecoder, StreamFrameKind, encode_stream_frame,
+};
 use sp_security::{DeviceId, DeviceIdentity, public_key_from_cert};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -32,7 +34,8 @@ use crate::tls::{Credentials, SERVER_NAME};
 /// ALPN for the TCP transport (distinct from QUIC's so the two can never be confused).
 pub const ALPN_TCP: &[u8] = b"soundpush-tcp/1";
 /// Exporter values the engine needs (pairing SAS), computed before the stream is split.
-pub(crate) const EXPORTED_LABELS: &[(&[u8], &[u8])] = &[(sp_security::pairing::SAS_EXPORTER_LABEL, b"")];
+pub(crate) const EXPORTED_LABELS: &[(&[u8], &[u8])] =
+    &[(sp_security::pairing::SAS_EXPORTER_LABEL, b"")];
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEP_ALIVE: Duration = Duration::from_secs(1);
@@ -54,12 +57,18 @@ pub struct TcpEndpoint {
 impl TcpEndpoint {
     /// Listen on `ip`, preferring `preferred_port` and falling back to an ephemeral port.
     /// The engine listens on loopback only: `adb reverse` delivers connections there.
-    pub async fn bind(identity: &DeviceIdentity, ip: IpAddr, preferred_port: u16) -> Result<Self, TransportError> {
+    pub async fn bind(
+        identity: &DeviceIdentity,
+        ip: IpAddr,
+        preferred_port: u16,
+    ) -> Result<Self, TransportError> {
         let listener = match TcpListener::bind((ip, preferred_port)).await {
             Ok(l) => l,
             Err(e) if preferred_port != 0 => {
                 warn!(preferred_port, error = %e, "preferred TCP port busy, using an ephemeral port");
-                TcpListener::bind((ip, 0)).await.map_err(TransportError::Bind)?
+                TcpListener::bind((ip, 0))
+                    .await
+                    .map_err(TransportError::Bind)?
             }
             Err(e) => return Err(TransportError::Bind(e)),
         };
@@ -71,7 +80,10 @@ impl TcpEndpoint {
         Self::new(identity, None)
     }
 
-    fn new(identity: &DeviceIdentity, listener: Option<TcpListener>) -> Result<Self, TransportError> {
+    fn new(
+        identity: &DeviceIdentity,
+        listener: Option<TcpListener>,
+    ) -> Result<Self, TransportError> {
         let credentials = Credentials::new(identity)?;
         let acceptor = TlsAcceptor::from(Arc::new(credentials.server_config(ALPN_TCP)?));
         Ok(Self {
@@ -125,8 +137,10 @@ impl TcpEndpoint {
         addr: SocketAddr,
         pinned: Option<DeviceId>,
     ) -> Result<SecureConnection, TransportError> {
-        let connector = TlsConnector::from(Arc::new(self.credentials.client_config(pinned, ALPN_TCP)?));
-        let name = ServerName::try_from(SERVER_NAME).map_err(|e| TransportError::Tls(e.to_string()))?;
+        let connector =
+            TlsConnector::from(Arc::new(self.credentials.client_config(pinned, ALPN_TCP)?));
+        let name =
+            ServerName::try_from(SERVER_NAME).map_err(|e| TransportError::Tls(e.to_string()))?;
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
             let stream = TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
@@ -172,7 +186,9 @@ impl TcpHandshake {
 
 type Exported = Vec<(&'static [u8], &'static [u8], [u8; 32])>;
 
-fn session_info<D>(conn: &rustls::ConnectionCommon<D>) -> Result<([u8; 32], Exported), TransportError> {
+fn session_info<D>(
+    conn: &rustls::ConnectionCommon<D>,
+) -> Result<([u8; 32], Exported), TransportError> {
     let leaf = conn
         .peer_certificates()
         .and_then(|certs| certs.first())
@@ -248,7 +264,12 @@ impl TcpShared {
     }
 
     pub async fn read_datagram(&self) -> Result<Bytes, TransportError> {
-        self.datagram_in.lock().await.recv().await.ok_or(TransportError::Closed)
+        self.datagram_in
+            .lock()
+            .await
+            .recv()
+            .await
+            .ok_or(TransportError::Closed)
     }
 
     pub fn exported(&self, label: &[u8], context: &[u8]) -> Option<[u8; 32]> {
@@ -274,7 +295,12 @@ impl TcpShared {
     }
 }
 
-fn start<S>(stream: S, remote: SocketAddr, peer_key: [u8; 32], exported: Exported) -> SecureConnection
+fn start<S>(
+    stream: S,
+    remote: SocketAddr,
+    peer_key: [u8; 32],
+    exported: Exported,
+) -> SecureConnection
 where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
@@ -408,12 +434,15 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 }
                 Ok(Some((StreamFrameKind::Datagram, payload))) => {
                     // Full: the session is not keeping up; dropping media is correct.
-                    if let Err(mpsc::error::TrySendError::Closed(_)) = datagram_in.try_send(payload) {
+                    if let Err(mpsc::error::TrySendError::Closed(_)) = datagram_in.try_send(payload)
+                    {
                         break 'read;
                     }
                 }
                 Ok(Some((StreamFrameKind::Ping, payload))) => {
-                    let (Ok(echo), Some(out)) = (<[u8; 8]>::try_from(&payload[..]), control_out.upgrade()) else {
+                    let (Ok(echo), Some(out)) =
+                        (<[u8; 8]>::try_from(&payload[..]), control_out.upgrade())
+                    else {
                         break 'read;
                     };
                     let _ = out.try_send(Outbound::Pong(echo));
@@ -422,7 +451,11 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     if let Ok(sent) = <[u8; 8]>::try_from(&payload[..]) {
                         let sample = stats.now_us().saturating_sub(u64::from_be_bytes(sent));
                         let old = stats.rtt_us.load(Ordering::Relaxed);
-                        let rtt = if old == 0 { sample } else { (old * 7 + sample) / 8 };
+                        let rtt = if old == 0 {
+                            sample
+                        } else {
+                            (old * 7 + sample) / 8
+                        };
                         stats.rtt_us.store(rtt, Ordering::Relaxed);
                     }
                 }

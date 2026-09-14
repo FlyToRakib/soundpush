@@ -102,8 +102,8 @@ impl Sender {
     ) -> Result<Self, EngineError> {
         let channels = config.profile.channels.clamp(1, 2) as usize;
         let frame = samples_per_frame(config.profile.frame_us);
-        let mut encoder =
-            encoder_for(&config.profile, config.application).map_err(|e| EngineError::Internal(e.to_string()))?;
+        let mut encoder = encoder_for(&config.profile, config.application)
+            .map_err(|e| EngineError::Internal(e.to_string()))?;
 
         // One second of capture headroom.
         let (mut producer, mut consumer) = rtrb::RingBuffer::<f32>::new(48_000 * channels);
@@ -267,7 +267,11 @@ fn encode_loop(
         }
 
         // Live control changes. A shared encoder follows its most constrained receiver.
-        if let Some(bitrate) = targets.iter().map(|t| t.controls.bitrate.load(Ordering::Relaxed)).min() {
+        if let Some(bitrate) = targets
+            .iter()
+            .map(|t| t.controls.bitrate.load(Ordering::Relaxed))
+            .min()
+        {
             if bitrate != applied_bitrate {
                 encoder.set_bitrate(bitrate);
                 applied_bitrate = bitrate;
@@ -286,7 +290,9 @@ fn encode_loop(
 
         // DSP.
         if controls.noise_suppression.load(Ordering::Relaxed) && channels == 1 && frame % 480 == 0 {
-            denoiser.get_or_insert_with(NoiseSuppressor::new).process(&mut buf);
+            denoiser
+                .get_or_insert_with(NoiseSuppressor::new)
+                .process(&mut buf);
         } else {
             denoiser = None;
         }
@@ -328,8 +334,13 @@ fn encode_loop(
                 t.restart = true;
                 continue;
             }
-            let with_redundancy = can_add_redundancy && t.controls.redundancy.load(Ordering::Relaxed);
-            let slot = if with_redundancy { &mut redundant } else { &mut plain };
+            let with_redundancy =
+                can_add_redundancy && t.controls.redundancy.load(Ordering::Relaxed);
+            let slot = if with_redundancy {
+                &mut redundant
+            } else {
+                &mut plain
+            };
             if slot.is_none() {
                 payload.clear();
                 let mut flags = MediaFlags::empty();
@@ -483,7 +494,11 @@ mod tests {
             controls: b_controls.clone(),
         });
         std::thread::sleep(Duration::from_millis(400));
-        assert_eq!(backend.1.load(Ordering::Relaxed), 1, "one capture for both routes");
+        assert_eq!(
+            backend.1.load(Ordering::Relaxed),
+            1,
+            "one capture for both routes"
+        );
         assert_eq!(group.subscribers(), 2);
 
         let (pa, pb) = (packets(&a), packets(&b));
@@ -507,7 +522,12 @@ mod tests {
         b_controls.muted.store(false, Ordering::Relaxed);
         std::thread::sleep(Duration::from_millis(200));
         let pb = packets(&b);
-        assert!(pb[muted_len].header.flags.contains(MediaFlags::DISCONTINUITY));
+        assert!(
+            pb[muted_len]
+                .header
+                .flags
+                .contains(MediaFlags::DISCONTINUITY)
+        );
 
         // The shared encoder follows the lowest requested bitrate; unsubscribing is clean.
         a_controls.bitrate.store(48_000, Ordering::Relaxed);

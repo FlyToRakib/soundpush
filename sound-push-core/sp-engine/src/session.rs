@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use sp_protocol::MediaPacket;
-use sp_protocol::control::{ControlMsg, Goodbye, Hello, PairRequest, StopReason, control_msg::Body};
+use sp_protocol::control::{
+    ControlMsg, Goodbye, Hello, PairRequest, StopReason, control_msg::Body,
+};
 use sp_protocol::probe::{self, Probe, ProbeKind};
 use sp_protocol::version::{LOCAL_VERSIONS, ProtocolVersion, VersionRange};
 use sp_security::DeviceId;
@@ -105,7 +107,8 @@ pub(crate) async fn run(
     let handshake = async {
         let (mut tx, mut rx) = if dialed {
             let (mut tx, rx) = conn.open_control().await?;
-            tx.send(&ControlMsg::new(0, Body::Hello(local_hello.clone()))).await?;
+            tx.send(&ControlMsg::new(0, Body::Hello(local_hello.clone())))
+                .await?;
             (tx, rx)
         } else {
             conn.accept_control().await?
@@ -115,31 +118,33 @@ pub(crate) async fn run(
             return Err(sp_transport::TransportError::Closed);
         };
         if !dialed {
-            tx.send(&ControlMsg::new(0, Body::Hello(local_hello.clone()))).await?;
+            tx.send(&ControlMsg::new(0, Body::Hello(local_hello.clone())))
+                .await?;
         }
         Ok::<_, sp_transport::TransportError>((tx, rx, peer_hello))
     };
 
-    let (mut tx, mut rx, peer_hello) = match tokio::time::timeout(HANDSHAKE_TIMEOUT * 2, handshake).await {
-        Ok(Ok(v)) => v,
-        Ok(Err(e)) => {
-            debug!(error = %e, "handshake failed");
-            conn.close(1, b"handshake");
-            let _ = events.send(SessionEvent::HandshakeFailed {
-                conn_id,
-                incompatible: false,
-            });
-            return;
-        }
-        Err(_) => {
-            conn.close(1, b"timeout");
-            let _ = events.send(SessionEvent::HandshakeFailed {
-                conn_id,
-                incompatible: false,
-            });
-            return;
-        }
-    };
+    let (mut tx, mut rx, peer_hello) =
+        match tokio::time::timeout(HANDSHAKE_TIMEOUT * 2, handshake).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => {
+                debug!(error = %e, "handshake failed");
+                conn.close(1, b"handshake");
+                let _ = events.send(SessionEvent::HandshakeFailed {
+                    conn_id,
+                    incompatible: false,
+                });
+                return;
+            }
+            Err(_) => {
+                conn.close(1, b"timeout");
+                let _ = events.send(SessionEvent::HandshakeFailed {
+                    conn_id,
+                    incompatible: false,
+                });
+                return;
+            }
+        };
 
     // The claimed device id must match the authenticated key.
     let claimed = DeviceId::try_from_slice(&peer_hello.device_id);
@@ -174,7 +179,11 @@ pub(crate) async fn run(
     }
 
     if let Some(pair) = pair {
-        if tx.send(&ControlMsg::new(0, Body::PairRequest(pair))).await.is_err() {
+        if tx
+            .send(&ControlMsg::new(0, Body::PairRequest(pair)))
+            .await
+            .is_err()
+        {
             let _ = events.send(SessionEvent::HandshakeFailed {
                 conn_id,
                 incompatible: false,
@@ -320,7 +329,9 @@ mod tests {
         assert!(!limit.allow(start + Duration::from_millis(100)));
         // Idle time never banks more than the burst.
         assert_eq!(
-            (0..20).filter(|_| limit.allow(start + Duration::from_secs(60))).count(),
+            (0..20)
+                .filter(|_| limit.allow(start + Duration::from_secs(60)))
+                .count(),
             5
         );
     }

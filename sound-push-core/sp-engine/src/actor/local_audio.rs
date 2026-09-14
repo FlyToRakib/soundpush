@@ -39,11 +39,20 @@ pub(super) struct LocalAudio {
 
 /// Whether a route's audio on this device uses the system default device of a changed direction.
 /// Routes pinned to a named device, per-app capture and the virtual microphone never follow it.
-pub(super) fn follows_default(kind: RouteKind, settings: &Settings, input_changed: bool, output_changed: bool) -> bool {
+pub(super) fn follows_default(
+    kind: RouteKind,
+    settings: &Settings,
+    input_changed: bool,
+    output_changed: bool,
+) -> bool {
     let (source, sink) = kind.endpoints();
     if kind.local_is_source() {
         match source {
-            "system" => output_changed && settings.capture.system_device.is_none() && settings.capture.app.is_none(),
+            "system" => {
+                output_changed
+                    && settings.capture.system_device.is_none()
+                    && settings.capture.app.is_none()
+            }
             "mic" => input_changed && settings.mic.device.is_none(),
             _ => false,
         }
@@ -56,9 +65,10 @@ impl Actor {
     /// What "send this computer's audio" captures: everything, or one app (or all but one).
     pub(super) fn system_audio_source(&self) -> CaptureSource {
         match &self.settings.capture.app {
-            Some(process) => {
-                CaptureSource::Application { process: process.clone(), exclude: self.settings.capture.exclude_app }
-            }
+            Some(process) => CaptureSource::Application {
+                process: process.clone(),
+                exclude: self.settings.capture.exclude_app,
+            },
             None => CaptureSource::SystemLoopback(self.settings.capture.system_device.clone()),
         }
     }
@@ -117,7 +127,9 @@ impl Actor {
             return false;
         }
         let now = Instant::now();
-        self.local_audio.reopened.retain(|_, t| now.duration_since(*t) < REOPEN_BACKOFF);
+        self.local_audio
+            .reopened
+            .retain(|_, t| now.duration_since(*t) < REOPEN_BACKOFF);
         if self.local_audio.reopened.contains_key(&key) {
             return false;
         }
@@ -166,7 +178,11 @@ impl Actor {
             return;
         }
         let now = Instant::now();
-        if self.local_audio.last_poll.is_some_and(|t| now.duration_since(t) < IN_USE_POLL) {
+        if self
+            .local_audio
+            .last_poll
+            .is_some_and(|t| now.duration_since(t) < IN_USE_POLL)
+        {
             return;
         }
         self.local_audio.last_poll = Some(now);
@@ -174,7 +190,9 @@ impl Actor {
         let mic_route = self
             .routes
             .iter()
-            .find(|r| r.kind == RouteKind::ReceiveMicToVirtualMic && r.status != RouteStatus::Stopped)
+            .find(|r| {
+                r.kind == RouteKind::ReceiveMicToVirtualMic && r.status != RouteStatus::Stopped
+            })
             .map(Route::key);
         // The automatic route ended some other way (stopped by the user, device left).
         if self.local_audio.auto_route.is_some() && self.local_audio.auto_route != mic_route {
@@ -217,7 +235,12 @@ impl Actor {
             })
             .map(|(id, _)| *id)
             .collect();
-        let last = self.settings.desktop.last_mic_peer.as_deref().and_then(DeviceId::from_hex);
+        let last = self
+            .settings
+            .desktop
+            .last_mic_peer
+            .as_deref()
+            .and_then(DeviceId::from_hex);
         let peer = match last.filter(|id| candidates.contains(id)) {
             Some(id) => id,
             None if candidates.len() == 1 => match candidates.first() {
@@ -244,7 +267,9 @@ impl Actor {
         let active = self
             .routes
             .iter()
-            .find(|r| r.kind == RouteKind::ReceiveMicToVirtualMic && r.status == RouteStatus::Active)
+            .find(|r| {
+                r.kind == RouteKind::ReceiveMicToVirtualMic && r.status == RouteStatus::Active
+            })
             .map(|r| r.peer.to_hex());
         if let Some(hex) = active
             && self.settings.desktop.last_mic_peer.as_deref() != Some(hex.as_str())
@@ -263,17 +288,47 @@ mod tests {
     fn only_routes_on_the_default_device_follow_it() {
         let mut s = Settings::default();
         assert!(follows_default(RouteKind::SendSystemAudio, &s, false, true));
-        assert!(!follows_default(RouteKind::SendSystemAudio, &s, true, false));
-        assert!(follows_default(RouteKind::SendMicToVirtualMic, &s, true, false));
-        assert!(follows_default(RouteKind::ReceiveSystemAudio, &s, false, true));
+        assert!(!follows_default(
+            RouteKind::SendSystemAudio,
+            &s,
+            true,
+            false
+        ));
+        assert!(follows_default(
+            RouteKind::SendMicToVirtualMic,
+            &s,
+            true,
+            false
+        ));
+        assert!(follows_default(
+            RouteKind::ReceiveSystemAudio,
+            &s,
+            false,
+            true
+        ));
         // The virtual microphone is a named cable, never the default output.
-        assert!(!follows_default(RouteKind::ReceiveMicToVirtualMic, &s, true, true));
+        assert!(!follows_default(
+            RouteKind::ReceiveMicToVirtualMic,
+            &s,
+            true,
+            true
+        ));
 
         s.output.device = Some("Headphones".into());
         s.capture.app = Some("spotify.exe".into());
         s.mic.device = Some("USB Mic".into());
-        assert!(!follows_default(RouteKind::ReceiveSystemAudio, &s, true, true));
+        assert!(!follows_default(
+            RouteKind::ReceiveSystemAudio,
+            &s,
+            true,
+            true
+        ));
         assert!(!follows_default(RouteKind::SendSystemAudio, &s, true, true));
-        assert!(!follows_default(RouteKind::SendMicToSpeaker, &s, true, true));
+        assert!(!follows_default(
+            RouteKind::SendMicToSpeaker,
+            &s,
+            true,
+            true
+        ));
     }
 }

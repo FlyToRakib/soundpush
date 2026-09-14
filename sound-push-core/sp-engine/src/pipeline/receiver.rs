@@ -72,9 +72,17 @@ impl Receiver {
     ) -> Result<(Self, PacketSink), EngineError> {
         let channels = config.profile.channels.clamp(1, 2) as usize;
         let (producer, consumer) = rtrb::RingBuffer::<InboundPacket>::new(1024);
-        let decoder = decoder_for(&config.profile).map_err(|e| EngineError::Internal(e.to_string()))?;
+        let decoder =
+            decoder_for(&config.profile).map_err(|e| EngineError::Internal(e.to_string()))?;
         let expected_codec = Codec::try_from(config.profile.codec as u8).unwrap_or(Codec::Opus);
-        let mut playout = Playout::new(&config.profile, channels, consumer, decoder, expected_codec, controls.clone());
+        let mut playout = Playout::new(
+            &config.profile,
+            channels,
+            consumer,
+            decoder,
+            expected_codec,
+            controls.clone(),
+        );
 
         let render = backend.open_render(
             &config.target,
@@ -165,7 +173,9 @@ impl Playout {
         while self.acc.len() < out.len() {
             let status = self.jitter.pop(&mut self.frame_buf);
             let ratio = match status {
-                PopStatus::Played => self.drift.update(self.jitter.buffered_samples(), self.jitter.target_samples()),
+                PopStatus::Played => self
+                    .drift
+                    .update(self.jitter.buffered_samples(), self.jitter.target_samples()),
                 PopStatus::Missing => {
                     self.decoder.conceal(&mut self.frame_buf);
                     self.drift.ratio()
@@ -175,20 +185,26 @@ impl Playout {
                     1.0
                 }
             };
-            self.resampler.process(&self.frame_buf, ratio, &mut self.acc);
+            self.resampler
+                .process(&self.frame_buf, ratio, &mut self.acc);
         }
         out.copy_from_slice(&self.acc[..out.len()]);
         self.acc.drain(..out.len());
 
         // Output processing.
-        self.gain.set(if self.controls.muted.load(Ordering::Relaxed) {
-            0.0
-        } else {
-            self.controls.volume.get()
-        });
+        self.gain
+            .set(if self.controls.muted.load(Ordering::Relaxed) {
+                0.0
+            } else {
+                self.controls.volume.get()
+            });
         self.gain.process(out);
         if self.channels == 2 {
-            balance_and_mono(out, self.controls.balance.get(), self.controls.mono.load(Ordering::Relaxed));
+            balance_and_mono(
+                out,
+                self.controls.balance.get(),
+                self.controls.mono.load(Ordering::Relaxed),
+            );
         }
         self.meter.process(out);
 
@@ -203,7 +219,9 @@ impl Playout {
 
     fn drain_network(&mut self) {
         while let Ok(packet) = self.input.pop() {
-            self.controls.packets_received.fetch_add(1, Ordering::Relaxed);
+            self.controls
+                .packets_received
+                .fetch_add(1, Ordering::Relaxed);
             if packet.codec != self.codec {
                 self.controls.decode_errors.fetch_add(1, Ordering::Relaxed);
                 continue;
@@ -216,7 +234,11 @@ impl Playout {
             let (primary, redundant) = match bytes {
                 [hi, lo, rest @ ..] if packet.redundant => {
                     let n = u16::from_be_bytes([*hi, *lo]) as usize;
-                    if n <= rest.len() { (&rest[..n], Some(&rest[n..])) } else { (bytes, None) }
+                    if n <= rest.len() {
+                        (&rest[..n], Some(&rest[n..]))
+                    } else {
+                        (bytes, None)
+                    }
                 }
                 _ => (bytes, None),
             };
@@ -226,16 +248,25 @@ impl Playout {
                 if let Some(prev_ts) = prev_ts.filter(|ts| !self.jitter.has(*ts)) {
                     if let Ok(samples) = self.decoder.decode(copy, &mut self.decode_buf) {
                         let n = samples * self.channels;
-                        self.jitter.push(prev_ts, self.decode_buf[..n].to_vec(), packet.arrival_samples);
-                        self.controls.packets_recovered.fetch_add(1, Ordering::Relaxed);
+                        self.jitter.push(
+                            prev_ts,
+                            self.decode_buf[..n].to_vec(),
+                            packet.arrival_samples,
+                        );
+                        self.controls
+                            .packets_recovered
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }
             match self.decoder.decode(primary, &mut self.decode_buf) {
                 Ok(samples) => {
                     let n = samples * self.channels;
-                    self.jitter
-                        .push(packet.timestamp, self.decode_buf[..n].to_vec(), packet.arrival_samples);
+                    self.jitter.push(
+                        packet.timestamp,
+                        self.decode_buf[..n].to_vec(),
+                        packet.arrival_samples,
+                    );
                 }
                 Err(_) => {
                     self.controls.decode_errors.fetch_add(1, Ordering::Relaxed);
@@ -335,7 +366,11 @@ mod tests {
             capture_frequency: 440.0,
         };
         let profile = build_profile(LatencyProfile::Stable, Quality::Auto, 1, true);
-        let rx_controls = Arc::new(ReceiverControls::new(1.0, profile.jitter_min_ms, profile.jitter_max_ms));
+        let rx_controls = Arc::new(ReceiverControls::new(
+            1.0,
+            profile.jitter_min_ms,
+            profile.jitter_max_ms,
+        ));
         let (_receiver, sink) = Receiver::start(
             &backend,
             ReceiverConfig {
@@ -347,14 +382,21 @@ mod tests {
         )
         .unwrap();
         // Drop every 5th packet.
-        let loopback = Arc::new(Loopback(Mutex::new(Some(sink)), 5, std::sync::atomic::AtomicU64::new(0)));
+        let loopback = Arc::new(Loopback(
+            Mutex::new(Some(sink)),
+            5,
+            std::sync::atomic::AtomicU64::new(0),
+        ));
         let tx_controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
         tx_controls.redundancy.store(true, Ordering::Relaxed);
         let _sender = start_sender(&backend, profile, tx_controls, loopback);
 
         std::thread::sleep(Duration::from_millis(2000));
         let recovered = rx_controls.packets_recovered.load(Ordering::Relaxed);
-        assert!(recovered >= 10, "expected recovered frames, got {recovered}");
+        assert!(
+            recovered >= 10,
+            "expected recovered frames, got {recovered}"
+        );
     }
 
     #[test]
@@ -366,7 +408,11 @@ mod tests {
         };
         let profile = build_profile(LatencyProfile::Balanced, Quality::Auto, 1, false);
 
-        let rx_controls = Arc::new(ReceiverControls::new(1.0, profile.jitter_min_ms, profile.jitter_max_ms));
+        let rx_controls = Arc::new(ReceiverControls::new(
+            1.0,
+            profile.jitter_min_ms,
+            profile.jitter_max_ms,
+        ));
         let (_receiver, sink) = Receiver::start(
             &backend,
             ReceiverConfig {
@@ -378,7 +424,11 @@ mod tests {
         )
         .unwrap();
 
-        let loopback = Arc::new(Loopback(Mutex::new(Some(sink)), 0, std::sync::atomic::AtomicU64::new(0)));
+        let loopback = Arc::new(Loopback(
+            Mutex::new(Some(sink)),
+            0,
+            std::sync::atomic::AtomicU64::new(0),
+        ));
         let tx_controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
         let _sender = start_sender(&backend, profile, tx_controls.clone(), loopback);
 

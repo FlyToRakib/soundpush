@@ -13,11 +13,13 @@ use objc2::Message;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_core_audio::{
-    AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
-    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectPropertyAddress, CATapDescription,
-    CATapMuteBehavior, kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceMainSubDeviceKey,
-    kAudioAggregateDeviceNameKey, kAudioAggregateDeviceSubDeviceListKey, kAudioAggregateDeviceTapAutoStartKey,
-    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
+    AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
+    AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap,
+    AudioObjectGetPropertyData, AudioObjectPropertyAddress, CATapDescription, CATapMuteBehavior,
+    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceMainSubDeviceKey,
+    kAudioAggregateDeviceNameKey, kAudioAggregateDeviceSubDeviceListKey,
+    kAudioAggregateDeviceTapAutoStartKey, kAudioAggregateDeviceTapListKey,
+    kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
     kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyTranslatePIDToProcessObject,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
     kAudioSubDeviceUIDKey, kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
@@ -91,8 +93,12 @@ impl SystemTap {
         let excluded = NSArray::from_retained_slice(&excluded);
 
         // SAFETY: standard alloc/init; the description is configured before use.
-        let description =
-            unsafe { CATapDescription::initStereoGlobalTapButExcludeProcesses(CATapDescription::alloc(), &excluded) };
+        let description = unsafe {
+            CATapDescription::initStereoGlobalTapButExcludeProcesses(
+                CATapDescription::alloc(),
+                &excluded,
+            )
+        };
         // SAFETY: plain property setters on a live object.
         unsafe {
             // Must match the aggregate's visibility: a private tap only attaches to a private aggregate.
@@ -105,7 +111,9 @@ impl SystemTap {
         // SAFETY: `description` is valid and `tap_id` is a valid out pointer.
         let status = unsafe { AudioHardwareCreateProcessTap(Some(&description), &mut tap_id) };
         if status != 0 || tap_id == 0 {
-            return Err(format!("could not create system audio tap (status {status})"));
+            return Err(format!(
+                "could not create system audio tap (status {status})"
+            ));
         }
         let destroy_tap = |msg: String| {
             // SAFETY: tap_id came from AudioHardwareCreateProcessTap.
@@ -115,10 +123,16 @@ impl SystemTap {
 
         // SAFETY: UUID is always set on a tap description.
         let tap_uid = unsafe { description.UUID().UUIDString() };
-        let output: u32 = read_property(kAudioObjectSystemObject as u32, kAudioHardwarePropertyDefaultOutputDevice, None)
-            .map_err(|s| destroy_tap(format!("no default output device (status {s})")))?;
-        let output_uid_ptr: *mut NSString = read_property(output, kAudioDevicePropertyDeviceUID, None)
-            .map_err(|s| destroy_tap(format!("could not read output device UID (status {s})")))?;
+        let output: u32 = read_property(
+            kAudioObjectSystemObject as u32,
+            kAudioHardwarePropertyDefaultOutputDevice,
+            None,
+        )
+        .map_err(|s| destroy_tap(format!("no default output device (status {s})")))?;
+        let output_uid_ptr: *mut NSString =
+            read_property(output, kAudioDevicePropertyDeviceUID, None).map_err(|s| {
+                destroy_tap(format!("could not read output device UID (status {s})"))
+            })?;
         // SAFETY: the property returns a +1 retained CFString, toll-free bridged to NSString.
         let output_uid = unsafe { Retained::from_raw(output_uid_ptr) }
             .ok_or_else(|| destroy_tap("output device has no UID".into()))?;
@@ -128,9 +142,16 @@ impl SystemTap {
         let name = NSString::from_str(TAP_DEVICE_NAME);
         let aggregate_uid = NSString::from_str(&format!("net.soundpush.system-audio.{tap_uid}"));
 
-        let (k_sub_uid, k_tap_uid, k_drift) = (ns_key(kAudioSubDeviceUIDKey), ns_key(kAudioSubTapUIDKey), ns_key(kAudioSubTapDriftCompensationKey));
+        let (k_sub_uid, k_tap_uid, k_drift) = (
+            ns_key(kAudioSubDeviceUIDKey),
+            ns_key(kAudioSubTapUIDKey),
+            ns_key(kAudioSubTapDriftCompensationKey),
+        );
         let sub_device = NSDictionary::from_slices(&[&*k_sub_uid], &[as_object(&*output_uid)]);
-        let sub_tap = NSDictionary::from_slices(&[&*k_tap_uid, &*k_drift], &[as_object(&*tap_uid), as_object(&*yes)]);
+        let sub_tap = NSDictionary::from_slices(
+            &[&*k_tap_uid, &*k_drift],
+            &[as_object(&*tap_uid), as_object(&*yes)],
+        );
         let sub_devices = NSArray::from_retained_slice(&[sub_device]);
         let taps = NSArray::from_retained_slice(&[sub_tap]);
 
@@ -165,9 +186,14 @@ impl SystemTap {
             AudioHardwareCreateAggregateDevice(cf, NonNull::from(&mut aggregate_id))
         };
         if status != 0 || aggregate_id == 0 {
-            return Err(destroy_tap(format!("could not create capture device (status {status})")));
+            return Err(destroy_tap(format!(
+                "could not create capture device (status {status})"
+            )));
         }
-        Ok(Self { tap_id, aggregate_id })
+        Ok(Self {
+            tap_id,
+            aggregate_id,
+        })
     }
 }
 

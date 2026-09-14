@@ -386,12 +386,21 @@ impl Settings {
         self.mic.gain_db = self.mic.gain_db.clamp(0.0, 20.0);
         self.stream.opus_bitrate = self.stream.opus_bitrate.clamp(6_000, 510_000);
         self.stream.custom_min_ms = self.stream.custom_min_ms.clamp(5, 500);
-        self.stream.custom_max_ms = self.stream.custom_max_ms.clamp(self.stream.custom_min_ms, 1000);
-        self.capture.app = self.capture.app.take().map(|a| a.trim().chars().take(260).collect()).filter(|a: &String| !a.is_empty());
+        self.stream.custom_max_ms = self
+            .stream
+            .custom_max_ms
+            .clamp(self.stream.custom_min_ms, 1000);
+        self.capture.app = self
+            .capture
+            .app
+            .take()
+            .map(|a| a.trim().chars().take(260).collect())
+            .filter(|a: &String| !a.is_empty());
         self.dismissed_tips.truncate(256);
         self.saved_routes.truncate(32);
-        self.device_profiles
-            .retain(|id, p| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) && !p.is_empty());
+        self.device_profiles.retain(|id, p| {
+            id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) && !p.is_empty()
+        });
         for p in self.device_profiles.values_mut() {
             p.sanitize();
         }
@@ -439,7 +448,8 @@ impl SettingsStore {
     }
 
     pub fn save(&self, settings: &Settings) -> Result<(), crate::EngineError> {
-        let json = serde_json::to_vec_pretty(settings).map_err(|e| crate::EngineError::Storage(e.to_string()))?;
+        let json = serde_json::to_vec_pretty(settings)
+            .map_err(|e| crate::EngineError::Storage(e.to_string()))?;
         write_atomic(&self.path, &json).map_err(|e| crate::EngineError::Storage(e.to_string()))
     }
 }
@@ -458,7 +468,11 @@ mod tests {
         store.save(&s).unwrap();
         assert_eq!(store.load().0, s);
 
-        fs::write(dir.path().join("settings.json"), br#"{"deviceName":"Old","futureField":1}"#).unwrap();
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"deviceName":"Old","futureField":1}"#,
+        )
+        .unwrap();
         let (loaded, recovered) = store.load();
         assert!(!recovered);
         assert_eq!(loaded.device_name, "Old");
@@ -501,17 +515,30 @@ mod tests {
                 ..DeviceProfile::default()
             },
         );
-        s.device_profiles.insert("not-a-device".into(), DeviceProfile {
-            redundancy: Some(true),
-            ..DeviceProfile::default()
-        });
-        s.device_profiles.insert("fedcba9876543210fedcba9876543210".into(), DeviceProfile::default());
+        s.device_profiles.insert(
+            "not-a-device".into(),
+            DeviceProfile {
+                redundancy: Some(true),
+                ..DeviceProfile::default()
+            },
+        );
+        s.device_profiles.insert(
+            "fedcba9876543210fedcba9876543210".into(),
+            DeviceProfile::default(),
+        );
         s.sanitize();
-        assert_eq!(s.device_profiles.len(), 1, "invalid ids and empty profiles are dropped");
+        assert_eq!(
+            s.device_profiles.len(),
+            1,
+            "invalid ids and empty profiles are dropped"
+        );
         let stream = s.stream_for(&peer);
         assert_eq!(stream.latency, LatencyMode::Stable);
         assert_eq!(stream.opus_bitrate, 6_000);
-        assert_eq!(stream.quality, s.stream.quality, "unset fields follow the global setting");
+        assert_eq!(
+            stream.quality, s.stream.quality,
+            "unset fields follow the global setting"
+        );
         assert_eq!(s.stream_for("other"), s.stream);
 
         // Round trip, and files from before profiles/keep existed still load.
@@ -519,7 +546,12 @@ mod tests {
         assert!(json.contains("\"deviceProfiles\"") && !json.contains("\"customMinMs\":null"));
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
-        let old: Settings = serde_json::from_str(r#"{"savedRoutes":[{"peerId":"ab","kind":"sendSystemAudio"}]}"#).unwrap();
-        assert!(old.saved_routes[0].keep, "routes saved by older versions were explicit");
+        let old: Settings =
+            serde_json::from_str(r#"{"savedRoutes":[{"peerId":"ab","kind":"sendSystemAudio"}]}"#)
+                .unwrap();
+        assert!(
+            old.saved_routes[0].keep,
+            "routes saved by older versions were explicit"
+        );
     }
 }

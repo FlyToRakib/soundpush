@@ -45,7 +45,9 @@ pub fn create(app: &mut App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
             "mute" => {
-                if let (Some(state), Some(items)) = (app.try_state::<AppState>(), app.try_state::<TrayItems>()) {
+                if let (Some(state), Some(items)) =
+                    (app.try_state::<AppState>(), app.try_state::<TrayItems>())
+                {
                     let muted = items.mute.is_checked().unwrap_or(false);
                     if let Some(engine) = state.engine.get() {
                         let _ = engine.set_mic_muted(muted);
@@ -53,7 +55,10 @@ pub fn create(app: &mut App) -> tauri::Result<()> {
                 }
             }
             "stop_all" => {
-                if let Some(engine) = app.try_state::<AppState>().and_then(|s| s.engine.get().cloned()) {
+                if let Some(engine) = app
+                    .try_state::<AppState>()
+                    .and_then(|s| s.engine.get().cloned())
+                {
                     for route in engine.state().routes.iter() {
                         let _ = engine.stop_route(route.route_id.clone());
                     }
@@ -94,18 +99,33 @@ pub fn update(app: &AppHandle, state: &EngineState) {
     let Some(items) = app.try_state::<TrayItems>() else {
         return;
     };
-    let active: Vec<_> = state.routes.iter().filter(|r| r.status == RouteStatus::Active).collect();
+    let active: Vec<_> = state
+        .routes
+        .iter()
+        .filter(|r| r.status == RouteStatus::Active)
+        .collect();
     let mic_live = active.iter().any(|r| {
-        matches!(r.kind, RouteKind::SendMicToSpeaker | RouteKind::SendMicToVirtualMic | RouteKind::ReceiveMicToVirtualMic)
+        matches!(
+            r.kind,
+            RouteKind::SendMicToSpeaker
+                | RouteKind::SendMicToVirtualMic
+                | RouteKind::ReceiveMicToVirtualMic
+        )
     });
     let summary = match active.len() {
         0 => {
             let connected = state
                 .peers
                 .iter()
-                .filter(|p| p.trusted && p.connection == sp_engine::state::ConnectionStatus::Connected)
+                .filter(|p| {
+                    p.trusted && p.connection == sp_engine::state::ConnectionStatus::Connected
+                })
                 .count();
-            if connected == 0 { "Not streaming".to_string() } else { format!("{connected} device(s) connected") }
+            if connected == 0 {
+                "Not streaming".to_string()
+            } else {
+                format!("{connected} device(s) connected")
+            }
         }
         1 => format!("Streaming with {}", active[0].peer_name),
         n => format!("{n} streams active"),
@@ -118,7 +138,9 @@ pub fn update(app: &AppHandle, state: &EngineState) {
 
     // Mute can change from a shortcut or the window, so the check mark follows the engine.
     let key = format!("{summary}|{}|{}", state.mic_muted, mic_live);
-    let Ok(mut last) = items.last_summary.lock() else { return };
+    let Ok(mut last) = items.last_summary.lock() else {
+        return;
+    };
     if *last == key {
         return;
     }

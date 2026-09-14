@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use sp_engine::settings::{DeviceProfile, QualityMode};
 use sp_engine::sp_audio_io::null::NullBackend;
 use sp_engine::sp_audio_io::{
-    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, ErrorCallback, RenderCallback,
-    RenderTarget,
+    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo,
+    ErrorCallback, RenderCallback, RenderTarget,
 };
 use sp_engine::state::{ConnectionStatus, RouteStatus};
 use sp_engine::{EngineConfig, EngineHandle, EngineState, PlatformHooks, RouteKind};
@@ -65,7 +65,8 @@ impl AudioBackend for Counting {
         on_error: ErrorCallback,
     ) -> Result<Box<dyn AudioStream>, AudioError> {
         self.captures.fetch_add(1, Ordering::Relaxed);
-        self.inner.open_capture(source, channels, on_audio, on_error)
+        self.inner
+            .open_capture(source, channels, on_audio, on_error)
     }
     fn open_render(
         &self,
@@ -125,11 +126,19 @@ fn start_with(
     .expect("engine starts")
 }
 
-fn start(dir: &tempfile::TempDir, name: &'static str, backend: Arc<dyn AudioBackend>) -> EngineHandle {
+fn start(
+    dir: &tempfile::TempDir,
+    name: &'static str,
+    backend: Arc<dyn AudioBackend>,
+) -> EngineHandle {
     start_with(dir, name, "linux", backend, config())
 }
 
-fn wait_for(engine: &EngineHandle, what: &str, pred: impl Fn(&EngineState) -> bool) -> Arc<EngineState> {
+fn wait_for(
+    engine: &EngineHandle,
+    what: &str,
+    pred: impl Fn(&EngineState) -> bool,
+) -> Arc<EngineState> {
     wait_for_within(engine, what, Duration::from_secs(10), pred)
 }
 
@@ -145,7 +154,10 @@ fn wait_for_within(
         if pred(&state) {
             return state;
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}: {state:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {what}: {state:#?}"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -195,7 +207,10 @@ fn qr_pairing_route_and_audio() {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     let (desk_id, phone_id) = pair(&rt, &desk, &phone);
-    assert!(desk.state().pairing.qr_uri.is_none(), "QR secret is single-use");
+    assert!(
+        desk.state().pairing.qr_uri.is_none(),
+        "QR secret is single-use"
+    );
 
     // Phone asks to hear the desk's system audio.
     let route_id = rt
@@ -214,7 +229,11 @@ fn qr_pairing_route_and_audio() {
             .iter()
             .any(|r| r.route_id == route_id && r.stats.latency_ms > 0.0)
     });
-    let route = phone_state.routes.iter().find(|r| r.route_id == route_id).unwrap();
+    let route = phone_state
+        .routes
+        .iter()
+        .find(|r| r.route_id == route_id)
+        .unwrap();
     assert_eq!(route.stats.codec, "Opus");
     assert!(
         phone_state
@@ -241,7 +260,9 @@ fn qr_pairing_route_and_audio() {
     // Stopping on one side stops on both.
     phone.stop_route(route_id).unwrap();
     wait_for(&desk, "desk system route stopped", |s| {
-        !s.routes.iter().any(|r| r.kind == RouteKind::SendSystemAudio)
+        !s.routes
+            .iter()
+            .any(|r| r.kind == RouteKind::SendSystemAudio)
     });
 
     // Forgetting a device revokes access.
@@ -266,7 +287,11 @@ fn trusted_devices_reconnect_after_restart() {
     drop(a);
     std::thread::sleep(Duration::from_millis(300));
     let a = start(&a_dir, "A", backend());
-    assert_eq!(a.state().local.device_id, a_id, "identity persists across restarts");
+    assert_eq!(
+        a.state().local.device_id,
+        a_id,
+        "identity persists across restarts"
+    );
     wait_for(&a, "A reconnects to B", |s| connected(s, &b_id));
 }
 
@@ -298,13 +323,18 @@ fn lost_connection_resumes_routes_without_asking_again() {
 
     // The network drops: no goodbye, both sides see the connection vanish.
     phone.simulate_connection_loss(desk_id.clone()).unwrap();
-    wait_for(&phone, "phone notices the loss", |s| !connected(s, &desk_id));
+    wait_for(&phone, "phone notices the loss", |s| {
+        !connected(s, &desk_id)
+    });
 
     // Both reconnect; the resume token lets the phone restore the approved route silently.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let (d, p) = (desk.state(), phone.state());
-        assert!(p.requests.is_empty(), "a resumed session must not prompt again");
+        assert!(
+            p.requests.is_empty(),
+            "a resumed session must not prompt again"
+        );
         let active = d
             .routes
             .iter()
@@ -315,7 +345,10 @@ fn lost_connection_resumes_routes_without_asking_again() {
         if active && connected(&d, &phone_id) && connected(&p, &desk_id) {
             break;
         }
-        assert!(Instant::now() < deadline, "route did not resume: {d:#?}\n{p:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "route did not resume: {d:#?}\n{p:#?}"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
     recorded.lock().unwrap().clear();
@@ -369,7 +402,11 @@ fn one_capture_serves_two_receivers() {
     // One receiver leaves: the other keeps playing from the same encoder.
     phone1.stop_route(r1).unwrap();
     wait_for(&desk, "one route left", |s| {
-        s.routes.iter().filter(|r| r.kind == RouteKind::SendSystemAudio).count() == 1
+        s.routes
+            .iter()
+            .filter(|r| r.kind == RouteKind::SendSystemAudio)
+            .count()
+            == 1
     });
     rec2.lock().unwrap().clear();
     wait_for_audio(&rec2, "phone 2 still plays");
@@ -383,7 +420,11 @@ fn one_capture_serves_two_receivers() {
         .unwrap();
     rec1.lock().unwrap().clear();
     wait_for_audio(&rec1, "phone 1 plays again");
-    assert_eq!(captures.load(Ordering::Relaxed), 2, "the idle encoder was released");
+    assert_eq!(
+        captures.load(Ordering::Relaxed),
+        2,
+        "the idle encoder was released"
+    );
 }
 
 #[test]
@@ -421,7 +462,13 @@ fn device_profile_switches_codec_on_a_running_route() {
             .iter()
             .any(|r| r.kind == RouteKind::SendSystemAudio && r.stats.codec == "PCM")
     });
-    assert!(phone.state().settings.device_profiles.contains_key(&desk_id));
+    assert!(
+        phone
+            .state()
+            .settings
+            .device_profiles
+            .contains_key(&desk_id)
+    );
     recorded.lock().unwrap().clear();
     wait_for_audio(&recorded, "pcm audio after the switch");
 
@@ -491,11 +538,17 @@ fn usb_tcp_transport_pairs_streams_and_measures() {
         .unwrap();
     wait_for_audio(&recorded, "audio over TCP");
 
-    let report = rt.block_on(phone.run_network_test(desk_id.clone())).unwrap();
+    let report = rt
+        .block_on(phone.run_network_test(desk_id.clone()))
+        .unwrap();
     assert_eq!(report.transport, "tcp");
     assert!(report.probes_received > 0);
     assert!(report.loss_pct < 5.0, "loopback loss {}", report.loss_pct);
-    assert!(report.achievable_kbps >= 320, "achievable {}", report.achievable_kbps);
+    assert!(
+        report.achievable_kbps >= 320,
+        "achievable {}",
+        report.achievable_kbps
+    );
     let state = wait_for(&phone, "test result in state", |s| {
         s.network_tests
             .iter()
@@ -507,9 +560,11 @@ fn usb_tcp_transport_pairs_streams_and_measures() {
     phone.simulate_connection_loss(desk_id.clone()).unwrap();
     std::thread::sleep(Duration::from_millis(200));
     wait_for_within(&phone, "reconnect over TCP", Duration::from_secs(20), |s| {
-        s.peers
-            .iter()
-            .any(|p| p.device_id == desk_id && p.connection == ConnectionStatus::Connected && p.transport == "tcp")
+        s.peers.iter().any(|p| {
+            p.device_id == desk_id
+                && p.connection == ConnectionStatus::Connected
+                && p.transport == "tcp"
+        })
     });
 }
 
@@ -528,18 +583,26 @@ fn routes_resume_after_restart_when_enabled() {
     rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
         .unwrap();
     wait_for(&phone, "route saved for restart", |s| {
-        s.settings.saved_routes.iter().any(|r| r.peer_id == desk_id && !r.keep)
+        s.settings
+            .saved_routes
+            .iter()
+            .any(|r| r.peer_id == desk_id && !r.keep)
     });
 
     drop(phone);
     std::thread::sleep(Duration::from_millis(300));
     let (phone_backend, recorded) = recorder();
     let phone = start(&phone_dir, "Phone", phone_backend);
-    wait_for_within(&phone, "route restored after restart", Duration::from_secs(15), |s| {
-        s.routes
-            .iter()
-            .any(|r| r.kind == RouteKind::ReceiveSystemAudio && r.status == RouteStatus::Active)
-    });
+    wait_for_within(
+        &phone,
+        "route restored after restart",
+        Duration::from_secs(15),
+        |s| {
+            s.routes
+                .iter()
+                .any(|r| r.kind == RouteKind::ReceiveSystemAudio && r.status == RouteStatus::Active)
+        },
+    );
     wait_for_audio(&recorded, "audio after restart");
 
     // Turning the setting off forgets routes that were only saved because of it.

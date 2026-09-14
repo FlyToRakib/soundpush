@@ -13,15 +13,21 @@ use sp_discovery::{Discovery, DiscoveryConfig, DiscoveryEvent, PeerAdvert};
 use sp_media::codec::OpusApplication;
 use sp_media::profile::build_profile;
 use sp_protocol::control::{
-    ControlMsg, ControlTarget, EndpointInfo, EndpointKind, Hello, MuteSet, NetTestReady, NetTestStart, NetTestStop,
-    PairRequest, PairResult, Platform, RouteAccept, RouteReject, RouteRequest, RouteStop, RouteUpdate, SessionTicket,
-    StatsReport, StopReason, StreamProfile, VolumeSet, control_msg::Body,
+    ControlMsg, ControlTarget, EndpointInfo, EndpointKind, Hello, MuteSet, NetTestReady,
+    NetTestStart, NetTestStop, PairRequest, PairResult, Platform, RouteAccept, RouteReject,
+    RouteRequest, RouteStop, RouteUpdate, SessionTicket, StatsReport, StopReason, StreamProfile,
+    VolumeSet, control_msg::Body,
 };
 use sp_protocol::version::LOCAL_VERSIONS;
 use sp_protocol::{Capabilities, Codec};
-use sp_security::pairing::{QrPairingPayload, SAS_EXPORTER_LABEL, pairing_proof, sas_code, verify_pairing_proof};
+use sp_security::pairing::{
+    QrPairingPayload, SAS_EXPORTER_LABEL, pairing_proof, sas_code, verify_pairing_proof,
+};
 use sp_security::trust::load_or_create_identity;
-use sp_security::{DeviceId, DeviceIdentity, Fingerprint, PermissionKind, Permissions, Policy, TrustStore, TrustedDevice};
+use sp_security::{
+    DeviceId, DeviceIdentity, Fingerprint, PermissionKind, Permissions, Policy, TrustStore,
+    TrustedDevice,
+};
 use sp_transport::{Endpoint, EndpointConfig, SecureConnection, TcpEndpoint, TransportKind};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
@@ -41,10 +47,10 @@ use crate::settings::{DeviceProfile, MicMode, SavedRoute, Settings, SettingsStor
 use crate::state::*;
 use crate::{EngineConfig, EngineError};
 
+mod local_audio;
 mod network_test;
 mod pipelines;
 mod profiles;
-mod local_audio;
 
 type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
 
@@ -61,52 +67,162 @@ const PIPELINE_START_DEADLINE: Duration = Duration::from_secs(20);
 pub(crate) enum Command {
     StartPairing(Reply<String>),
     StopPairing,
-    PairWithQr { uri: String, reply: Reply<()> },
-    PairWithDevice { device_id: String, reply: Reply<()> },
-    PairWithAddress { address: String, reply: Reply<()> },
-    ConfirmPairing { device_id: String, accept: bool },
-    Connect { device_id: String },
-    Disconnect { device_id: String },
-    ForgetDevice { device_id: String },
-    SetBlocked { device_id: String, blocked: bool },
-    RenameDevice { device_id: String, alias: Option<String> },
-    SetAutoConnect { device_id: String, enabled: bool },
-    SetPermission { device_id: String, kind: PermissionKind, policy: Policy },
-    StartRoute { device_id: String, kind: RouteKind, reply: Reply<String> },
-    StopRoute { route_id: String },
-    SetRouteVolume { route_id: String, volume: f32 },
-    SetRouteMuted { route_id: String, muted: bool },
-    SetRouteKeepRunning { route_id: String, keep: bool },
-    SetPeerSpeakersMuted { device_id: String, muted: bool },
-    RespondRouteRequest { request_id: u64, accept: bool, remember: bool },
-    SetMicMuted { muted: bool },
-    SetMicMonitor { enabled: bool },
+    PairWithQr {
+        uri: String,
+        reply: Reply<()>,
+    },
+    PairWithDevice {
+        device_id: String,
+        reply: Reply<()>,
+    },
+    PairWithAddress {
+        address: String,
+        reply: Reply<()>,
+    },
+    ConfirmPairing {
+        device_id: String,
+        accept: bool,
+    },
+    Connect {
+        device_id: String,
+    },
+    Disconnect {
+        device_id: String,
+    },
+    ForgetDevice {
+        device_id: String,
+    },
+    SetBlocked {
+        device_id: String,
+        blocked: bool,
+    },
+    RenameDevice {
+        device_id: String,
+        alias: Option<String>,
+    },
+    SetAutoConnect {
+        device_id: String,
+        enabled: bool,
+    },
+    SetPermission {
+        device_id: String,
+        kind: PermissionKind,
+        policy: Policy,
+    },
+    StartRoute {
+        device_id: String,
+        kind: RouteKind,
+        reply: Reply<String>,
+    },
+    StopRoute {
+        route_id: String,
+    },
+    SetRouteVolume {
+        route_id: String,
+        volume: f32,
+    },
+    SetRouteMuted {
+        route_id: String,
+        muted: bool,
+    },
+    SetRouteKeepRunning {
+        route_id: String,
+        keep: bool,
+    },
+    SetPeerSpeakersMuted {
+        device_id: String,
+        muted: bool,
+    },
+    RespondRouteRequest {
+        request_id: u64,
+        accept: bool,
+        remember: bool,
+    },
+    SetMicMuted {
+        muted: bool,
+    },
+    SetMicMonitor {
+        enabled: bool,
+    },
     RefreshAudioDevices,
-    AudioDevicesChanged { default_input: bool, default_output: bool },
-    UpdateSettings { settings: Settings, reply: Reply<Settings> },
-    DismissNotice { id: u64 },
+    AudioDevicesChanged {
+        default_input: bool,
+        default_output: bool,
+    },
+    UpdateSettings {
+        settings: Settings,
+        reply: Reply<Settings>,
+    },
+    DismissNotice {
+        id: u64,
+    },
     NetworkChanged,
-    SetForeground { foreground: bool },
-    SetDeviceProfile { device_id: String, profile: Option<DeviceProfile> },
-    RunNetworkTest { device_id: String, reply: Reply<NetworkReport> },
-    CancelNetworkTest { device_id: String },
-    SimulateConnectionLoss { device_id: String },
+    SetForeground {
+        foreground: bool,
+    },
+    SetDeviceProfile {
+        device_id: String,
+        profile: Option<DeviceProfile>,
+    },
+    RunNetworkTest {
+        device_id: String,
+        reply: Reply<NetworkReport>,
+    },
+    CancelNetworkTest {
+        device_id: String,
+    },
+    SimulateConnectionLoss {
+        device_id: String,
+    },
     /// `done` is signalled once sessions are closed and everything held has been released.
-    Shutdown { done: Option<std::sync::mpsc::Sender<()>> },
+    Shutdown {
+        done: Option<std::sync::mpsc::Sender<()>>,
+    },
 }
 
 enum Internal {
     Discovery(DiscoveryEvent),
     Incoming(SecureConnection),
-    DialFailed { conn_id: u64, target: Option<DeviceId>, error: EngineError },
-    Dialed { conn_id: u64, conn: SecureConnection, pair: Option<PairRequest> },
-    AudioFailed { peer: DeviceId, route: u8, error: EngineError },
-    PairAddressResolved { addrs: Vec<SocketAddr>, reply: Reply<()> },
+    DialFailed {
+        conn_id: u64,
+        target: Option<DeviceId>,
+        error: EngineError,
+    },
+    Dialed {
+        conn_id: u64,
+        conn: SecureConnection,
+        pair: Option<PairRequest>,
+    },
+    AudioFailed {
+        peer: DeviceId,
+        route: u8,
+        error: EngineError,
+    },
+    PairAddressResolved {
+        addrs: Vec<SocketAddr>,
+        reply: Reply<()>,
+    },
     AudioDevicesListed(Vec<sp_audio_io::DeviceInfo>),
-    SenderReady { key: pipelines::EncoderKey, start_id: u64, result: Result<Sender, EngineError> },
-    ReceiverReady { peer: DeviceId, route: u8, start_id: u64, result: Result<(Receiver, PacketSink), EngineError> },
-    EncoderFailed { key: pipelines::EncoderKey, error: EngineError },
-    NetTestFinished { peer: DeviceId, test_id: u32, report: NetworkReport },
+    SenderReady {
+        key: pipelines::EncoderKey,
+        start_id: u64,
+        result: Result<Sender, EngineError>,
+    },
+    ReceiverReady {
+        peer: DeviceId,
+        route: u8,
+        start_id: u64,
+        result: Result<(Receiver, PacketSink), EngineError>,
+    },
+    EncoderFailed {
+        key: pipelines::EncoderKey,
+        error: EngineError,
+    },
+    NetTestFinished {
+        peer: DeviceId,
+        test_id: u32,
+        report: NetworkReport,
+    },
 }
 
 // ------------------------------------------------------------------ state types
@@ -269,7 +385,13 @@ pub(crate) struct Actor {
 pub(crate) async fn spawn(
     hooks: Arc<dyn PlatformHooks>,
     config: EngineConfig,
-) -> Result<(mpsc::UnboundedSender<Command>, watch::Receiver<Arc<EngineState>>), EngineError> {
+) -> Result<
+    (
+        mpsc::UnboundedSender<Command>,
+        watch::Receiver<Arc<EngineState>>,
+    ),
+    EngineError,
+> {
     let data_dir = hooks.data_dir();
     std::fs::create_dir_all(&data_dir).map_err(|e| EngineError::Storage(e.to_string()))?;
     let key = hooks.storage_key();
@@ -292,7 +414,13 @@ pub(crate) async fn spawn(
     )?);
     // TLS over TCP on loopback, where `adb reverse` forwards a phone's USB connection.
     let tcp = if config.tcp_listener {
-        match TcpEndpoint::bind(&identity, IpAddr::V4(Ipv4Addr::LOCALHOST), endpoint.local_port()).await {
+        match TcpEndpoint::bind(
+            &identity,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            endpoint.local_port(),
+        )
+        .await
+        {
             Ok(t) => Some(t),
             Err(e) => {
                 warn!(error = %e, "no TCP listener: USB connections unavailable");
@@ -363,7 +491,12 @@ pub(crate) async fn spawn(
         actor.notice("notice.identityReset", vec![], Severity::Warning, None);
     }
     if trust_recovered {
-        actor.notice("notice.trustStoreRecovered", vec![], Severity::Warning, None);
+        actor.notice(
+            "notice.trustStoreRecovered",
+            vec![],
+            Severity::Warning,
+            None,
+        );
     }
     if settings_recovered {
         actor.notice("notice.settingsRecovered", vec![], Severity::Warning, None);
@@ -371,7 +504,12 @@ pub(crate) async fn spawn(
     // Reports of panics since the last start, shown once (they stay in diagnostics exports).
     let crashes = crate::crash::take_unseen(&data_dir);
     if crashes > 0 {
-        actor.notice("notice.crashReport", vec![crashes.to_string()], Severity::Warning, None);
+        actor.notice(
+            "notice.crashReport",
+            vec![crashes.to_string()],
+            Severity::Warning,
+            None,
+        );
     }
     // Audio device listing is slow on some phones; it runs after start-up (first thing in the loop).
 
@@ -407,7 +545,8 @@ pub(crate) async fn spawn(
 
     // Discovery.
     if actor.config.discovery {
-        let (discovery, mut events) = Discovery::start(actor.identity.clone(), actor.discovery_config());
+        let (discovery, mut events) =
+            Discovery::start(actor.identity.clone(), actor.discovery_config());
         actor.discovery = Some(discovery);
         let tx = internal_tx.clone();
         tokio::spawn(async move {
@@ -455,7 +594,10 @@ pub(crate) async fn spawn(
 }
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn route_key(peer: &DeviceId, id: u8) -> String {
@@ -506,7 +648,9 @@ impl Actor {
             microphone: true,
             speaker: true,
             virtual_mic: virtual_mic.is_some(),
-            virtual_mic_input: virtual_mic_device.as_deref().and_then(|d| self.hooks.virtual_cable_input(d)),
+            virtual_mic_input: virtual_mic_device
+                .as_deref()
+                .and_then(|d| self.hooks.virtual_cable_input(d)),
             virtual_mic_device,
         }
     }
@@ -550,13 +694,25 @@ impl Actor {
             endpoint_info("speaker", "Speakers", EndpointKind::SinkSpeaker),
         ];
         if caps.system_audio {
-            endpoints.push(endpoint_info("system", "System audio", EndpointKind::SourceSystemAudio));
+            endpoints.push(endpoint_info(
+                "system",
+                "System audio",
+                EndpointKind::SourceSystemAudio,
+            ));
         }
         if caps.app_audio {
-            endpoints.push(endpoint_info("apps", "App audio", EndpointKind::SourceAppAudio));
+            endpoints.push(endpoint_info(
+                "apps",
+                "App audio",
+                EndpointKind::SourceAppAudio,
+            ));
         }
         if caps.virtual_mic {
-            endpoints.push(endpoint_info("virtual-mic", "SoundPush Microphone", EndpointKind::SinkVirtualMic));
+            endpoints.push(endpoint_info(
+                "virtual-mic",
+                "SoundPush Microphone",
+                EndpointKind::SinkVirtualMic,
+            ));
         }
         Hello {
             protocol_min: LOCAL_VERSIONS.min.to_u32(),
@@ -599,7 +755,13 @@ impl Actor {
         }
     }
 
-    fn notice(&mut self, key: &str, args: Vec<String>, severity: Severity, error: Option<&EngineError>) {
+    fn notice(
+        &mut self,
+        key: &str,
+        args: Vec<String>,
+        severity: Severity,
+        error: Option<&EngineError>,
+    ) {
         let id = self.next_notice_id;
         self.next_notice_id += 1;
         self.notices.push(NoticeView {
@@ -617,7 +779,11 @@ impl Actor {
 
     fn error_notice(&mut self, error: &EngineError, args: Vec<String>) {
         // When the firewall blocks incoming connections, that is the fix to offer.
-        if matches!(error, EngineError::Unreachable | EngineError::NetworkBlocked) && self.hooks.inbound_blocked() {
+        if matches!(
+            error,
+            EngineError::Unreachable | EngineError::NetworkBlocked
+        ) && self.hooks.inbound_blocked()
+        {
             let error = EngineError::FirewallBlocked;
             return self.notice(error.key(), args, error.severity(), Some(&error));
         }
@@ -704,7 +870,12 @@ impl Actor {
                 .map(|r| (r.peer.to_hex(), r.kind))
                 .collect();
             for (peer_id, kind) in active {
-                if !self.settings.saved_routes.iter().any(|s| s.matches(&peer_id, kind)) {
+                if !self
+                    .settings
+                    .saved_routes
+                    .iter()
+                    .any(|s| s.matches(&peer_id, kind))
+                {
                     self.settings.saved_routes.push(SavedRoute {
                         peer_id,
                         kind,
@@ -743,9 +914,18 @@ impl Actor {
             }
             Command::PairWithDevice { device_id, reply } => {
                 let result = parse_device(&device_id).and_then(|id| {
-                    let advert = self.discovered.get(&id).ok_or(EngineError::DeviceNotFound)?;
+                    let advert = self
+                        .discovered
+                        .get(&id)
+                        .ok_or(EngineError::DeviceNotFound)?;
                     let addrs = advert.addresses.clone();
-                    let conn_id = self.dial(addrs, None, Some(PairRequest { qr_proof: None }), None, None);
+                    let conn_id = self.dial(
+                        addrs,
+                        None,
+                        Some(PairRequest { qr_proof: None }),
+                        None,
+                        None,
+                    );
                     self.pair_dials.insert(conn_id, false);
                     Ok(())
                 });
@@ -811,7 +991,9 @@ impl Actor {
             }
             Command::RenameDevice { device_id, alias } => {
                 if let Ok(id) = parse_device(&device_id) {
-                    let alias = alias.map(|a| a.trim().chars().take(64).collect::<String>()).filter(|a| !a.is_empty());
+                    let alias = alias
+                        .map(|a| a.trim().chars().take(64).collect::<String>())
+                        .filter(|a| !a.is_empty());
                     let _ = self.trust.update(&id, |d| d.alias = alias);
                 }
             }
@@ -820,7 +1002,11 @@ impl Actor {
                     let _ = self.trust.update(&id, |d| d.auto_connect = enabled);
                 }
             }
-            Command::SetPermission { device_id, kind, policy } => {
+            Command::SetPermission {
+                device_id,
+                kind,
+                policy,
+            } => {
                 if let Ok(id) = parse_device(&device_id) {
                     let _ = self.trust.update(&id, |d| d.permissions.set(kind, policy));
                     // Revocation takes effect immediately.
@@ -829,13 +1015,19 @@ impl Actor {
                     }
                 }
             }
-            Command::StartRoute { device_id, kind, reply } => match parse_device(&device_id) {
+            Command::StartRoute {
+                device_id,
+                kind,
+                reply,
+            } => match parse_device(&device_id) {
                 Ok(id) => self.start_route(id, kind, reply),
                 Err(e) => {
                     let _ = reply.send(Err(e));
                 }
             },
-            Command::StopRoute { route_id } => self.stop_route_by_key(&route_id, StopReason::UserStopped, true),
+            Command::StopRoute { route_id } => {
+                self.stop_route_by_key(&route_id, StopReason::UserStopped, true)
+            }
             Command::SetRouteVolume { route_id, volume } => {
                 let volume = volume.clamp(0.0, 2.0);
                 if let Some(r) = self.routes.iter_mut().find(|r| r.key() == route_id) {
@@ -879,9 +1071,15 @@ impl Actor {
                     r.keep_running = keep;
                     let (peer_id, kind) = (r.peer.to_hex(), r.kind);
                     let auto = r.requested_locally && self.settings.resume_routes_on_start;
-                    self.settings.saved_routes.retain(|s| !s.matches(&peer_id, kind));
+                    self.settings
+                        .saved_routes
+                        .retain(|s| !s.matches(&peer_id, kind));
                     if keep || auto {
-                        self.settings.saved_routes.push(SavedRoute { peer_id, kind, keep });
+                        self.settings.saved_routes.push(SavedRoute {
+                            peer_id,
+                            kind,
+                            keep,
+                        });
                     }
                     self.save_settings();
                 }
@@ -910,7 +1108,10 @@ impl Actor {
                 default_input,
                 default_output,
             } => self.on_audio_devices_changed(default_input, default_output),
-            Command::UpdateSettings { mut settings, reply } => {
+            Command::UpdateSettings {
+                mut settings,
+                reply,
+            } => {
                 settings.sanitize();
                 if settings.device_name.is_empty() {
                     settings.device_name = self.settings.device_name.clone();
@@ -964,7 +1165,10 @@ impl Actor {
                 }
             }
             Command::SimulateConnectionLoss { device_id } => {
-                if let Some(s) = parse_device(&device_id).ok().and_then(|id| self.sessions.get(&id)) {
+                if let Some(s) = parse_device(&device_id)
+                    .ok()
+                    .and_then(|id| self.sessions.get(&id))
+                {
                     s.conn.close(0, b"simulated loss");
                 }
             }
@@ -984,7 +1188,8 @@ impl Actor {
             if let Some(c) = r.receiver_controls.as_ref().filter(|_| !r.kind.is_mic()) {
                 c.balance.set(self.settings.output.balance);
                 c.mono.store(self.settings.output.mono, Ordering::Relaxed);
-                c.av_offset_ms.store(self.settings.output.av_offset_ms, Ordering::Relaxed);
+                c.av_offset_ms
+                    .store(self.settings.output.av_offset_ms, Ordering::Relaxed);
             }
         }
         self.update_mic_groups();
@@ -1008,7 +1213,8 @@ impl Actor {
         tokio::task::spawn_blocking(move || {
             hooks.audio_devices_changed();
             // A broken audio stack must never stop the engine from starting.
-            let listed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.list_devices()));
+            let listed =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.list_devices()));
             let devices = match listed {
                 Ok(Ok(devices)) => devices,
                 Ok(Err(e)) => {
@@ -1078,7 +1284,12 @@ impl Actor {
             let network = async move {
                 let mut last = EngineError::Unreachable;
                 for addr in addrs.into_iter().take(8) {
-                    match tokio::time::timeout(Duration::from_secs(3), endpoint.connect(addr, pinned)).await {
+                    match tokio::time::timeout(
+                        Duration::from_secs(3),
+                        endpoint.connect(addr, pinned),
+                    )
+                    .await
+                    {
                         Ok(Ok(conn)) => return Ok(conn),
                         Ok(Err(e)) => {
                             debug!(%addr, error = %e, "dial failed");
@@ -1102,10 +1313,18 @@ impl Actor {
             };
             match first_success(network, usb).await {
                 Ok(conn) => {
-                    let _ = tx.send(Internal::Dialed { conn_id, conn, pair });
+                    let _ = tx.send(Internal::Dialed {
+                        conn_id,
+                        conn,
+                        pair,
+                    });
                 }
                 Err(error) => {
-                    let _ = tx.send(Internal::DialFailed { conn_id, target, error });
+                    let _ = tx.send(Internal::DialFailed {
+                        conn_id,
+                        target,
+                        error,
+                    });
                 }
             }
         });
@@ -1145,7 +1364,12 @@ impl Actor {
             .get(&id)
             .map(|a| a.addresses.clone())
             .unwrap_or_default();
-        addrs.extend(device.last_addresses.iter().filter_map(|a| a.parse::<SocketAddr>().ok()));
+        addrs.extend(
+            device
+                .last_addresses
+                .iter()
+                .filter_map(|a| a.parse::<SocketAddr>().ok()),
+        );
         let usb_port = self.usb_port(Some(&device.platform), &addrs);
         let state = self.dials.entry(id).or_insert_with(new_dial);
         if state.in_flight || Instant::now() < state.next_attempt {
@@ -1162,12 +1386,19 @@ impl Actor {
     }
 
     fn pair_with_qr(&mut self, uri: &str) -> Result<(), EngineError> {
-        let payload = QrPairingPayload::from_uri(uri).map_err(|_| EngineError::InvalidInput("pairing code".into()))?;
+        let payload = QrPairingPayload::from_uri(uri)
+            .map_err(|_| EngineError::InvalidInput("pairing code".into()))?;
         // Expiry is enforced by the displaying device, which rejects stale secrets.
         if payload.device_id == self.identity.device_id() {
-            return Err(EngineError::InvalidInput("this is your own pairing code".into()));
+            return Err(EngineError::InvalidInput(
+                "this is your own pairing code".into(),
+            ));
         }
-        let proof = pairing_proof(&payload.secret, &self.identity.fingerprint(), &payload.device_id);
+        let proof = pairing_proof(
+            &payload.secret,
+            &self.identity.fingerprint(),
+            &payload.device_id,
+        );
         // Pinned to the code's device ID, so the USB candidate cannot reach anyone else.
         let usb_port = self.usb_port(None, &payload.addresses);
         let conn_id = self.dial(
@@ -1190,13 +1421,35 @@ impl Actor {
             Internal::Incoming(conn) => {
                 let conn_id = self.next_conn_id();
                 let hello = self.local_hello(self.trusted_peer_of(&conn));
-                tokio::spawn(session::run(conn, false, conn_id, hello, None, self.session_tx.clone()));
+                tokio::spawn(session::run(
+                    conn,
+                    false,
+                    conn_id,
+                    hello,
+                    None,
+                    self.session_tx.clone(),
+                ));
             }
-            Internal::Dialed { conn_id, conn, pair } => {
+            Internal::Dialed {
+                conn_id,
+                conn,
+                pair,
+            } => {
                 let hello = self.local_hello(self.trusted_peer_of(&conn));
-                tokio::spawn(session::run(conn, true, conn_id, hello, pair, self.session_tx.clone()));
+                tokio::spawn(session::run(
+                    conn,
+                    true,
+                    conn_id,
+                    hello,
+                    pair,
+                    self.session_tx.clone(),
+                ));
             }
-            Internal::DialFailed { conn_id, target, error } => {
+            Internal::DialFailed {
+                conn_id,
+                target,
+                error,
+            } => {
                 self.pair_dials.remove(&conn_id);
                 self.dial_targets.remove(&conn_id);
                 if let Some(id) = target {
@@ -1239,11 +1492,20 @@ impl Actor {
                 } else {
                     // On a phone, a loopback address means a USB forward to a computer.
                     let usb_port = if self.hooks.platform() == "android" {
-                        addrs.iter().find(|a| a.ip().is_loopback()).map(|a| a.port())
+                        addrs
+                            .iter()
+                            .find(|a| a.ip().is_loopback())
+                            .map(|a| a.port())
                     } else {
                         None
                     };
-                    let conn_id = self.dial(addrs, None, Some(PairRequest { qr_proof: None }), None, usb_port);
+                    let conn_id = self.dial(
+                        addrs,
+                        None,
+                        Some(PairRequest { qr_proof: None }),
+                        None,
+                        usb_port,
+                    );
                     self.pair_dials.insert(conn_id, false);
                     Ok(())
                 };
@@ -1254,7 +1516,8 @@ impl Actor {
                 self.audio_devices = devices
                     .into_iter()
                     .map(|d| AudioDeviceView {
-                        virtual_cable: d.kind == DeviceKind::Output && hooks.virtual_cable_input(&d.name).is_some(),
+                        virtual_cable: d.kind == DeviceKind::Output
+                            && hooks.virtual_cable_input(&d.name).is_some(),
                         id: d.id,
                         name: d.name,
                         is_input: d.kind == DeviceKind::Input,
@@ -1262,7 +1525,11 @@ impl Actor {
                     })
                     .collect();
             }
-            Internal::SenderReady { key, start_id, result } => self.on_sender_ready(key, start_id, result),
+            Internal::SenderReady {
+                key,
+                start_id,
+                result,
+            } => self.on_sender_ready(key, start_id, result),
             Internal::ReceiverReady {
                 peer,
                 route,
@@ -1270,7 +1537,11 @@ impl Actor {
                 result,
             } => self.on_receiver_ready(peer, route, start_id, result),
             Internal::EncoderFailed { key, error } => self.on_encoder_failed(key, error),
-            Internal::NetTestFinished { peer, test_id, report } => self.on_net_test_finished(peer, test_id, report),
+            Internal::NetTestFinished {
+                peer,
+                test_id,
+                report,
+            } => self.on_net_test_finished(peer, test_id, report),
         }
     }
 
@@ -1285,7 +1556,10 @@ impl Actor {
             SessionEvent::Established(est) => self.on_established(est),
             SessionEvent::Control { conn_id, msg } => self.on_control(conn_id, msg),
             SessionEvent::Closed { conn_id, reason } => self.on_closed(conn_id, reason),
-            SessionEvent::HandshakeFailed { conn_id, incompatible } => {
+            SessionEvent::HandshakeFailed {
+                conn_id,
+                incompatible,
+            } => {
                 self.pair_dials.remove(&conn_id);
                 // A dial whose QUIC handshake worked but whose Hello did not must free its dial
                 // state, or the device is never dialed again.
@@ -1346,10 +1620,17 @@ impl Actor {
         // to verify, so pairing stops rather than showing a predictable code.
         let Ok(exporter) = est.conn.export_keying_material(SAS_EXPORTER_LABEL, b"") else {
             let _ = est.tx.send(SessionCmd::Close(StopReason::Unspecified));
-            self.error_notice(&EngineError::Internal("pairing code unavailable".into()), vec![]);
+            self.error_notice(
+                &EngineError::Internal("pairing code unavailable".into()),
+                vec![],
+            );
             return;
         };
-        let code = sas_code(&exporter, &self.identity.fingerprint(), &est.conn.peer_fingerprint());
+        let code = sas_code(
+            &exporter,
+            &self.identity.fingerprint(),
+            &est.conn.peer_fingerprint(),
+        );
         if let Some(old) = self.pairings.remove(&id) {
             let _ = old.tx.send(SessionCmd::Close(StopReason::Superseded));
         }
@@ -1379,7 +1660,10 @@ impl Actor {
             return;
         };
         p.local_confirmed = accept;
-        let _ = p.tx.send(SessionCmd::Send(ControlMsg::new(0, Body::PairResult(PairResult { accepted: accept }))));
+        let _ = p.tx.send(SessionCmd::Send(ControlMsg::new(
+            0,
+            Body::PairResult(PairResult { accepted: accept }),
+        )));
         if !accept {
             if let Some(p) = self.pairings.remove(&id) {
                 let _ = p.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
@@ -1431,7 +1715,10 @@ impl Actor {
             let local_lower = self.identity.device_id() < id;
             let old_preferred = old.dialed == local_lower;
             let new_preferred = est.dialed == local_lower;
-            if old_preferred && !new_preferred && old.connected_at.elapsed() < Duration::from_secs(5) {
+            if old_preferred
+                && !new_preferred
+                && old.connected_at.elapsed() < Duration::from_secs(5)
+            {
                 let _ = est.tx.send(SessionCmd::Close(StopReason::Superseded));
                 self.sessions.insert(id, old);
                 // The rejected connection may be our own dial: free its dial state.
@@ -1469,7 +1756,9 @@ impl Actor {
         };
         // A token to resume this session after a network interruption (plan §20).
         if Capabilities(session.hello.capabilities).has(Capabilities::FEATURE_SESSION_RESUME) {
-            let token = self.resume.issue(session.conn.peer_public_key(), Instant::now());
+            let token = self
+                .resume
+                .issue(session.conn.peer_public_key(), Instant::now());
             session.send(Body::SessionTicket(SessionTicket {
                 token: Bytes::copy_from_slice(&token),
                 lifetime_secs: crate::resume::TOKEN_LIFETIME.as_secs() as u32,
@@ -1481,7 +1770,12 @@ impl Actor {
 
     fn on_closed(&mut self, conn_id: u64, reason: StopReason) {
         self.unpaired.remove(&conn_id);
-        if let Some((id, _)) = self.pairings.iter().find(|(_, p)| p.conn_id == conn_id).map(|(k, v)| (*k, v.conn_id)) {
+        if let Some((id, _)) = self
+            .pairings
+            .iter()
+            .find(|(_, p)| p.conn_id == conn_id)
+            .map(|(k, v)| (*k, v.conn_id))
+        {
             self.pairings.remove(&id);
             if reason == StopReason::PermissionDenied {
                 self.error_notice(&EngineError::PairingRejected, vec![]);
@@ -1539,9 +1833,16 @@ impl Actor {
             }
             return;
         }
-        if let Some(id) = self.pairings.iter().find(|(_, p)| p.conn_id == conn_id).map(|(k, _)| *k) {
+        if let Some(id) = self
+            .pairings
+            .iter()
+            .find(|(_, p)| p.conn_id == conn_id)
+            .map(|(k, _)| *k)
+        {
             if let Body::PairResult(result) = body {
-                let Some(p) = self.pairings.get_mut(&id) else { return };
+                let Some(p) = self.pairings.get_mut(&id) else {
+                    return;
+                };
                 if !result.accepted {
                     if let Some(p) = self.pairings.remove(&id) {
                         let _ = p.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
@@ -1611,8 +1912,13 @@ impl Actor {
             }
             Body::Goodbye(_) | Body::PairRequest(_) | Body::PairResult(_) => {}
             Body::SessionTicket(ticket) => {
-                if self.sessions.get(&peer).is_some_and(|s| s.conn_id == conn_id) {
-                    self.resume.hold(peer, ticket.token, ticket.lifetime_secs, Instant::now());
+                if self
+                    .sessions
+                    .get(&peer)
+                    .is_some_and(|s| s.conn_id == conn_id)
+                {
+                    self.resume
+                        .hold(peer, ticket.token, ticket.lifetime_secs, Instant::now());
                 }
             }
             Body::NetTestStart(start) => self.on_net_test_start(peer, start),
@@ -1625,8 +1931,13 @@ impl Actor {
         let id = est.conn.peer_fingerprint().device_id();
         match (req.qr_proof, self.qr.as_ref()) {
             (Some(proof), Some(qr)) if !qr.is_expired(now_unix()) => {
-                let ok = verify_pairing_proof(&qr.secret, &est.conn.peer_fingerprint(), &self.identity.device_id(), &proof)
-                    .is_ok();
+                let ok = verify_pairing_proof(
+                    &qr.secret,
+                    &est.conn.peer_fingerprint(),
+                    &self.identity.device_id(),
+                    &proof,
+                )
+                .is_ok();
                 if !ok {
                     let _ = est.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
                     return;
@@ -1640,7 +1951,10 @@ impl Actor {
                     p.local_confirmed = true;
                     p.peer_confirmed = true;
                 }
-                let _ = tx.send(SessionCmd::Send(ControlMsg::new(0, Body::PairResult(PairResult { accepted: true }))));
+                let _ = tx.send(SessionCmd::Send(ControlMsg::new(
+                    0,
+                    Body::PairResult(PairResult { accepted: true }),
+                )));
                 self.complete_pairing(id);
             }
             (None, Some(_)) => {
@@ -1660,7 +1974,11 @@ impl Actor {
             let _ = reply.send(Err(e));
             return;
         }
-        if let Some(existing) = self.routes.iter().find(|r| r.peer == peer && r.kind == kind && r.status != RouteStatus::Stopped) {
+        if let Some(existing) = self
+            .routes
+            .iter()
+            .find(|r| r.peer == peer && r.kind == kind && r.status != RouteStatus::Stopped)
+        {
             let _ = reply.send(Ok(existing.key()));
             return;
         }
@@ -1693,10 +2011,16 @@ impl Actor {
     fn check_local_capability(&self, kind: RouteKind) -> Result<(), EngineError> {
         let caps = self.local_capabilities();
         match kind {
-            RouteKind::SendSystemAudio if !caps.system_audio => Err(EngineError::LoopbackUnsupported),
+            RouteKind::SendSystemAudio if !caps.system_audio => {
+                Err(EngineError::LoopbackUnsupported)
+            }
             RouteKind::SendAppAudio if !caps.app_audio => Err(EngineError::LoopbackUnsupported),
-            RouteKind::ReceiveMicToVirtualMic if !caps.virtual_mic => Err(EngineError::VirtualMicMissing),
-            RouteKind::SendMicToVirtualMic | RouteKind::SendMicToSpeaker if !self.hooks.microphone_permitted() => {
+            RouteKind::ReceiveMicToVirtualMic if !caps.virtual_mic => {
+                Err(EngineError::VirtualMicMissing)
+            }
+            RouteKind::SendMicToVirtualMic | RouteKind::SendMicToSpeaker
+                if !self.hooks.microphone_permitted() =>
+            {
                 Err(EngineError::MicPermissionDenied)
             }
             _ => Ok(()),
@@ -1717,7 +2041,9 @@ impl Actor {
 
     fn on_route_request(&mut self, peer: DeviceId, req: RouteRequest) {
         let local_is_source = !req.requester_is_source;
-        let Some(kind) = RouteKind::from_endpoints(&req.source_endpoint, &req.sink_endpoint, local_is_source) else {
+        let Some(kind) =
+            RouteKind::from_endpoints(&req.source_endpoint, &req.sink_endpoint, local_is_source)
+        else {
             self.reject(peer, req.route, StopReason::UnsupportedEndpoint);
             return;
         };
@@ -1730,7 +2056,11 @@ impl Actor {
             return;
         }
         let permission = if local_is_source {
-            if kind.is_mic() { PermissionKind::UseMyMicrophone } else { PermissionKind::ReceiveMyAudio }
+            if kind.is_mic() {
+                PermissionKind::UseMyMicrophone
+            } else {
+                PermissionKind::ReceiveMyAudio
+            }
         } else {
             PermissionKind::SendAudioToMe
         };
@@ -1740,10 +2070,12 @@ impl Actor {
             .map(|d| d.permissions.policy(permission))
             .unwrap_or(Policy::Deny);
         let resumed = self.resume.resumed_recently(&peer, Instant::now())
-            && self
-                .routes
-                .iter()
-                .any(|r| r.peer == peer && r.kind == kind && r.status == RouteStatus::Paused && !r.requested_locally);
+            && self.routes.iter().any(|r| {
+                r.peer == peer
+                    && r.kind == kind
+                    && r.status == RouteStatus::Paused
+                    && !r.requested_locally
+            });
         match policy {
             Policy::Allow => self.accept_route(peer, req, kind),
             Policy::Deny => self.reject(peer, req.route, StopReason::PermissionDenied),
@@ -1775,17 +2107,27 @@ impl Actor {
         };
         if remember {
             let kind = if pending.kind.local_is_source() {
-                if pending.kind.is_mic() { PermissionKind::UseMyMicrophone } else { PermissionKind::ReceiveMyAudio }
+                if pending.kind.is_mic() {
+                    PermissionKind::UseMyMicrophone
+                } else {
+                    PermissionKind::ReceiveMyAudio
+                }
             } else {
                 PermissionKind::SendAudioToMe
             };
             let policy = if accept { Policy::Allow } else { Policy::Deny };
-            let _ = self.trust.update(&pending.peer, |d| d.permissions.set(kind, policy));
+            let _ = self
+                .trust
+                .update(&pending.peer, |d| d.permissions.set(kind, policy));
         }
         if accept {
             self.accept_route(pending.peer, pending.request, pending.kind);
         } else {
-            self.reject(pending.peer, pending.request.route, StopReason::PermissionDenied);
+            self.reject(
+                pending.peer,
+                pending.request.route,
+                StopReason::PermissionDenied,
+            );
         }
     }
 
@@ -1799,7 +2141,10 @@ impl Actor {
     }
 
     fn accept_route(&mut self, peer: DeviceId, req: RouteRequest, kind: RouteKind) {
-        let mut profile = req.profile.clone().unwrap_or_else(|| self.profile_for(kind, &peer));
+        let mut profile = req
+            .profile
+            .clone()
+            .unwrap_or_else(|| self.profile_for(kind, &peer));
         sanitize_profile(&mut profile);
         if !kind.local_is_source() {
             // The receiving side's latency preference wins.
@@ -1810,8 +2155,9 @@ impl Actor {
         let id = req.route as u8;
         // A paused copy from before a reconnect is replaced. Route ids restart with each session,
         // so a paused route that happens to reuse this id goes too (its requester asks again).
-        self.routes
-            .retain(|r| !(r.peer == peer && r.status == RouteStatus::Paused && (r.kind == kind || r.id == id)));
+        self.routes.retain(|r| {
+            !(r.peer == peer && r.status == RouteStatus::Paused && (r.kind == kind || r.id == id))
+        });
         if self.routes.iter().any(|r| r.peer == peer && r.id == id) {
             return; // duplicate request
         }
@@ -1829,7 +2175,9 @@ impl Actor {
             Err(e) => {
                 let reason = match e {
                     EngineError::MicPermissionDenied => StopReason::PermissionDenied,
-                    EngineError::VirtualMicMissing | EngineError::LoopbackUnsupported => StopReason::UnsupportedEndpoint,
+                    EngineError::VirtualMicMissing | EngineError::LoopbackUnsupported => {
+                        StopReason::UnsupportedEndpoint
+                    }
                     _ => StopReason::AudioDeviceLost,
                 };
                 self.reject(peer, req.route, reason);
@@ -1941,7 +2289,12 @@ impl Actor {
     }
 
     fn remove_routes_for(&mut self, peer: DeviceId) {
-        let keys: Vec<String> = self.routes.iter().filter(|r| r.peer == peer).map(Route::key).collect();
+        let keys: Vec<String> = self
+            .routes
+            .iter()
+            .filter(|r| r.peer == peer)
+            .map(Route::key)
+            .collect();
         for k in keys {
             self.stop_route_by_key(&k, StopReason::Unspecified, false);
         }
@@ -1956,18 +2309,28 @@ impl Actor {
             .filter(|r| r.peer == peer && r.status == RouteStatus::Paused && r.requested_locally)
             .map(|r| r.kind)
             .collect();
-        self.routes.retain(|r| !(r.peer == peer && r.status == RouteStatus::Paused && r.requested_locally));
+        self.routes.retain(|r| {
+            !(r.peer == peer && r.status == RouteStatus::Paused && r.requested_locally)
+        });
         let peer_hex = peer.to_hex();
         let resume_all = self.settings.resume_routes_on_start;
         for saved in &self.settings.saved_routes {
-            if saved.peer_id == peer_hex && (saved.keep || resume_all) && !kinds.contains(&saved.kind) {
+            if saved.peer_id == peer_hex
+                && (saved.keep || resume_all)
+                && !kinds.contains(&saved.kind)
+            {
                 kinds.push(saved.kind);
             }
         }
         for kind in kinds {
             let (tx, _rx) = oneshot::channel();
             self.start_route(peer, kind, tx);
-            if let Some(r) = self.routes.iter_mut().rev().find(|r| r.peer == peer && r.kind == kind) {
+            if let Some(r) = self
+                .routes
+                .iter_mut()
+                .rev()
+                .find(|r| r.peer == peer && r.kind == kind)
+            {
                 r.keep_running = self
                     .settings
                     .saved_routes
@@ -1987,7 +2350,11 @@ impl Actor {
             .filter(|r| r.peer == peer)
             .filter(|r| {
                 let kind = if r.kind.local_is_source() {
-                    if r.kind.is_mic() { PermissionKind::UseMyMicrophone } else { PermissionKind::ReceiveMyAudio }
+                    if r.kind.is_mic() {
+                        PermissionKind::UseMyMicrophone
+                    } else {
+                        PermissionKind::ReceiveMyAudio
+                    }
                 } else {
                     PermissionKind::SendAudioToMe
                 };
@@ -2032,7 +2399,12 @@ impl Actor {
         if m.target == ControlTarget::DeviceSpeakers as i32 {
             if !self.hooks.set_speakers_muted(m.muted) {
                 let name = self.peer_name(&peer);
-                self.notice("notice.muteSpeakersUnsupported", vec![name], Severity::Info, None);
+                self.notice(
+                    "notice.muteSpeakersUnsupported",
+                    vec![name],
+                    Severity::Info,
+                    None,
+                );
             }
             return;
         }
@@ -2057,18 +2429,27 @@ impl Actor {
             return;
         };
         let total = stats.packets_received.saturating_add(stats.packets_lost);
-        r.loss_pct = if total > 0 { stats.packets_lost as f64 * 100.0 / total as f64 } else { 0.0 };
+        r.loss_pct = if total > 0 {
+            stats.packets_lost as f64 * 100.0 / total as f64
+        } else {
+            0.0
+        };
         if let (Some(c), Some(p)) = (&r.sender_controls, &r.profile) {
             if p.adaptive_bitrate && p.codec == Codec::Opus as u32 {
                 let current = c.bitrate.load(Ordering::Relaxed);
                 if r.loss_pct > 2.0 {
-                    c.bitrate.store((current * 3 / 4).max(32_000), Ordering::Relaxed);
-                    c.expected_loss_pct.store(r.loss_pct.round() as u32, Ordering::Relaxed);
+                    c.bitrate
+                        .store((current * 3 / 4).max(32_000), Ordering::Relaxed);
+                    c.expected_loss_pct
+                        .store(r.loss_pct.round() as u32, Ordering::Relaxed);
                     r.stable_secs = 0;
                 } else if r.loss_pct < 0.5 {
                     r.stable_secs += 1;
                     if r.stable_secs >= 10 {
-                        c.bitrate.store((current * 5 / 4).min(p.bitrate.max(128_000)), Ordering::Relaxed);
+                        c.bitrate.store(
+                            (current * 5 / 4).min(p.bitrate.max(128_000)),
+                            Ordering::Relaxed,
+                        );
                         c.expected_loss_pct.store(0, Ordering::Relaxed);
                         r.stable_secs = 0;
                     }
@@ -2112,7 +2493,8 @@ impl Actor {
                 r.deadline.is_some_and(|d| now > d)
                     || (r.status == RouteStatus::Paused
                         && !r.keep_running
-                        && r.paused_at.is_some_and(|p| now.duration_since(p) > Duration::from_secs(120)))
+                        && r.paused_at
+                            .is_some_and(|p| now.duration_since(p) > Duration::from_secs(120)))
             })
             .map(Route::key)
             .collect();
@@ -2129,10 +2511,17 @@ impl Actor {
             if let Some(c) = &r.receiver_controls {
                 let received = c.packets_received.load(Ordering::Relaxed);
                 let missing = c.packets_missing.load(Ordering::Relaxed);
-                let (dr, dm) = (received.saturating_sub(r.last_received), missing.saturating_sub(r.last_missing));
+                let (dr, dm) = (
+                    received.saturating_sub(r.last_received),
+                    missing.saturating_sub(r.last_missing),
+                );
                 r.last_received = received;
                 r.last_missing = missing;
-                r.loss_pct = if dr + dm > 0 { dm as f64 * 100.0 / (dr + dm) as f64 } else { 0.0 };
+                r.loss_pct = if dr + dm > 0 {
+                    dm as f64 * 100.0 / (dr + dm) as f64
+                } else {
+                    0.0
+                };
                 let bytes = c.bytes_received.load(Ordering::Relaxed);
                 r.bitrate_kbps = (bytes.saturating_sub(r.last_bytes) * 8 / 1000) as u32;
                 r.last_bytes = bytes;
@@ -2171,7 +2560,12 @@ impl Actor {
         self.check_virtual_mic_use();
 
         // Pending prompts expire.
-        let expired_requests: Vec<u64> = self.requests.iter().filter(|(_, r)| now > r.expires).map(|(k, _)| *k).collect();
+        let expired_requests: Vec<u64> = self
+            .requests
+            .iter()
+            .filter(|(_, r)| now > r.expires)
+            .map(|(k, _)| *k)
+            .collect();
         for id in expired_requests {
             if let Some(p) = self.requests.remove(&id) {
                 self.reject(p.peer, p.request.route, StopReason::Timeout);
@@ -2209,7 +2603,9 @@ impl Actor {
             let candidates: Vec<DeviceId> = self
                 .trust
                 .list()
-                .filter(|d| d.auto_connect && !d.blocked && !self.sessions.contains_key(&d.device_id))
+                .filter(|d| {
+                    d.auto_connect && !d.blocked && !self.sessions.contains_key(&d.device_id)
+                })
                 .map(|d| d.device_id)
                 .collect();
             for id in candidates {
@@ -2225,7 +2621,9 @@ impl Actor {
                 continue;
             }
             match r.kind {
-                RouteKind::SendMicToSpeaker | RouteKind::SendMicToVirtualMic => ka.microphone = true,
+                RouteKind::SendMicToSpeaker | RouteKind::SendMicToVirtualMic => {
+                    ka.microphone = true
+                }
                 RouteKind::SendAppAudio => ka.app_audio_capture = true,
                 RouteKind::SendSystemAudio => {}
                 _ => ka.playback = true,
@@ -2242,7 +2640,12 @@ impl Actor {
 
     fn shutdown(&mut self) {
         // Sending this computer's audio may have muted its speakers: never leave them that way.
-        if self.settings.capture.mute_local_speakers && self.routes.iter().any(|r| r.kind == RouteKind::SendSystemAudio) {
+        if self.settings.capture.mute_local_speakers
+            && self
+                .routes
+                .iter()
+                .any(|r| r.kind == RouteKind::SendSystemAudio)
+        {
             self.hooks.set_speakers_muted(false);
         }
         for (_, s) in self.sessions.drain() {
@@ -2278,18 +2681,33 @@ impl Actor {
             seen.insert(d.device_id);
             peers.push(self.peer_view(d.device_id, Some(d)));
         }
-        for id in self.discovered.keys().chain(self.sessions.keys()).copied().collect::<Vec<_>>() {
+        for id in self
+            .discovered
+            .keys()
+            .chain(self.sessions.keys())
+            .copied()
+            .collect::<Vec<_>>()
+        {
             if seen.insert(id) {
                 peers.push(self.peer_view(id, None));
             }
         }
-        peers.sort_by(|a, b| b.trusted.cmp(&a.trusted).then(b.online.cmp(&a.online)).then(a.name.cmp(&b.name)));
+        peers.sort_by(|a, b| {
+            b.trusted
+                .cmp(&a.trusted)
+                .then(b.online.cmp(&a.online))
+                .then(a.name.cmp(&b.name))
+        });
 
         let routes = self
             .routes
             .iter()
             .map(|r| {
-                let rtt = self.sessions.get(&r.peer).map(|s| s.conn.stats().rtt.as_secs_f64() * 1000.0).unwrap_or(0.0);
+                let rtt = self
+                    .sessions
+                    .get(&r.peer)
+                    .map(|s| s.conn.stats().rtt.as_secs_f64() * 1000.0)
+                    .unwrap_or(0.0);
                 let mut stats = RouteStats {
                     codec: match r.profile.as_ref().map(|p| p.codec) {
                         Some(c) if c == Codec::PcmS16Le as u32 => "PCM".into(),
@@ -2300,14 +2718,21 @@ impl Actor {
                     loss_pct: r.loss_pct,
                     ..RouteStats::default()
                 };
-                let frame_ms = r.profile.as_ref().map(|p| p.frame_us as f64 / 1000.0).unwrap_or(10.0);
+                let frame_ms = r
+                    .profile
+                    .as_ref()
+                    .map(|p| p.frame_us as f64 / 1000.0)
+                    .unwrap_or(10.0);
                 if let Some(c) = &r.receiver_controls {
                     stats.buffer_ms = c.buffer_ms.get() as f64;
                     stats.jitter_ms = c.jitter_ms.get() as f64;
                     stats.underruns = c.underruns.load(Ordering::Relaxed);
                     stats.drift_ppm = c.drift_ppm.load(Ordering::Relaxed);
                     stats.level_db = c.level_db.get();
-                    stats.latency_ms = stats.buffer_ms + frame_ms + c.device_latency_ms.load(Ordering::Relaxed) as f64 + rtt / 2.0;
+                    stats.latency_ms = stats.buffer_ms
+                        + frame_ms
+                        + c.device_latency_ms.load(Ordering::Relaxed) as f64
+                        + rtt / 2.0;
                 }
                 if let Some(c) = &r.sender_controls {
                     stats.level_db = c.level_db.get();
@@ -2316,7 +2741,10 @@ impl Actor {
                         stats.jitter_ms = remote.jitter_us as f64 / 1000.0;
                         stats.underruns = remote.underruns as u64;
                         stats.drift_ppm = remote.drift_ppm;
-                        stats.latency_ms = remote.buffer_ms as f64 + frame_ms * 2.0 + remote.output_latency_ms as f64 + rtt / 2.0;
+                        stats.latency_ms = remote.buffer_ms as f64
+                            + frame_ms * 2.0
+                            + remote.output_latency_ms as f64
+                            + rtt / 2.0;
                     }
                 }
                 RouteView {
@@ -2326,7 +2754,11 @@ impl Actor {
                     kind: r.kind,
                     status: r.status,
                     started_unix: r.started_unix,
-                    elapsed_secs: if r.status == RouteStatus::Active { now.duration_since(r.started).as_secs() } else { 0 },
+                    elapsed_secs: if r.status == RouteStatus::Active {
+                        now.duration_since(r.started).as_secs()
+                    } else {
+                        0
+                    },
                     volume: r.volume,
                     muted: r.muted,
                     stats,
@@ -2426,12 +2858,20 @@ impl Actor {
             Some(s) => {
                 let st = s.conn.stats();
                 let rtt = st.rtt.as_secs_f64() * 1000.0;
-                let loss = if st.sent_packets > 0 { st.lost_packets as f64 * 100.0 / st.sent_packets as f64 } else { 0.0 };
+                let loss = if st.sent_packets > 0 {
+                    st.lost_packets as f64 * 100.0 / st.sent_packets as f64
+                } else {
+                    0.0
+                };
                 let jitter = self
                     .routes
                     .iter()
                     .filter(|r| r.peer == id)
-                    .filter_map(|r| r.receiver_controls.as_ref().map(|c| c.jitter_ms.get() as f64))
+                    .filter_map(|r| {
+                        r.receiver_controls
+                            .as_ref()
+                            .map(|c| c.jitter_ms.get() as f64)
+                    })
                     .fold(0.0, f64::max);
                 (rtt, LinkQuality::from_stats(rtt, loss, jitter))
             }
@@ -2456,7 +2896,9 @@ impl Actor {
             connection,
             quality,
             rtt_ms,
-            addresses: advert.map(|a| a.addresses.iter().map(ToString::to_string).collect()).unwrap_or_default(),
+            addresses: advert
+                .map(|a| a.addresses.iter().map(ToString::to_string).collect())
+                .unwrap_or_default(),
             permissions: trusted.map(|t| t.permissions),
             auto_connect: trusted.is_some_and(|t| t.auto_connect),
             blocked: trusted.is_some_and(|t| t.blocked),
@@ -2525,7 +2967,13 @@ where
     }
 }
 
-fn new_route(peer: DeviceId, id: u8, kind: RouteKind, requested_locally: bool, volume: f32) -> Route {
+fn new_route(
+    peer: DeviceId,
+    id: u8,
+    kind: RouteKind,
+    requested_locally: bool,
+    volume: f32,
+) -> Route {
     Route {
         peer,
         id,

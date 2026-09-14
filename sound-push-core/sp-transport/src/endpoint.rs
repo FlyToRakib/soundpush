@@ -41,20 +41,25 @@ pub struct Endpoint {
 
 impl Endpoint {
     /// Bind on all interfaces (dual-stack when available). Tries the preferred port first.
-    pub fn bind(identity: &DeviceIdentity, config: &EndpointConfig) -> Result<Self, TransportError> {
+    pub fn bind(
+        identity: &DeviceIdentity,
+        config: &EndpointConfig,
+    ) -> Result<Self, TransportError> {
         let credentials = Credentials::new(identity)?;
 
         let mut transport = quinn::TransportConfig::default();
         transport.keep_alive_interval(Some(config.keep_alive));
         transport.max_idle_timeout(Some(
-            quinn::IdleTimeout::try_from(config.idle_timeout).map_err(|e| TransportError::Tls(e.to_string()))?,
+            quinn::IdleTimeout::try_from(config.idle_timeout)
+                .map_err(|e| TransportError::Tls(e.to_string()))?,
         ));
         transport.datagram_receive_buffer_size(Some(1 << 20));
         transport.datagram_send_buffer_size(1 << 20);
         let transport = Arc::new(transport);
 
-        let quic_server = quinn::crypto::rustls::QuicServerConfig::try_from(credentials.server_config(ALPN)?)
-            .map_err(|e| TransportError::Tls(e.to_string()))?;
+        let quic_server =
+            quinn::crypto::rustls::QuicServerConfig::try_from(credentials.server_config(ALPN)?)
+                .map_err(|e| TransportError::Tls(e.to_string()))?;
         let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server));
         server_config.transport_config(transport.clone());
         // Connection migration: a peer whose address changes (Wi-Fi roam, DHCP renewal, switching
@@ -64,9 +69,15 @@ impl Endpoint {
 
         let socket = bind_socket(config.preferred_port)?;
         let ipv6 = socket.local_addr().is_ok_and(|a| a.is_ipv6());
-        let runtime = quinn::default_runtime().ok_or_else(|| TransportError::Tls("no async runtime".into()))?;
-        let inner = quinn::Endpoint::new(quinn::EndpointConfig::default(), Some(server_config), socket, runtime)
-            .map_err(TransportError::Bind)?;
+        let runtime = quinn::default_runtime()
+            .ok_or_else(|| TransportError::Tls("no async runtime".into()))?;
+        let inner = quinn::Endpoint::new(
+            quinn::EndpointConfig::default(),
+            Some(server_config),
+            socket,
+            runtime,
+        )
+        .map_err(TransportError::Bind)?;
 
         Ok(Self {
             inner,
@@ -86,9 +97,10 @@ impl Endpoint {
         addr: SocketAddr,
         pinned: Option<DeviceId>,
     ) -> Result<SecureConnection, TransportError> {
-        let quic_client =
-            quinn::crypto::rustls::QuicClientConfig::try_from(self.credentials.client_config(pinned, ALPN)?)
-                .map_err(|e| TransportError::Tls(e.to_string()))?;
+        let quic_client = quinn::crypto::rustls::QuicClientConfig::try_from(
+            self.credentials.client_config(pinned, ALPN)?,
+        )
+        .map_err(|e| TransportError::Tls(e.to_string()))?;
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client));
         client_config.transport_config(self.transport.clone());
 
@@ -103,7 +115,10 @@ impl Endpoint {
     /// The handshake is completed by [`Handshake::finish`], so a caller can run several at
     /// once and one stalled peer does not hold up the others.
     pub async fn accept(&self) -> Option<Handshake> {
-        self.inner.accept().await.map(|incoming| Handshake { incoming })
+        self.inner
+            .accept()
+            .await
+            .map(|incoming| Handshake { incoming })
     }
 
     pub fn close(&self) {
@@ -157,7 +172,9 @@ fn bind_socket(preferred: u16) -> Result<UdpSocket, TransportError> {
     let mut last_err = None;
     for port in candidates {
         // Fall back to IPv4-only where IPv6 is disabled.
-        match bind_dual_stack(port).or_else(|_| UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))) {
+        match bind_dual_stack(port)
+            .or_else(|_| UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port))))
+        {
             Ok(socket) => {
                 if port != preferred {
                     warn!(preferred, "preferred port busy, using an ephemeral port");
@@ -167,7 +184,9 @@ fn bind_socket(preferred: u16) -> Result<UdpSocket, TransportError> {
             Err(e) => last_err = Some(e),
         }
     }
-    Err(TransportError::Bind(last_err.unwrap_or_else(|| std::io::Error::other("bind failed"))))
+    Err(TransportError::Bind(
+        last_err.unwrap_or_else(|| std::io::Error::other("bind failed")),
+    ))
 }
 
 /// Map IPv4 targets to IPv4-mapped IPv6 when the local socket is IPv6.

@@ -9,7 +9,8 @@ use crate::ProtocolError;
 /// Maximum control frame size (64 KiB).
 pub const MAX_CONTROL_FRAME: usize = 64 * 1024;
 /// Maximum media frame size on stream transports (what receivers accept).
-pub const MAX_MEDIA_FRAME: usize = crate::media::MEDIA_HEADER_LEN + crate::media::MAX_ACCEPTED_MEDIA_PAYLOAD;
+pub const MAX_MEDIA_FRAME: usize =
+    crate::media::MEDIA_HEADER_LEN + crate::media::MAX_ACCEPTED_MEDIA_PAYLOAD;
 /// Largest payload of a keep-alive or close frame.
 pub const MAX_SMALL_FRAME: usize = 256;
 
@@ -105,7 +106,11 @@ impl StreamFrameKind {
 }
 
 /// Append a typed stream frame to `out`.
-pub fn encode_stream_frame(kind: StreamFrameKind, payload: &[u8], out: &mut BytesMut) -> Result<(), ProtocolError> {
+pub fn encode_stream_frame(
+    kind: StreamFrameKind,
+    payload: &[u8],
+    out: &mut BytesMut,
+) -> Result<(), ProtocolError> {
     if payload.len() > kind.max_len() {
         return Err(ProtocolError::FrameTooLarge {
             len: payload.len(),
@@ -185,7 +190,10 @@ mod tests {
             }
         }
         assert_eq!(frames.len(), 3);
-        assert_eq!(frames[0], (StreamFrameKind::Control, Bytes::from_static(b"ctl")));
+        assert_eq!(
+            frames[0],
+            (StreamFrameKind::Control, Bytes::from_static(b"ctl"))
+        );
         assert_eq!(frames[1].1.len(), 900);
         assert_eq!(frames[2].0, StreamFrameKind::Ping);
 

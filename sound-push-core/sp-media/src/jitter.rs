@@ -185,7 +185,8 @@ impl JitterBuffer {
             let n = frame.len().min(out.len());
             out[..n].copy_from_slice(&frame[..n]);
             out[n..].fill(0.0);
-            self.play_ts = Some(play.saturating_add((frame.len() / self.cfg.channels.max(1)) as u64));
+            self.play_ts =
+                Some(play.saturating_add((frame.len() / self.cfg.channels.max(1)) as u64));
             self.consecutive_missing = 0;
             self.stats.played += 1;
             return PopStatus::Played;
@@ -198,13 +199,16 @@ impl JitterBuffer {
 
         // Buffer is below target: hold the play position (conceal without advancing).
         // This grows the effective delay by one frame so the late packet can still play.
-        if self.buffered_samples() + advance <= self.target_samples && self.consecutive_missing <= MAX_CONCEAL_FRAMES {
+        if self.buffered_samples() + advance <= self.target_samples
+            && self.consecutive_missing <= MAX_CONCEAL_FRAMES
+        {
             return PopStatus::Missing;
         }
         if !have_future && self.consecutive_missing > MAX_CONCEAL_FRAMES {
             // Genuine underrun: rebuffer with a larger target.
             self.stats.underruns += 1;
-            self.target_samples = self.clamp_target(self.target_samples.saturating_add(2 * advance));
+            self.target_samples =
+                self.clamp_target(self.target_samples.saturating_add(2 * advance));
             self.buffering = true;
             self.play_ts = None;
             self.consecutive_missing = 0;
@@ -227,7 +231,8 @@ impl JitterBuffer {
         } else {
             // Shrink by at most 1 ms per call.
             let step = ms_to_samples(1);
-            self.target_samples = self.clamp_target(self.target_samples.saturating_sub(step).max(needed));
+            self.target_samples =
+                self.clamp_target(self.target_samples.saturating_sub(step).max(needed));
         }
     }
 
@@ -403,7 +408,11 @@ mod tests {
         }
         let stats = jb.stats();
         assert!(stats.underruns <= 3, "underruns {}", stats.underruns);
-        assert!(stats.played as f64 > total as f64 * 0.95, "played {}", stats.played);
+        assert!(
+            stats.played as f64 > total as f64 * 0.95,
+            "played {}",
+            stats.played
+        );
         assert!(stats.target_ms <= 120.0);
     }
 }

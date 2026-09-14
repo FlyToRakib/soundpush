@@ -35,7 +35,8 @@ impl Backoff {
         }
         let exp = self.base.saturating_mul(1 << (self.attempt - 1).min(16));
         let max = exp.min(self.cap);
-        let millis = rand::thread_rng().gen_range(max.as_millis() as u64 / 2..=max.as_millis() as u64);
+        let millis =
+            rand::thread_rng().gen_range(max.as_millis() as u64 / 2..=max.as_millis() as u64);
         Duration::from_millis(millis)
     }
 
@@ -61,7 +62,8 @@ impl FlapDetector {
     pub const LIMIT: usize = 5;
 
     pub fn record(&mut self, now: std::time::Instant) -> bool {
-        self.events.retain(|t| now.duration_since(*t) < Self::WINDOW);
+        self.events
+            .retain(|t| now.duration_since(*t) < Self::WINDOW);
         self.events.push(now);
         self.events.len() > Self::LIMIT
     }

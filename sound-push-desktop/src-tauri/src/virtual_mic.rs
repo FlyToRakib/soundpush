@@ -118,7 +118,8 @@ mod macos {
     const BINARY: &str = "Contents/MacOS/SoundPushMicrophone";
     const HAL_DIR: &str = "/Library/Audio/Plug-Ins/HAL";
     /// coreaudiod loads plug-ins when it starts; restarting it makes the device appear now.
-    const RESTART_AUDIO: &str = "launchctl kickstart -k system/com.apple.audio.coreaudiod || killall coreaudiod";
+    const RESTART_AUDIO: &str =
+        "launchctl kickstart -k system/com.apple.audio.coreaudiod || killall coreaudiod";
 
     pub fn installed() -> bool {
         Path::new(HAL_DIR).join(DRIVER).join(BINARY).exists()
@@ -131,7 +132,11 @@ mod macos {
             candidates.push(dir.join(DRIVER));
         }
         if cfg!(debug_assertions) {
-            candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../drivers/macos-virtual-mic/build").join(DRIVER));
+            candidates.push(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../drivers/macos-virtual-mic/build")
+                    .join(DRIVER),
+            );
         }
         candidates.into_iter().find(|p| p.join(BINARY).exists())
     }
@@ -171,7 +176,10 @@ mod macos {
     pub fn install(app: &AppHandle) -> Result<(), String> {
         let source = bundled(app).ok_or("SoundPush Microphone is missing from this app")?;
         let dest = Path::new(HAL_DIR).join(DRIVER);
-        let (src, dst) = (quote(&source.to_string_lossy()), quote(&dest.to_string_lossy()));
+        let (src, dst) = (
+            quote(&source.to_string_lossy()),
+            quote(&dest.to_string_lossy()),
+        );
         run_as_admin(&format!(
             "mkdir -p {hal} && rm -rf {dst} && cp -R {src} {dst} && chown -R root:wheel {dst} && ({RESTART_AUDIO})",
             hal = quote(HAL_DIR)
@@ -210,11 +218,15 @@ mod linux {
     const LEVEL_METERS: &[&str] = &["org.PulseAudio.pavucontrol", "org.gnome.VolumeControl"];
 
     fn sink_args() -> String {
-        format!("sink_name={SINK} rate=48000 sink_properties=\"device.description='{SINK_DESCRIPTION}'\"")
+        format!(
+            "sink_name={SINK} rate=48000 sink_properties=\"device.description='{SINK_DESCRIPTION}'\""
+        )
     }
 
     fn source_args() -> String {
-        format!("master={SINK}.monitor source_name={SOURCE} source_properties=\"device.description='{SOURCE_DESCRIPTION}'\"")
+        format!(
+            "master={SINK}.monitor source_name={SOURCE} source_properties=\"device.description='{SOURCE_DESCRIPTION}'\""
+        )
     }
 
     fn marker() -> PathBuf {
@@ -222,7 +234,8 @@ mod linux {
     }
 
     fn drop_in() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("pipewire/pipewire-pulse.conf.d/soundpush-microphone.conf"))
+        dirs::config_dir()
+            .map(|d| d.join("pipewire/pipewire-pulse.conf.d/soundpush-microphone.conf"))
     }
 
     fn drop_in_text() -> String {
@@ -246,12 +259,22 @@ mod linux {
 
     /// Load the modules that are not loaded yet.
     fn ensure_loaded(pulse: &mut Pulse) -> Result<(), String> {
-        if !pulse.sinks().map_err(|e| e.to_string())?.iter().any(|d| d.name == SINK) {
+        if !pulse
+            .sinks()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .any(|d| d.name == SINK)
+        {
             pulse
                 .load_module("module-null-sink", &sink_args())
                 .map_err(|e| e.to_string())?;
         }
-        if !pulse.sources().map_err(|e| e.to_string())?.iter().any(|d| d.name == SOURCE) {
+        if !pulse
+            .sources()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .any(|d| d.name == SOURCE)
+        {
             pulse
                 .load_module("module-remap-source", &source_args())
                 .map_err(|e| e.to_string())?;
@@ -286,7 +309,9 @@ mod linux {
     pub fn uninstall() -> Result<(), String> {
         for path in [Some(marker()), drop_in()].into_iter().flatten() {
             match std::fs::remove_file(&path) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("{}: {e}", path.display())),
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(format!("{}: {e}", path.display()));
+                }
                 _ => {}
             }
         }
@@ -301,8 +326,13 @@ mod linux {
             ("module-null-sink", format!("sink_name={SINK}")),
         ];
         for (name, pair) in ours {
-            for module in modules.iter().filter(|m| m.name == name && has_argument(&m.argument, &pair)) {
-                pulse.unload_module(module.index).map_err(|e| e.to_string())?;
+            for module in modules
+                .iter()
+                .filter(|m| m.name == name && has_argument(&m.argument, &pair))
+            {
+                pulse
+                    .unload_module(module.index)
+                    .map_err(|e| e.to_string())?;
             }
         }
         Ok(())
@@ -312,20 +342,22 @@ mod linux {
         if !installed() {
             return;
         }
-        let spawned = std::thread::Builder::new().name("sp-virtual-mic".into()).spawn(|| {
-            // At login SoundPush may start before the sound server does.
-            for _ in 0..30 {
-                if let Ok(mut pulse) = Pulse::connect() {
-                    match ensure_loaded(&mut pulse) {
-                        Ok(()) => info!("SoundPush Microphone is available"),
-                        Err(e) => warn!(error = %e, "could not restore SoundPush Microphone"),
+        let spawned = std::thread::Builder::new()
+            .name("sp-virtual-mic".into())
+            .spawn(|| {
+                // At login SoundPush may start before the sound server does.
+                for _ in 0..30 {
+                    if let Ok(mut pulse) = Pulse::connect() {
+                        match ensure_loaded(&mut pulse) {
+                            Ok(()) => info!("SoundPush Microphone is available"),
+                            Err(e) => warn!(error = %e, "could not restore SoundPush Microphone"),
+                        }
+                        return;
                     }
-                    return;
+                    std::thread::sleep(Duration::from_secs(2));
                 }
-                std::thread::sleep(Duration::from_secs(2));
-            }
-            warn!("no sound server; SoundPush Microphone was not restored");
-        });
+                warn!("no sound server; SoundPush Microphone was not restored");
+            });
         if let Err(e) = spawned {
             warn!(error = %e, "could not restore SoundPush Microphone");
         }
@@ -346,9 +378,9 @@ mod linux {
         let Some(index) = sources.iter().find(|d| d.name == source).map(|d| d.index) else {
             return false;
         };
-        outputs
-            .iter()
-            .any(|o| o.source == index && !o.corked && !LEVEL_METERS.contains(&o.application_id.as_str()))
+        outputs.iter().any(|o| {
+            o.source == index && !o.corked && !LEVEL_METERS.contains(&o.application_id.as_str())
+        })
     }
 
     /// Whether a module argument string contains `pair` ("key=value") as a whole word.
@@ -383,21 +415,54 @@ mod linux {
         #[test]
         fn in_use_only_when_an_app_records_from_our_source() {
             let sources = [source("alsa_input.usb-mic", 3), source(SOURCE, 7)];
-            assert!(recording_from(SOURCE, &sources, &[output(7, false, "com.discordapp.Discord")]));
-            assert!(recording_from(SOURCE, &sources, &[output(3, false, ""), output(7, false, "")]));
+            assert!(recording_from(
+                SOURCE,
+                &sources,
+                &[output(7, false, "com.discordapp.Discord")]
+            ));
+            assert!(recording_from(
+                SOURCE,
+                &sources,
+                &[output(3, false, ""), output(7, false, "")]
+            ));
             // Another microphone, a paused stream, or a level meter.
-            assert!(!recording_from(SOURCE, &sources, &[output(3, false, "com.discordapp.Discord")]));
-            assert!(!recording_from(SOURCE, &sources, &[output(7, true, "com.discordapp.Discord")]));
-            assert!(!recording_from(SOURCE, &sources, &[output(7, false, "org.PulseAudio.pavucontrol")]));
+            assert!(!recording_from(
+                SOURCE,
+                &sources,
+                &[output(3, false, "com.discordapp.Discord")]
+            ));
+            assert!(!recording_from(
+                SOURCE,
+                &sources,
+                &[output(7, true, "com.discordapp.Discord")]
+            ));
+            assert!(!recording_from(
+                SOURCE,
+                &sources,
+                &[output(7, false, "org.PulseAudio.pavucontrol")]
+            ));
             // Not installed.
-            assert!(!recording_from(SOURCE, &sources[..1], &[output(7, false, "")]));
+            assert!(!recording_from(
+                SOURCE,
+                &sources[..1],
+                &[output(7, false, "")]
+            ));
         }
 
         #[test]
         fn modules_are_matched_by_whole_arguments() {
-            assert!(has_argument(&sink_args(), "sink_name=soundpush_microphone_feed"));
-            assert!(has_argument(&source_args(), "source_name=soundpush_microphone"));
-            assert!(!has_argument("source_name=soundpush_microphone_2", "source_name=soundpush_microphone"));
+            assert!(has_argument(
+                &sink_args(),
+                "sink_name=soundpush_microphone_feed"
+            ));
+            assert!(has_argument(
+                &source_args(),
+                "source_name=soundpush_microphone"
+            ));
+            assert!(!has_argument(
+                "source_name=soundpush_microphone_2",
+                "source_name=soundpush_microphone"
+            ));
         }
 
         #[test]
@@ -416,7 +481,8 @@ mod windows {
     use std::process::Command;
 
     /// Official VB-CABLE package. Keep URL and checksum in sync with `drivers/vbcable/fetch.sh`.
-    const PACKAGE_URL: &str = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
+    const PACKAGE_URL: &str =
+        "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
     const PACKAGE_SHA256: &str = "B950E39F01AF1D04EA623C8F6D8EB9B6EA5C477C637295FABF20631C85116BFB";
     /// Run helper processes without flashing a console window.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -429,9 +495,12 @@ mod windows {
             .join(r"System32\drivers");
         std::fs::read_dir(drivers)
             .map(|entries| {
-                entries
-                    .flatten()
-                    .any(|e| e.file_name().to_string_lossy().to_ascii_lowercase().starts_with("vbaudio_cable"))
+                entries.flatten().any(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .starts_with("vbaudio_cable")
+                })
             })
             .unwrap_or(false)
     }
@@ -457,14 +526,25 @@ Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 "#
         );
         let output = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &script,
+            ])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| e.to_string())?;
         if output.status.success() {
             // The setup window closed. Only the driver file proves "Install Driver" was clicked;
             // closing the window without it is a choice, reported like a declined prompt.
-            return if installed() { Ok(()) } else { Err("cancelled".into()) };
+            return if installed() {
+                Ok(())
+            } else {
+                Err("cancelled".into())
+            };
         }
         let stderr = String::from_utf8_lossy(&output.stderr);
         // Declining the UAC prompt: "The operation was canceled by the user."
@@ -482,10 +562,20 @@ Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
     /// Restart in 10 seconds so the user sees Windows' own notice first.
     pub fn restart() -> Result<(), String> {
         let status = Command::new("shutdown.exe")
-            .args(["/r", "/t", "10", "/c", "SoundPush: restarting to finish installing VB-CABLE"])
+            .args([
+                "/r",
+                "/t",
+                "10",
+                "/c",
+                "SoundPush: restarting to finish installing VB-CABLE",
+            ])
             .creation_flags(CREATE_NO_WINDOW)
             .status()
             .map_err(|e| e.to_string())?;
-        if status.success() { Ok(()) } else { Err("Windows did not accept the restart request".into()) }
+        if status.success() {
+            Ok(())
+        } else {
+            Err("Windows did not accept the restart request".into())
+        }
     }
 }

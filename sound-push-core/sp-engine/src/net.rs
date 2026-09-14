@@ -40,7 +40,9 @@ fn unusable_link_local(a: &SocketAddr) -> bool {
 
 /// Order dial candidates best-first. Loopback is kept only when explicitly allowed.
 pub fn sort_candidates(addrs: &mut Vec<SocketAddr>, include_loopback: bool) {
-    addrs.retain(|a| a.port() != 0 && !unusable_link_local(a) && (include_loopback || !a.ip().is_loopback()));
+    addrs.retain(|a| {
+        a.port() != 0 && !unusable_link_local(a) && (include_loopback || !a.ip().is_loopback())
+    });
     addrs.sort_by_key(|a| if a.ip().is_loopback() { 254 } else { rank(a) });
     addrs.dedup();
 }
@@ -57,12 +59,20 @@ pub async fn resolve(input: &str, default_port: u16) -> Vec<SocketAddr> {
     if input.is_empty() || input.len() > 253 {
         return Vec::new();
     }
-    let with_port = if input.rsplit_once(':').is_some_and(|(_, p)| p.parse::<u16>().is_ok()) {
+    let with_port = if input
+        .rsplit_once(':')
+        .is_some_and(|(_, p)| p.parse::<u16>().is_ok())
+    {
         input.to_string()
     } else {
         format!("{input}:{default_port}")
     };
-    match tokio::time::timeout(std::time::Duration::from_secs(3), tokio::net::lookup_host(with_port)).await {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        tokio::net::lookup_host(with_port),
+    )
+    .await
+    {
         Ok(Ok(iter)) => iter.collect(),
         _ => Vec::new(),
     }
@@ -74,9 +84,18 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_literals() {
-        assert_eq!(resolve("192.168.1.4", 47650).await, vec!["192.168.1.4:47650".parse().unwrap()]);
-        assert_eq!(resolve("10.0.0.2:9000", 47650).await, vec!["10.0.0.2:9000".parse().unwrap()]);
-        assert_eq!(resolve("[fe80::1]", 1).await, vec!["[fe80::1]:1".parse().unwrap()]);
+        assert_eq!(
+            resolve("192.168.1.4", 47650).await,
+            vec!["192.168.1.4:47650".parse().unwrap()]
+        );
+        assert_eq!(
+            resolve("10.0.0.2:9000", 47650).await,
+            vec!["10.0.0.2:9000".parse().unwrap()]
+        );
+        assert_eq!(
+            resolve("[fe80::1]", 1).await,
+            vec!["[fe80::1]:1".parse().unwrap()]
+        );
         assert!(resolve("", 1).await.is_empty());
     }
 
@@ -89,15 +108,24 @@ mod tests {
         ];
         sort_candidates(&mut a, false);
         assert_eq!(a.len(), 2);
-        assert!(!a.iter().any(|x| matches!(x, SocketAddr::V6(v) if v.scope_id() == 0)));
+        assert!(
+            !a.iter()
+                .any(|x| matches!(x, SocketAddr::V6(v) if v.scope_id() == 0))
+        );
     }
 
     #[test]
     fn loopback_only_when_allowed() {
-        let mut a = vec!["127.0.0.1:5".parse().unwrap(), "192.168.0.2:5".parse().unwrap()];
+        let mut a = vec![
+            "127.0.0.1:5".parse().unwrap(),
+            "192.168.0.2:5".parse().unwrap(),
+        ];
         sort_candidates(&mut a, false);
         assert_eq!(a.len(), 1);
-        let mut b = vec!["127.0.0.1:5".parse().unwrap(), "192.168.0.2:5".parse().unwrap()];
+        let mut b = vec![
+            "127.0.0.1:5".parse().unwrap(),
+            "192.168.0.2:5".parse().unwrap(),
+        ];
         sort_candidates(&mut b, true);
         assert_eq!(b[1], "127.0.0.1:5".parse::<SocketAddr>().unwrap());
     }

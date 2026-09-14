@@ -29,8 +29,12 @@ struct PropertyAddress {
     element: u32,
 }
 
-type ListenerProc =
-    unsafe extern "C" fn(object: u32, count: u32, addresses: *const PropertyAddress, client: *mut c_void) -> i32;
+type ListenerProc = unsafe extern "C" fn(
+    object: u32,
+    count: u32,
+    addresses: *const PropertyAddress,
+    client: *mut c_void,
+) -> i32;
 
 #[link(name = "CoreAudio", kind = "framework")]
 unsafe extern "C" {
@@ -67,7 +71,12 @@ unsafe extern "C" {
 
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
-    fn CFStringGetCString(string: *const c_void, buffer: *mut c_char, size: isize, encoding: u32) -> u8;
+    fn CFStringGetCString(
+        string: *const c_void,
+        buffer: *mut c_char,
+        size: isize,
+        encoding: u32,
+    ) -> u8;
     fn CFRelease(cf: *const c_void);
 }
 
@@ -102,7 +111,11 @@ const UTF8: u32 = 0x0800_0100;
 const RTLD_LAZY: i32 = 1;
 
 fn address(selector: u32, scope: u32) -> PropertyAddress {
-    PropertyAddress { selector, scope, element: ELEMENT_MAIN }
+    PropertyAddress {
+        selector,
+        scope,
+        element: ELEMENT_MAIN,
+    }
 }
 
 // ------------------------------------------------------------------ permissions
@@ -130,7 +143,10 @@ pub fn system_audio_permission() -> &'static str {
     // SAFETY: dlopen/dlsym with valid C strings; the symbol has the documented preflight
     // signature `int TCCAccessPreflight(CFStringRef service, CFDictionaryRef options)`.
     unsafe {
-        let handle = dlopen(c"/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC".as_ptr(), RTLD_LAZY);
+        let handle = dlopen(
+            c"/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC".as_ptr(),
+            RTLD_LAZY,
+        );
         if handle.is_null() {
             return "unknown";
         }
@@ -138,8 +154,10 @@ pub fn system_audio_permission() -> &'static str {
         if symbol.is_null() {
             return "unknown";
         }
-        let preflight =
-            std::mem::transmute::<*mut c_void, unsafe extern "C" fn(*const c_void, *const c_void) -> i32>(symbol);
+        let preflight = std::mem::transmute::<
+            *mut c_void,
+            unsafe extern "C" fn(*const c_void, *const c_void) -> i32,
+        >(symbol);
         let service: Retained<NSString> = NSString::from_str("kTCCServiceAudioCapture");
         match preflight(Retained::as_ptr(&service).cast(), std::ptr::null()) {
             0 => "granted",
@@ -163,8 +181,12 @@ unsafe extern "C" fn on_property(
     }
     // SAFETY: `client` is the leaked Mutex<Sender> from `watch_devices`; Core Audio passes
     // `count` valid addresses.
-    let (tx, addresses) =
-        unsafe { (&*client.cast::<Mutex<Sender<Change>>>(), std::slice::from_raw_parts(addresses, count as usize)) };
+    let (tx, addresses) = unsafe {
+        (
+            &*client.cast::<Mutex<Sender<Change>>>(),
+            std::slice::from_raw_parts(addresses, count as usize),
+        )
+    };
     let mut change = Change::LIST;
     for a in addresses {
         match a.selector {
@@ -200,7 +222,12 @@ pub fn watch_devices(tx: Sender<Change>) {
         // SAFETY: valid address, a listener with the Core Audio signature, and a client pointer
         // that is never freed.
         let status = unsafe {
-            AudioObjectAddPropertyListener(SYSTEM_OBJECT, &address(selector, SCOPE_GLOBAL), on_property, client)
+            AudioObjectAddPropertyListener(
+                SYSTEM_OBJECT,
+                &address(selector, SCOPE_GLOBAL),
+                on_property,
+                client,
+            )
         };
         if status != 0 {
             warn!(status, "could not listen for audio device changes");
@@ -213,13 +240,20 @@ fn device_ids() -> Vec<u32> {
     let mut size = 0u32;
     // SAFETY: size query, then a buffer of exactly that many bytes.
     unsafe {
-        if AudioObjectGetPropertyDataSize(SYSTEM_OBJECT, &addr, 0, std::ptr::null(), &mut size) != 0 {
+        if AudioObjectGetPropertyDataSize(SYSTEM_OBJECT, &addr, 0, std::ptr::null(), &mut size) != 0
+        {
             return Vec::new();
         }
         let mut ids = vec![0u32; size as usize / std::mem::size_of::<u32>()];
         let mut size = (ids.len() * std::mem::size_of::<u32>()) as u32;
-        if AudioObjectGetPropertyData(SYSTEM_OBJECT, &addr, 0, std::ptr::null(), &mut size, ids.as_mut_ptr().cast())
-            != 0
+        if AudioObjectGetPropertyData(
+            SYSTEM_OBJECT,
+            &addr,
+            0,
+            std::ptr::null(),
+            &mut size,
+            ids.as_mut_ptr().cast(),
+        ) != 0
         {
             return Vec::new();
         }
@@ -264,7 +298,11 @@ fn device_name(device: u32) -> Option<String> {
         let mut buf = [0 as c_char; 256];
         let ok = CFStringGetCString(string, buf.as_mut_ptr(), buf.len() as isize, UTF8) != 0;
         CFRelease(string);
-        ok.then(|| std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().to_string())
+        ok.then(|| {
+            std::ffi::CStr::from_ptr(buf.as_ptr())
+                .to_string_lossy()
+                .to_string()
+        })
     }
 }
 
@@ -272,7 +310,13 @@ fn has_output(device: u32) -> bool {
     let mut size = 0u32;
     // SAFETY: size query only.
     let status = unsafe {
-        AudioObjectGetPropertyDataSize(device, &address(STREAMS, SCOPE_OUTPUT), 0, std::ptr::null(), &mut size)
+        AudioObjectGetPropertyDataSize(
+            device,
+            &address(STREAMS, SCOPE_OUTPUT),
+            0,
+            std::ptr::null(),
+            &mut size,
+        )
     };
     status == 0 && size > 0
 }
@@ -281,7 +325,11 @@ pub fn bluetooth_outputs() -> Vec<String> {
     device_ids()
         .into_iter()
         .filter(|&d| {
-            has_output(d) && matches!(u32_property(d, TRANSPORT), Some(TRANSPORT_BLUETOOTH | TRANSPORT_BLUETOOTH_LE))
+            has_output(d)
+                && matches!(
+                    u32_property(d, TRANSPORT),
+                    Some(TRANSPORT_BLUETOOTH | TRANSPORT_BLUETOOTH_LE)
+                )
         })
         .filter_map(device_name)
         .collect()

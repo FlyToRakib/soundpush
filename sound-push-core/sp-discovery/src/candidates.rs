@@ -67,6 +67,9 @@ mod tests {
         assert_eq!(out[0], "192.168.1.9:1".parse().unwrap());
         assert_eq!(out[1], "10.0.0.4:1".parse().unwrap());
         assert_eq!(out.len(), 4);
-        assert_eq!(out.last().unwrap(), &"172.17.0.1:1".parse::<SocketAddr>().unwrap());
+        assert_eq!(
+            out.last().unwrap(),
+            &"172.17.0.1:1".parse::<SocketAddr>().unwrap()
+        );
     }
 }

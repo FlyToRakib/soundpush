@@ -129,10 +129,16 @@ impl EngineHandle {
     }
 
     fn send(&self, cmd: Command) -> Result<(), EngineError> {
-        self.inner.commands.send(cmd).map_err(|_| EngineError::Stopped)
+        self.inner
+            .commands
+            .send(cmd)
+            .map_err(|_| EngineError::Stopped)
     }
 
-    async fn request<T>(&self, make: impl FnOnce(oneshot::Sender<Result<T, EngineError>>) -> Command) -> Result<T, EngineError> {
+    async fn request<T>(
+        &self,
+        make: impl FnOnce(oneshot::Sender<Result<T, EngineError>>) -> Command,
+    ) -> Result<T, EngineError> {
         let (tx, rx) = oneshot::channel();
         self.send(make(tx))?;
         rx.await.map_err(|_| EngineError::Stopped)?
@@ -151,17 +157,20 @@ impl EngineHandle {
 
     /// Pair by scanning another device's QR code.
     pub async fn pair_with_qr(&self, uri: String) -> Result<(), EngineError> {
-        self.request(|reply| Command::PairWithQr { uri, reply }).await
+        self.request(|reply| Command::PairWithQr { uri, reply })
+            .await
     }
 
     /// Start code pairing with a discovered device (the other device must have pairing open).
     pub async fn pair_with_device(&self, device_id: String) -> Result<(), EngineError> {
-        self.request(|reply| Command::PairWithDevice { device_id, reply }).await
+        self.request(|reply| Command::PairWithDevice { device_id, reply })
+            .await
     }
 
     /// Start code pairing with a manually entered address (IP, IP:port or hostname).
     pub async fn pair_with_address(&self, address: String) -> Result<(), EngineError> {
-        self.request(|reply| Command::PairWithAddress { address, reply }).await
+        self.request(|reply| Command::PairWithAddress { address, reply })
+            .await
     }
 
     /// Accept or reject a code comparison prompt.
@@ -187,7 +196,11 @@ impl EngineHandle {
         self.send(Command::SetBlocked { device_id, blocked })
     }
 
-    pub fn rename_device(&self, device_id: String, alias: Option<String>) -> Result<(), EngineError> {
+    pub fn rename_device(
+        &self,
+        device_id: String,
+        alias: Option<String>,
+    ) -> Result<(), EngineError> {
         self.send(Command::RenameDevice { device_id, alias })
     }
 
@@ -195,12 +208,25 @@ impl EngineHandle {
         self.send(Command::SetAutoConnect { device_id, enabled })
     }
 
-    pub fn set_permission(&self, device_id: String, kind: PermissionKind, policy: Policy) -> Result<(), EngineError> {
-        self.send(Command::SetPermission { device_id, kind, policy })
+    pub fn set_permission(
+        &self,
+        device_id: String,
+        kind: PermissionKind,
+        policy: Policy,
+    ) -> Result<(), EngineError> {
+        self.send(Command::SetPermission {
+            device_id,
+            kind,
+            policy,
+        })
     }
 
     /// Set a device's stream profile (`None` clears it). Running routes pick it up immediately.
-    pub fn set_device_profile(&self, device_id: String, profile: Option<DeviceProfile>) -> Result<(), EngineError> {
+    pub fn set_device_profile(
+        &self,
+        device_id: String,
+        profile: Option<DeviceProfile>,
+    ) -> Result<(), EngineError> {
         self.send(Command::SetDeviceProfile { device_id, profile })
     }
 
@@ -209,7 +235,8 @@ impl EngineHandle {
     /// Measure RTT, jitter, loss and achievable bitrate to a connected device over the media path
     /// (about ten seconds). Progress and the last result also appear in `EngineState::network_tests`.
     pub async fn run_network_test(&self, device_id: String) -> Result<NetworkReport, EngineError> {
-        self.request(|reply| Command::RunNetworkTest { device_id, reply }).await
+        self.request(|reply| Command::RunNetworkTest { device_id, reply })
+            .await
     }
 
     pub fn cancel_network_test(&self, device_id: String) -> Result<(), EngineError> {
@@ -219,8 +246,17 @@ impl EngineHandle {
     // ---------------------------------------------------------------- routes
 
     /// Start a route with a connected device. Returns the route id.
-    pub async fn start_route(&self, device_id: String, kind: RouteKind) -> Result<String, EngineError> {
-        self.request(|reply| Command::StartRoute { device_id, kind, reply }).await
+    pub async fn start_route(
+        &self,
+        device_id: String,
+        kind: RouteKind,
+    ) -> Result<String, EngineError> {
+        self.request(|reply| Command::StartRoute {
+            device_id,
+            kind,
+            reply,
+        })
+        .await
     }
 
     pub fn stop_route(&self, route_id: String) -> Result<(), EngineError> {
@@ -240,12 +276,21 @@ impl EngineHandle {
     }
 
     /// Mute the physical speakers of a connected device ("Mute PC").
-    pub fn set_peer_speakers_muted(&self, device_id: String, muted: bool) -> Result<(), EngineError> {
+    pub fn set_peer_speakers_muted(
+        &self,
+        device_id: String,
+        muted: bool,
+    ) -> Result<(), EngineError> {
         self.send(Command::SetPeerSpeakersMuted { device_id, muted })
     }
 
     /// Answer an incoming route request. `remember` stores the decision as the device's permission.
-    pub fn respond_route_request(&self, request_id: u64, accept: bool, remember: bool) -> Result<(), EngineError> {
+    pub fn respond_route_request(
+        &self,
+        request_id: u64,
+        accept: bool,
+        remember: bool,
+    ) -> Result<(), EngineError> {
         self.send(Command::RespondRouteRequest {
             request_id,
             accept,
@@ -269,7 +314,11 @@ impl EngineHandle {
 
     /// The OS reported an audio device change. The device list is refreshed, and running routes
     /// that use the system default device of a changed direction reopen on the new default.
-    pub fn audio_devices_changed(&self, default_input_changed: bool, default_output_changed: bool) -> Result<(), EngineError> {
+    pub fn audio_devices_changed(
+        &self,
+        default_input_changed: bool,
+        default_output_changed: bool,
+    ) -> Result<(), EngineError> {
         self.send(Command::AudioDevicesChanged {
             default_input: default_input_changed,
             default_output: default_output_changed,
@@ -279,7 +328,8 @@ impl EngineHandle {
     // ---------------------------------------------------------------- settings & misc
 
     pub async fn update_settings(&self, settings: Settings) -> Result<Settings, EngineError> {
-        self.request(|reply| Command::UpdateSettings { settings, reply }).await
+        self.request(|reply| Command::UpdateSettings { settings, reply })
+            .await
     }
 
     pub fn dismiss_notice(&self, id: u64) -> Result<(), EngineError> {

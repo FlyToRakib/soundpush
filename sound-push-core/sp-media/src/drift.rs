@@ -46,7 +46,8 @@ impl DriftController {
         };
         self.filtered_error = Some(filtered);
         self.integral = (self.integral + filtered).clamp(-2e6, 2e6);
-        let correction = (self.kp * filtered + self.ki * self.integral).clamp(-MAX_CORRECTION, MAX_CORRECTION);
+        let correction =
+            (self.kp * filtered + self.ki * self.integral).clamp(-MAX_CORRECTION, MAX_CORRECTION);
         self.ratio = 1.0 + correction;
         self.ratio
     }

@@ -43,10 +43,19 @@ fn adb_candidates() -> Vec<PathBuf> {
         dirs.push(local.join("Android").join("Sdk").join("platform-tools"));
     }
     if let Some(home) = dirs::home_dir() {
-        dirs.push(home.join("Library").join("Android").join("sdk").join("platform-tools"));
+        dirs.push(
+            home.join("Library")
+                .join("Android")
+                .join("sdk")
+                .join("platform-tools"),
+        );
         dirs.push(home.join("Android").join("Sdk").join("platform-tools"));
     }
-    let mut candidates: Vec<PathBuf> = dirs.into_iter().map(|d| d.join(exe)).filter(|p| p.is_file()).collect();
+    let mut candidates: Vec<PathBuf> = dirs
+        .into_iter()
+        .map(|d| d.join(exe))
+        .filter(|p| p.is_file())
+        .collect();
     candidates.push(PathBuf::from(exe));
     candidates
 }

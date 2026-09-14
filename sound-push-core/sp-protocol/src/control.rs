@@ -443,7 +443,10 @@ mod tests {
     fn unknown_body_from_newer_peer_is_distinguishable() {
         // request_id = 1, then field 99 (a future body) as a length-delimited empty message.
         let future = [0x08, 0x01, 0x9A, 0x06, 0x00];
-        assert_eq!(ControlMsg::from_bytes(&future), Err(ProtocolError::UnknownMessage));
+        assert_eq!(
+            ControlMsg::from_bytes(&future),
+            Err(ProtocolError::UnknownMessage)
+        );
     }
 
     #[test]

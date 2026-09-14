@@ -14,7 +14,10 @@ use super::*;
 pub(crate) enum SourceKey {
     System(Option<String>),
     /// Per-app capture of this computer's audio (one app, or all but one).
-    Application { process: String, exclude: bool },
+    Application {
+        process: String,
+        exclude: bool,
+    },
     Apps,
     Mic(Option<String>),
 }
@@ -92,7 +95,11 @@ impl Actor {
         }
     }
 
-    fn begin_receiver(&mut self, route: &mut Route, profile: StreamProfile) -> Result<bool, EngineError> {
+    fn begin_receiver(
+        &mut self,
+        route: &mut Route,
+        profile: StreamProfile,
+    ) -> Result<bool, EngineError> {
         let target = match route.kind.endpoints().1 {
             "virtual-mic" => self
                 .hooks
@@ -103,19 +110,27 @@ impl Actor {
         // A rebuild (codec change) keeps the route's controls, so volume and mute survive it.
         let controls = match &route.receiver_controls {
             Some(c) => {
-                c.jitter_min_ms.store(profile.jitter_min_ms, Ordering::Relaxed);
-                c.jitter_max_ms.store(profile.jitter_max_ms, Ordering::Relaxed);
+                c.jitter_min_ms
+                    .store(profile.jitter_min_ms, Ordering::Relaxed);
+                c.jitter_max_ms
+                    .store(profile.jitter_max_ms, Ordering::Relaxed);
                 c.clone()
             }
             None => {
                 let c = Arc::new(ReceiverControls::new(
-                    if route.kind.is_mic() { 1.0 } else { route.volume },
+                    if route.kind.is_mic() {
+                        1.0
+                    } else {
+                        route.volume
+                    },
                     profile.jitter_min_ms,
                     profile.jitter_max_ms,
                 ));
                 // The microphone mute also silences a phone microphone arriving here.
-                c.muted
-                    .store(route.muted || (route.kind.is_mic() && self.mic_muted), Ordering::Relaxed);
+                c.muted.store(
+                    route.muted || (route.kind.is_mic() && self.mic_muted),
+                    Ordering::Relaxed,
+                );
                 if !route.kind.is_mic() {
                     c.balance.set(self.settings.output.balance);
                     c.mono.store(self.settings.output.mono, Ordering::Relaxed);
@@ -141,7 +156,12 @@ impl Actor {
         let backend = self.backend.clone();
         let tx = self.internal_tx.clone();
         tokio::task::spawn_blocking(move || {
-            let result = Receiver::start(backend.as_ref(), ReceiverConfig { profile, target }, controls, on_error);
+            let result = Receiver::start(
+                backend.as_ref(),
+                ReceiverConfig { profile, target },
+                controls,
+                on_error,
+            );
             let _ = tx.send(Internal::ReceiverReady {
                 peer,
                 route: id,
@@ -152,11 +172,18 @@ impl Actor {
         Ok(false)
     }
 
-    fn begin_sender(&mut self, route: &mut Route, profile: StreamProfile) -> Result<bool, EngineError> {
+    fn begin_sender(
+        &mut self,
+        route: &mut Route,
+        profile: StreamProfile,
+    ) -> Result<bool, EngineError> {
         let apps = route.kind.endpoints().0 == "apps";
         let source = match route.kind.endpoints().0 {
             "system" => self.system_audio_source(),
-            "apps" => self.hooks.app_audio_source().ok_or(EngineError::LoopbackUnsupported)?,
+            "apps" => self
+                .hooks
+                .app_audio_source()
+                .ok_or(EngineError::LoopbackUnsupported)?,
             _ => self.mic_source(),
         };
         let is_mic = route.kind.is_mic();
@@ -164,8 +191,12 @@ impl Actor {
 
         // Per-route controls; the group has its own for gain, noise suppression and mic mute.
         let controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
-        controls.redundancy.store(profile.redundancy, Ordering::Relaxed);
-        controls.muted.store(route.muted || (is_mic && self.mic_muted), Ordering::Relaxed);
+        controls
+            .redundancy
+            .store(profile.redundancy, Ordering::Relaxed);
+        controls
+            .muted
+            .store(route.muted || (is_mic && self.mic_muted), Ordering::Relaxed);
         route.sender_controls = Some(controls.clone());
         route.encoder = Some(key.clone());
         route.subscription = None;
@@ -175,7 +206,10 @@ impl Actor {
 
         match self.encoders.get_mut(&key) {
             Some(EncoderSlot::Running(sender)) => {
-                let session = self.sessions.get(&route.peer).ok_or(EngineError::Unreachable)?;
+                let session = self
+                    .sessions
+                    .get(&route.peer)
+                    .ok_or(EngineError::Unreachable)?;
                 route.subscription = Some(sender.subscribe(Subscriber {
                     route: route.id,
                     sink: Arc::new(session.conn.clone()),
@@ -190,11 +224,17 @@ impl Actor {
             None => {
                 let start_id = self.next_start_id();
                 let group = Arc::new(SenderControls::new(
-                    if is_mic { self.settings.mic.gain_db } else { 0.0 },
+                    if is_mic {
+                        self.settings.mic.gain_db
+                    } else {
+                        0.0
+                    },
                     is_mic && self.settings.mic.noise_suppression,
                     profile.bitrate,
                 ));
-                group.muted.store(is_mic && self.mic_muted, Ordering::Relaxed);
+                group
+                    .muted
+                    .store(is_mic && self.mic_muted, Ordering::Relaxed);
                 let failed_tx = self.internal_tx.clone();
                 let failed_key = key.clone();
                 let on_error = Box::new(move |e: sp_audio_io::AudioError| {
@@ -228,16 +268,24 @@ impl Actor {
                         group,
                         on_error,
                     );
-                    let _ = tx.send(Internal::SenderReady { key, start_id, result });
+                    let _ = tx.send(Internal::SenderReady {
+                        key,
+                        start_id,
+                        result,
+                    });
                 });
                 Ok(false)
             }
         }
     }
 
-    pub(super) fn on_sender_ready(&mut self, key: EncoderKey, start_id: u64, result: Result<Sender, EngineError>) {
-        let current =
-            matches!(self.encoders.get(&key), Some(EncoderSlot::Starting { start_id: s, .. }) if *s == start_id);
+    pub(super) fn on_sender_ready(
+        &mut self,
+        key: EncoderKey,
+        start_id: u64,
+        result: Result<Sender, EngineError>,
+    ) {
+        let current = matches!(self.encoders.get(&key), Some(EncoderSlot::Starting { start_id: s, .. }) if *s == start_id);
         if !current {
             if let Ok(sender) = result {
                 drop_off_actor(sender);
@@ -252,14 +300,16 @@ impl Actor {
                 let mut ready = Vec::new();
                 for (peer, id) in waiting {
                     let route_id = route_key(&peer, id);
-                    let Some(r) = self
-                        .routes
-                        .iter_mut()
-                        .find(|r| r.key() == route_id && r.encoder.as_ref() == Some(&key) && r.subscription.is_none())
-                    else {
+                    let Some(r) = self.routes.iter_mut().find(|r| {
+                        r.key() == route_id
+                            && r.encoder.as_ref() == Some(&key)
+                            && r.subscription.is_none()
+                    }) else {
                         continue;
                     };
-                    let (Some(session), Some(controls)) = (self.sessions.get(&peer), r.sender_controls.clone()) else {
+                    let (Some(session), Some(controls)) =
+                        (self.sessions.get(&peer), r.sender_controls.clone())
+                    else {
                         continue;
                     };
                     r.subscription = Some(sender.subscribe(Subscriber {
@@ -341,7 +391,9 @@ impl Actor {
             .collect();
         let mut notified = false;
         for (route_id, peer, id) in affected {
-            if self.reopen_on_default_device(peer, id) || !self.routes.iter().any(|r| r.key() == route_id) {
+            if self.reopen_on_default_device(peer, id)
+                || !self.routes.iter().any(|r| r.key() == route_id)
+            {
                 continue;
             }
             if !notified {
@@ -390,7 +442,12 @@ impl Actor {
         }
         if requested_locally && self.settings.resume_routes_on_start {
             let peer_id = peer.to_hex();
-            if !self.settings.saved_routes.iter().any(|s| s.matches(&peer_id, kind)) {
+            if !self
+                .settings
+                .saved_routes
+                .iter()
+                .any(|s| s.matches(&peer_id, kind))
+            {
                 self.settings.saved_routes.push(SavedRoute {
                     peer_id,
                     kind,
@@ -497,7 +554,10 @@ impl Actor {
                     .controls
                     .noise_suppression
                     .store(self.settings.mic.noise_suppression, Ordering::Relaxed);
-                sender.controls.muted.store(self.mic_muted, Ordering::Relaxed);
+                sender
+                    .controls
+                    .muted
+                    .store(self.mic_muted, Ordering::Relaxed);
             }
         }
     }

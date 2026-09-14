@@ -131,14 +131,18 @@ impl DeviceIdentity {
             .map_err(|e| SecurityError::Certificate(e.to_string()))?;
         let key_der = Zeroizing::new(pkcs8.as_bytes().to_vec());
 
-        let key_pair = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&key_der.as_slice().into(), &rcgen::PKCS_ED25519)
-            .map_err(|e| SecurityError::Certificate(e.to_string()))?;
+        let key_pair = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(
+            &key_der.as_slice().into(),
+            &rcgen::PKCS_ED25519,
+        )
+        .map_err(|e| SecurityError::Certificate(e.to_string()))?;
 
         let mut params = rcgen::CertificateParams::new(vec!["soundpush.local".to_string()])
             .map_err(|e| SecurityError::Certificate(e.to_string()))?;
-        params
-            .distinguished_name
-            .push(rcgen::DnType::CommonName, format!("SoundPush {}", self.device_id().short()));
+        params.distinguished_name.push(
+            rcgen::DnType::CommonName,
+            format!("SoundPush {}", self.device_id().short()),
+        );
         params.not_before = rcgen::date_time_ymd(2024, 1, 1);
         params.not_after = rcgen::date_time_ymd(2124, 1, 1);
 
@@ -157,7 +161,8 @@ pub fn verify_signature(public_key: &[u8; 32], message: &[u8], signature: &[u8; 
     let Ok(key) = VerifyingKey::from_bytes(public_key) else {
         return false;
     };
-    key.verify(message, &Signature::from_bytes(signature)).is_ok()
+    key.verify(message, &Signature::from_bytes(signature))
+        .is_ok()
 }
 
 /// Extract the Ed25519 public key from a peer's DER certificate.
@@ -167,7 +172,9 @@ pub fn public_key_from_cert(cert_der: &[u8]) -> Result<[u8; 32], SecurityError> 
     let spki = cert.public_key();
     // OID 1.3.101.112 = Ed25519
     if spki.algorithm.algorithm.to_id_string() != "1.3.101.112" {
-        return Err(SecurityError::InvalidCertificate("not an Ed25519 key".into()));
+        return Err(SecurityError::InvalidCertificate(
+            "not an Ed25519 key".into(),
+        ));
     }
     let raw = spki.subject_public_key.data.as_ref();
     raw.try_into()
@@ -233,7 +240,10 @@ mod tests {
     fn certificate_carries_identity_key() {
         let id = DeviceIdentity::generate();
         let cert = id.certificate().unwrap();
-        assert_eq!(public_key_from_cert(&cert.cert_der).unwrap(), id.public_key());
+        assert_eq!(
+            public_key_from_cert(&cert.cert_der).unwrap(),
+            id.public_key()
+        );
     }
 
     #[test]

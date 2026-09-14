@@ -4,7 +4,9 @@
 use std::sync::atomic::AtomicU32;
 
 use super::*;
-use crate::nettest::{self, NetworkTestStatus, NetworkTestView, Progress, RESPONDER_WINDOW, TestPlan};
+use crate::nettest::{
+    self, NetworkTestStatus, NetworkTestView, Progress, RESPONDER_WINDOW, TestPlan,
+};
 
 /// How long the peer has to accept a test.
 const READY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -70,10 +72,9 @@ impl Actor {
     }
 
     pub(super) fn on_net_test_ready(&mut self, peer: DeviceId, ready: NetTestReady) {
-        let awaiting = self
-            .net_tests
-            .get(&peer)
-            .is_some_and(|t| t.test_id == ready.test_id && matches!(t.phase, Phase::AwaitingReady { .. }));
+        let awaiting = self.net_tests.get(&peer).is_some_and(|t| {
+            t.test_id == ready.test_id && matches!(t.phase, Phase::AwaitingReady { .. })
+        });
         if !awaiting {
             return;
         }
@@ -81,7 +82,8 @@ impl Actor {
             self.finish_network_test(peer, Err(EngineError::PeerDenied));
             return;
         }
-        let (Some(session), Some(test)) = (self.sessions.get(&peer), self.net_tests.get_mut(&peer)) else {
+        let (Some(session), Some(test)) = (self.sessions.get(&peer), self.net_tests.get_mut(&peer))
+        else {
             return;
         };
         let (tx, rx) = mpsc::channel(4096);
@@ -105,12 +107,21 @@ impl Actor {
                 TestPlan::default(),
             )
             .await;
-            let _ = internal.send(Internal::NetTestFinished { peer, test_id, report });
+            let _ = internal.send(Internal::NetTestFinished {
+                peer,
+                test_id,
+                report,
+            });
         });
         test.phase = Phase::Running(task.abort_handle());
     }
 
-    pub(super) fn on_net_test_finished(&mut self, peer: DeviceId, test_id: u32, report: NetworkReport) {
+    pub(super) fn on_net_test_finished(
+        &mut self,
+        peer: DeviceId,
+        test_id: u32,
+        report: NetworkReport,
+    ) {
         if self
             .net_tests
             .get(&peer)

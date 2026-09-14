@@ -7,7 +7,11 @@ pub fn db_to_gain(db: f32) -> f32 {
 
 /// Convert linear amplitude to dBFS (floor −120 dB).
 pub fn gain_to_db(gain: f32) -> f32 {
-    if gain <= 1e-6 { -120.0 } else { 20.0 * gain.log10() }
+    if gain <= 1e-6 {
+        -120.0
+    } else {
+        20.0 * gain.log10()
+    }
 }
 
 /// Smoothed gain stage (avoids zipper noise on changes).
@@ -18,7 +22,10 @@ pub struct Gain {
 
 impl Gain {
     pub fn new(gain: f32) -> Self {
-        Self { current: gain, target: gain }
+        Self {
+            current: gain,
+            target: gain,
+        }
     }
 
     pub fn set(&mut self, gain: f32) {
@@ -88,7 +95,11 @@ impl LevelMeter {
             sum += s * s;
         }
         let rms = (sum / samples.len() as f32).sqrt();
-        self.peak = if peak > self.peak { peak } else { self.peak * 0.9 + peak * 0.1 };
+        self.peak = if peak > self.peak {
+            peak
+        } else {
+            self.peak * 0.9 + peak * 0.1
+        };
         self.rms = self.rms * 0.8 + rms * 0.2;
     }
 
@@ -185,7 +196,8 @@ impl NoiseSuppressor {
             for (dst, src) in self.scratch_in.iter_mut().zip(chunk.iter()) {
                 *dst = *src * 32768.0;
             }
-            self.state.process_frame(&mut self.scratch_out, &self.scratch_in);
+            self.state
+                .process_frame(&mut self.scratch_out, &self.scratch_in);
             for (dst, src) in chunk.iter_mut().zip(self.scratch_out.iter()) {
                 *dst = *src / 32768.0;
             }
@@ -248,7 +260,9 @@ mod tests {
     #[test]
     fn noise_suppressor_runs() {
         let mut ns = NoiseSuppressor::new();
-        let mut buf: Vec<f32> = (0..4800).map(|i| ((i * 7919) % 200) as f32 / 2000.0 - 0.05).collect();
+        let mut buf: Vec<f32> = (0..4800)
+            .map(|i| ((i * 7919) % 200) as f32 / 2000.0 - 0.05)
+            .collect();
         ns.process(&mut buf);
         assert!(buf.iter().all(|s| s.is_finite()));
     }

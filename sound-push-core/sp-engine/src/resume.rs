@@ -51,7 +51,12 @@ impl ResumeTokens {
         self.issued.retain(|_, i| i.peer_key != peer_key);
         if self.issued.len() >= MAX_TOKENS {
             // Evict the token closest to expiry.
-            if let Some(oldest) = self.issued.iter().min_by_key(|(_, i)| i.expires).map(|(t, _)| *t) {
+            if let Some(oldest) = self
+                .issued
+                .iter()
+                .min_by_key(|(_, i)| i.expires)
+                .map(|(t, _)| *t)
+            {
                 self.issued.remove(&oldest);
             }
         }
@@ -105,7 +110,10 @@ impl ResumeTokens {
     /// new one: both directions of a simultaneous dial may present it, and the issuer accepts
     /// it once.
     pub fn held_for(&self, peer: &DeviceId, now: Instant) -> Option<Bytes> {
-        self.held.get(peer).filter(|h| now < h.expires).map(|h| h.token.clone())
+        self.held
+            .get(peer)
+            .filter(|h| now < h.expires)
+            .map(|h| h.token.clone())
     }
 
     /// True while `peer`'s last connection resumed its session.
@@ -148,7 +156,10 @@ mod tests {
         let token = store.issue(alice.public_key(), now);
         assert!(store.redeem(&alice.public_key(), &token, now));
         assert!(store.resumed_recently(&alice.device_id(), now));
-        assert!(!store.redeem(&alice.public_key(), &token, now), "single use");
+        assert!(
+            !store.redeem(&alice.public_key(), &token, now),
+            "single use"
+        );
         assert!(!store.resumed_recently(&alice.device_id(), now + RESUME_GRANT));
 
         let token = store.issue(alice.public_key(), now);
@@ -171,7 +182,10 @@ mod tests {
         assert!(store.held_for(&peer, now).is_none(), "wrong length ignored");
         store.hold(peer, Bytes::from_static(&[1; TOKEN_LEN]), u32::MAX, now);
         assert!(store.held_for(&peer, now).is_some());
-        assert!(store.held_for(&peer, now + TOKEN_LIFETIME).is_none(), "lifetime capped");
+        assert!(
+            store.held_for(&peer, now + TOKEN_LIFETIME).is_none(),
+            "lifetime capped"
+        );
         for _ in 0..200 {
             store.hold(
                 DeviceIdentity::generate().device_id(),

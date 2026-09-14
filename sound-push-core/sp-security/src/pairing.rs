@@ -106,10 +106,15 @@ impl QrPairingPayload {
         }
         let body = text
             .strip_prefix(QR_PREFIX)
-            .ok_or(SecurityError::InvalidPairingPayload("not a SoundPush pairing code"))?;
+            .ok_or(SecurityError::InvalidPairingPayload(
+                "not a SoundPush pairing code",
+            ))?;
         let bytes = base32_decode(body).ok_or(SecurityError::InvalidPairingPayload("encoding"))?;
 
-        let mut r = Reader { buf: &bytes, pos: 0 };
+        let mut r = Reader {
+            buf: &bytes,
+            pos: 0,
+        };
         if r.u8()? != CODE_VERSION {
             return Err(SecurityError::InvalidPairingPayload("unsupported version"));
         }
@@ -155,7 +160,9 @@ fn select_addresses(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
             IpAddr::V4(ip) if ip.is_loopback() => loopback.push(addr),
             IpAddr::V4(ip) if !ip.is_unspecified() && !ip.is_link_local() => v4.push(addr),
             IpAddr::V6(ip) if ip.is_loopback() => loopback.push(addr),
-            IpAddr::V6(ip) if !ip.is_unspecified() && (ip.segments()[0] & 0xffc0) != 0xfe80 => v6.push(addr),
+            IpAddr::V6(ip) if !ip.is_unspecified() && (ip.segments()[0] & 0xffc0) != 0xfe80 => {
+                v6.push(addr)
+            }
             _ => {}
         }
     }
@@ -185,7 +192,9 @@ impl Reader<'_> {
             .get(self.pos..end)
             .ok_or(SecurityError::InvalidPairingPayload("truncated"))?;
         self.pos = end;
-        slice.try_into().map_err(|_| SecurityError::InvalidPairingPayload("truncated"))
+        slice
+            .try_into()
+            .map_err(|_| SecurityError::InvalidPairingPayload("truncated"))
     }
 }
 
@@ -242,7 +251,10 @@ fn proof_mac(secret: &[u8; 16], scanner: &Fingerprint, displayer: &DeviceId) -> 
 
 /// Proof that the scanner saw the QR secret, bound to both identities.
 pub fn pairing_proof(secret: &[u8; 16], scanner: &Fingerprint, displayer: &DeviceId) -> [u8; 32] {
-    proof_mac(secret, scanner, displayer).finalize().into_bytes().into()
+    proof_mac(secret, scanner, displayer)
+        .finalize()
+        .into_bytes()
+        .into()
 }
 
 /// Constant-time verification of a pairing proof.
@@ -296,7 +308,11 @@ mod tests {
         let uri = payload.to_uri();
         assert!(uri.chars().all(|c| QR_ALPHANUMERIC.contains(c)), "{uri}");
         // QR version 4 (33×33 modules) at error-correction level M holds 90 alphanumeric characters.
-        assert!(uri.len() <= 90, "code too long for a version-4 QR: {} chars", uri.len());
+        assert!(
+            uri.len() <= 90,
+            "code too long for a version-4 QR: {} chars",
+            uri.len()
+        );
 
         let parsed = QrPairingPayload::from_uri(&uri).unwrap();
         assert_eq!(parsed.device_id, payload.device_id);
@@ -319,8 +335,18 @@ mod tests {
         let id = DeviceIdentity::generate().device_id();
         let only_loopback = QrPairingPayload::new(id, vec!["127.0.0.1:5000".parse().unwrap()], 0);
         assert_eq!(only_loopback.addresses.len(), 1);
-        let mixed = QrPairingPayload::new(id, vec!["127.0.0.1:5000".parse().unwrap(), "192.168.0.2:5000".parse().unwrap()], 0);
-        assert_eq!(mixed.addresses, vec!["192.168.0.2:5000".parse::<SocketAddr>().unwrap()]);
+        let mixed = QrPairingPayload::new(
+            id,
+            vec![
+                "127.0.0.1:5000".parse().unwrap(),
+                "192.168.0.2:5000".parse().unwrap(),
+            ],
+            0,
+        );
+        assert_eq!(
+            mixed.addresses,
+            vec!["192.168.0.2:5000".parse::<SocketAddr>().unwrap()]
+        );
     }
 
     #[test]
@@ -331,8 +357,14 @@ mod tests {
         assert!(QrPairingPayload::from_uri("SP1:AEAQCAIBAEAQCAIB").is_err());
         let id = DeviceIdentity::generate().device_id();
         let valid = QrPairingPayload::new(id, vec!["192.168.1.2:1".parse().unwrap()], 0).to_uri();
-        assert!(QrPairingPayload::from_uri(&format!("{valid}AA")).is_err(), "trailing data");
-        assert!(QrPairingPayload::from_uri(&valid[..valid.len() - 4]).is_err(), "truncated");
+        assert!(
+            QrPairingPayload::from_uri(&format!("{valid}AA")).is_err(),
+            "trailing data"
+        );
+        assert!(
+            QrPairingPayload::from_uri(&valid[..valid.len() - 4]).is_err(),
+            "truncated"
+        );
     }
 
     #[test]
@@ -350,7 +382,9 @@ mod tests {
         let secret = [9u8; 16];
         let proof = pairing_proof(&secret, &a.fingerprint(), &b.device_id());
         assert!(verify_pairing_proof(&secret, &a.fingerprint(), &b.device_id(), &proof).is_ok());
-        assert!(verify_pairing_proof(&[8u8; 16], &a.fingerprint(), &b.device_id(), &proof).is_err());
+        assert!(
+            verify_pairing_proof(&[8u8; 16], &a.fingerprint(), &b.device_id(), &proof).is_err()
+        );
         assert!(verify_pairing_proof(&secret, &b.fingerprint(), &a.device_id(), &proof).is_err());
     }
 

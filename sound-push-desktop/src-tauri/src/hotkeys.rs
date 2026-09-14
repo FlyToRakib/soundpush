@@ -64,16 +64,27 @@ pub struct Hotkeys {
 }
 
 pub fn plugin() -> TauriPlugin<Wry> {
-    tauri_plugin_global_shortcut::Builder::new().with_handler(on_shortcut).build()
+    tauri_plugin_global_shortcut::Builder::new()
+        .with_handler(on_shortcut)
+        .build()
 }
 
 fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
-    let (Some(state), Some(hotkeys)) = (app.try_state::<AppState>(), app.try_state::<Hotkeys>()) else {
+    let (Some(state), Some(hotkeys)) = (app.try_state::<AppState>(), app.try_state::<Hotkeys>())
+    else {
         return;
     };
-    let Some(engine) = state.engine.get() else { return };
-    let Ok(slots) = hotkeys.slots.lock() else { return };
-    let is = |slot: &Slot| slot.shortcut.as_ref().is_some_and(|s| s.id() == shortcut.id());
+    let Some(engine) = state.engine.get() else {
+        return;
+    };
+    let Ok(slots) = hotkeys.slots.lock() else {
+        return;
+    };
+    let is = |slot: &Slot| {
+        slot.shortcut
+            .as_ref()
+            .is_some_and(|s| s.id() == shortcut.id())
+    };
     let (mute, push_to_talk) = (is(&slots.0), is(&slots.1));
     drop(slots);
     // The OS does not repeat a held shortcut, so a toggle happens once per press.
@@ -90,7 +101,12 @@ fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
 
 /// Normalise and parse an accelerator ("ctrl + shift + m" → "Ctrl+Shift+M").
 fn parse(accelerator: &str) -> Result<(String, Shortcut), HotkeyError> {
-    let normal = accelerator.split('+').map(str::trim).filter(|p| !p.is_empty()).collect::<Vec<_>>().join("+");
+    let normal = accelerator
+        .split('+')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("+");
     let shortcut: Shortcut = normal.parse().map_err(|_| HotkeyError::Invalid)?;
     Ok((normal, shortcut))
 }
@@ -111,7 +127,10 @@ pub fn set(app: &AppHandle, kind: Kind, accelerator: Option<&str>) -> Result<(),
     };
     let parsed = accelerator.map(parse).transpose()?;
     if let Some((_, shortcut)) = &parsed
-        && other.shortcut.as_ref().is_some_and(|s| s.id() == shortcut.id())
+        && other
+            .shortcut
+            .as_ref()
+            .is_some_and(|s| s.id() == shortcut.id())
     {
         return Err(HotkeyError::Duplicate);
     }
@@ -120,8 +139,12 @@ pub fn set(app: &AppHandle, kind: Kind, accelerator: Option<&str>) -> Result<(),
 
 /// Register the shortcuts saved in settings (at start-up and after every settings change).
 pub fn apply(app: &AppHandle, mute: Option<&str>, push_to_talk: Option<&str>) {
-    let Some(hotkeys) = app.try_state::<Hotkeys>() else { return };
-    let Ok(mut slots) = hotkeys.slots.lock() else { return };
+    let Some(hotkeys) = app.try_state::<Hotkeys>() else {
+        return;
+    };
+    let Ok(mut slots) = hotkeys.slots.lock() else {
+        return;
+    };
     for (kind, wanted) in [(Kind::Mute, mute), (Kind::PushToTalk, push_to_talk)] {
         let (mute_slot, push_to_talk_slot) = &mut *slots;
         let (slot, other) = match kind {
@@ -138,7 +161,10 @@ pub fn apply(app: &AppHandle, mute: Option<&str>, push_to_talk: Option<&str>) {
         }
         let result = wanted.and_then(|parsed| {
             if let Some((_, shortcut)) = &parsed
-                && other.shortcut.as_ref().is_some_and(|s| s.id() == shortcut.id())
+                && other
+                    .shortcut
+                    .as_ref()
+                    .is_some_and(|s| s.id() == shortcut.id())
             {
                 return Err(HotkeyError::Duplicate);
             }
@@ -153,7 +179,12 @@ pub fn apply(app: &AppHandle, mute: Option<&str>, push_to_talk: Option<&str>) {
 
 pub fn status(app: &AppHandle) -> HotkeyStatus {
     app.try_state::<Hotkeys>()
-        .and_then(|h| h.slots.lock().ok().map(|s| HotkeyStatus { mute: s.0.error, push_to_talk: s.1.error }))
+        .and_then(|h| {
+            h.slots.lock().ok().map(|s| HotkeyStatus {
+                mute: s.0.error,
+                push_to_talk: s.1.error,
+            })
+        })
         .unwrap_or_default()
 }
 
@@ -165,7 +196,11 @@ fn replace(
 ) -> Result<(), HotkeyError> {
     let manager = app.global_shortcut();
     if let Some((accelerator, shortcut)) = &parsed {
-        if slot.shortcut.as_ref().is_some_and(|s| s.id() == shortcut.id()) {
+        if slot
+            .shortcut
+            .as_ref()
+            .is_some_and(|s| s.id() == shortcut.id())
+        {
             slot.accelerator = Some(accelerator.clone());
             slot.error = None;
             return Ok(());
@@ -186,7 +221,9 @@ fn replace(
 
     // With push-to-talk the microphone starts muted; removing it gives the microphone back.
     if kind == Kind::PushToTalk
-        && let Some(engine) = app.try_state::<AppState>().and_then(|s| s.engine.get().cloned())
+        && let Some(engine) = app
+            .try_state::<AppState>()
+            .and_then(|s| s.engine.get().cloned())
     {
         if slot.shortcut.is_some() {
             let _ = engine.set_mic_muted(true);

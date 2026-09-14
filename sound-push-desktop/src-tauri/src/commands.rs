@@ -7,7 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use sp_engine::settings::Settings;
 use sp_engine::state::RouteKind;
-use sp_engine::{DeviceProfile, EngineError, EngineState, ErrorView, NetworkReport, PermissionKind, Policy, Severity};
+use sp_engine::{
+    DeviceProfile, EngineError, EngineState, ErrorView, NetworkReport, PermissionKind, Policy,
+    Severity,
+};
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
@@ -73,7 +76,11 @@ pub async fn pair_with_qr(state: State<'_, AppState>, uri: String) -> CmdResult<
 }
 
 #[tauri::command]
-pub fn confirm_pairing(state: State<'_, AppState>, device_id: String, accept: bool) -> CmdResult<()> {
+pub fn confirm_pairing(
+    state: State<'_, AppState>,
+    device_id: String,
+    accept: bool,
+) -> CmdResult<()> {
     Ok(state.engine()?.confirm_pairing(device_id, accept)?)
 }
 
@@ -93,22 +100,39 @@ pub fn forget_device(state: State<'_, AppState>, device_id: String) -> CmdResult
 }
 
 #[tauri::command]
-pub fn set_device_blocked(state: State<'_, AppState>, device_id: String, blocked: bool) -> CmdResult<()> {
+pub fn set_device_blocked(
+    state: State<'_, AppState>,
+    device_id: String,
+    blocked: bool,
+) -> CmdResult<()> {
     Ok(state.engine()?.set_device_blocked(device_id, blocked)?)
 }
 
 #[tauri::command]
-pub fn rename_device(state: State<'_, AppState>, device_id: String, alias: Option<String>) -> CmdResult<()> {
+pub fn rename_device(
+    state: State<'_, AppState>,
+    device_id: String,
+    alias: Option<String>,
+) -> CmdResult<()> {
     Ok(state.engine()?.rename_device(device_id, alias)?)
 }
 
 #[tauri::command]
-pub fn set_auto_connect(state: State<'_, AppState>, device_id: String, enabled: bool) -> CmdResult<()> {
+pub fn set_auto_connect(
+    state: State<'_, AppState>,
+    device_id: String,
+    enabled: bool,
+) -> CmdResult<()> {
     Ok(state.engine()?.set_auto_connect(device_id, enabled)?)
 }
 
 #[tauri::command]
-pub fn set_permission(state: State<'_, AppState>, device_id: String, kind: String, policy: String) -> CmdResult<()> {
+pub fn set_permission(
+    state: State<'_, AppState>,
+    device_id: String,
+    kind: String,
+    policy: String,
+) -> CmdResult<()> {
     let kind = match kind.as_str() {
         "receiveMyAudio" => PermissionKind::ReceiveMyAudio,
         "useMyMicrophone" => PermissionKind::UseMyMicrophone,
@@ -126,13 +150,20 @@ pub fn set_permission(state: State<'_, AppState>, device_id: String, kind: Strin
 }
 
 #[tauri::command]
-pub fn set_device_profile(state: State<'_, AppState>, device_id: String, profile: Option<DeviceProfile>) -> CmdResult<()> {
+pub fn set_device_profile(
+    state: State<'_, AppState>,
+    device_id: String,
+    profile: Option<DeviceProfile>,
+) -> CmdResult<()> {
     Ok(state.engine()?.set_device_profile(device_id, profile)?)
 }
 
 /// About ten seconds; progress is also published in the engine state.
 #[tauri::command]
-pub async fn run_network_test(state: State<'_, AppState>, device_id: String) -> CmdResult<NetworkReport> {
+pub async fn run_network_test(
+    state: State<'_, AppState>,
+    device_id: String,
+) -> CmdResult<NetworkReport> {
     Ok(state.engine()?.run_network_test(device_id).await?)
 }
 
@@ -155,16 +186,22 @@ pub async fn usb_status(state: State<'_, AppState>) -> CmdResult<crate::usb::Usb
 pub async fn usb_connect(state: State<'_, AppState>, serial: String) -> CmdResult<()> {
     let engine = state.engine()?.clone();
     let local = engine.state().local.clone();
-    tauri::async_runtime::spawn_blocking(move || crate::usb::connect(&serial, local.port, local.tcp_port))
-        .await
-        .map_err(|e| EngineError::Internal(e.to_string()))?
-        .map_err(EngineError::Internal)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::usb::connect(&serial, local.port, local.tcp_port)
+    })
+    .await
+    .map_err(|e| EngineError::Internal(e.to_string()))?
+    .map_err(EngineError::Internal)?;
     // Retry now instead of waiting for the next reconnect attempt.
     Ok(engine.network_changed()?)
 }
 
 #[tauri::command]
-pub async fn start_route(state: State<'_, AppState>, device_id: String, kind: RouteKind) -> CmdResult<String> {
+pub async fn start_route(
+    state: State<'_, AppState>,
+    device_id: String,
+    kind: RouteKind,
+) -> CmdResult<String> {
     Ok(state.engine()?.start_route(device_id, kind).await?)
 }
 
@@ -174,7 +211,11 @@ pub fn stop_route(state: State<'_, AppState>, route_id: String) -> CmdResult<()>
 }
 
 #[tauri::command]
-pub fn set_route_volume(state: State<'_, AppState>, route_id: String, volume: f32) -> CmdResult<()> {
+pub fn set_route_volume(
+    state: State<'_, AppState>,
+    route_id: String,
+    volume: f32,
+) -> CmdResult<()> {
     Ok(state.engine()?.set_route_volume(route_id, volume)?)
 }
 
@@ -184,18 +225,33 @@ pub fn set_route_muted(state: State<'_, AppState>, route_id: String, muted: bool
 }
 
 #[tauri::command]
-pub fn set_route_keep_running(state: State<'_, AppState>, route_id: String, keep: bool) -> CmdResult<()> {
+pub fn set_route_keep_running(
+    state: State<'_, AppState>,
+    route_id: String,
+    keep: bool,
+) -> CmdResult<()> {
     Ok(state.engine()?.set_route_keep_running(route_id, keep)?)
 }
 
 #[tauri::command]
-pub fn set_peer_speakers_muted(state: State<'_, AppState>, device_id: String, muted: bool) -> CmdResult<()> {
+pub fn set_peer_speakers_muted(
+    state: State<'_, AppState>,
+    device_id: String,
+    muted: bool,
+) -> CmdResult<()> {
     Ok(state.engine()?.set_peer_speakers_muted(device_id, muted)?)
 }
 
 #[tauri::command]
-pub fn respond_route_request(state: State<'_, AppState>, request_id: u64, accept: bool, remember: bool) -> CmdResult<()> {
-    Ok(state.engine()?.respond_route_request(request_id, accept, remember)?)
+pub fn respond_route_request(
+    state: State<'_, AppState>,
+    request_id: u64,
+    accept: bool,
+    remember: bool,
+) -> CmdResult<()> {
+    Ok(state
+        .engine()?
+        .respond_route_request(request_id, accept, remember)?)
 }
 
 #[tauri::command]
@@ -214,7 +270,10 @@ pub fn refresh_audio_devices(state: State<'_, AppState>) -> CmdResult<()> {
 }
 
 #[tauri::command]
-pub async fn update_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<Settings> {
+pub async fn update_settings(
+    state: State<'_, AppState>,
+    settings: Settings,
+) -> CmdResult<Settings> {
     Ok(state.engine()?.update_settings(settings).await?)
 }
 
@@ -241,8 +300,15 @@ pub async fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<String>
         .map_err(|e| EngineError::Internal(e.to_string()))?
 }
 
-fn write_diagnostics(snapshot: &EngineState, data_dir: &std::path::Path, log_dir: &std::path::Path) -> CmdResult<String> {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+fn write_diagnostics(
+    snapshot: &EngineState,
+    data_dir: &std::path::Path,
+    log_dir: &std::path::Path,
+) -> CmdResult<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let dir = data_dir.join("diagnostics");
     std::fs::create_dir_all(&dir).map_err(|e| EngineError::Storage(e.to_string()))?;
     let path = dir.join(format!("soundpush-diagnostics-{now}.txt"));
@@ -257,7 +323,11 @@ fn write_diagnostics(snapshot: &EngineState, data_dir: &std::path::Path, log_dir
     // Redact remote addresses; keep only the local device code and peer prefixes.
     let mut redacted = snapshot.clone();
     for peer in &mut redacted.peers {
-        peer.addresses = peer.addresses.iter().map(|_| "<redacted>".to_string()).collect();
+        peer.addresses = peer
+            .addresses
+            .iter()
+            .map(|_| "<redacted>".to_string())
+            .collect();
         peer.device_id.truncate(8);
     }
     report.push_str("== State ==\n");
@@ -326,7 +396,9 @@ pub fn restart_computer() -> CmdResult<()> {
     crate::virtual_mic::restart_computer().map_err(|e| EngineError::Internal(e).into())
 }
 
-async fn change_virtual_mic(f: impl FnOnce() -> Result<(), String> + Send + 'static) -> CmdResult<()> {
+async fn change_virtual_mic(
+    f: impl FnOnce() -> Result<(), String> + Send + 'static,
+) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         let result = f();
         // The audio server needs a moment to restart and publish its devices.
@@ -353,14 +425,18 @@ pub async fn set_hotkey(
     accelerator: Option<String>,
 ) -> CmdResult<()> {
     let engine = state.engine()?.clone();
-    let accelerator = accelerator.map(|a| a.trim().to_string()).filter(|a| !a.is_empty());
+    let accelerator = accelerator
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty());
     {
         // Registration waits on the main thread, so it must not run on it (or on the async runtime).
         let accelerator = accelerator.clone();
-        tauri::async_runtime::spawn_blocking(move || crate::hotkeys::set(&app, kind, accelerator.as_deref()))
-            .await
-            .map_err(|e| EngineError::Internal(e.to_string()))?
-            .map_err(|e| CommandError::keyed(e.key(), format!("{e:?}")))?;
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::hotkeys::set(&app, kind, accelerator.as_deref())
+        })
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()))?
+        .map_err(|e| CommandError::keyed(e.key(), format!("{e:?}")))?;
     }
 
     let mut settings = engine.state().settings.clone();
@@ -374,7 +450,9 @@ pub async fn set_hotkey(
 
 /// Firewall and network profile (Windows). Checked fresh; takes a moment on large rule sets.
 #[tauri::command]
-pub async fn network_status(state: State<'_, AppState>) -> CmdResult<crate::network::NetworkStatus> {
+pub async fn network_status(
+    state: State<'_, AppState>,
+) -> CmdResult<crate::network::NetworkStatus> {
     let status = tauri::async_runtime::spawn_blocking(crate::network::status)
         .await
         .map_err(|e| EngineError::Internal(e.to_string()))?;
@@ -384,7 +462,10 @@ pub async fn network_status(state: State<'_, AppState>) -> CmdResult<crate::netw
 
 /// Add SoundPush's firewall rule through a UAC prompt, then check again.
 #[tauri::command]
-pub async fn fix_firewall(state: State<'_, AppState>, include_public: bool) -> CmdResult<crate::network::NetworkStatus> {
+pub async fn fix_firewall(
+    state: State<'_, AppState>,
+    include_public: bool,
+) -> CmdResult<crate::network::NetworkStatus> {
     tauri::async_runtime::spawn_blocking(move || crate::network::fix_firewall(include_public))
         .await
         .map_err(|e| EngineError::Internal(e.to_string()))?
@@ -406,7 +487,12 @@ pub async fn request_microphone(state: State<'_, AppState>) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         use sp_audio_io::AudioBackend;
         // Opening the microphone is what makes macOS ask; nothing is recorded.
-        if let Ok(stream) = backend.open_capture(&sp_audio_io::CaptureSource::DefaultInput, 1, Box::new(|_| {}), Box::new(|_| {})) {
+        if let Ok(stream) = backend.open_capture(
+            &sp_audio_io::CaptureSource::DefaultInput,
+            1,
+            Box::new(|_| {}),
+            Box::new(|_| {}),
+        ) {
             std::thread::sleep(std::time::Duration::from_millis(300));
             drop(stream);
         }

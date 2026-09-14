@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use sp_security::DeviceId;
 
-use crate::candidates::order;
 use crate::PeerAdvert;
+use crate::candidates::order;
 
 /// A peer is considered gone when no advert arrived for this long.
 pub const PEER_TTL: Duration = Duration::from_secs(15);
@@ -134,12 +134,23 @@ mod tests {
         let mut reg = PeerRegistry::new(me);
         let t = Instant::now();
 
-        assert!(reg.ingest(advert(me, "192.168.1.2:1", "me", Source::Mdns), t).is_none());
-        assert!(reg.ingest(advert(peer, "192.168.1.3:47650", "Phone", Source::Mdns), t).is_some());
+        assert!(
+            reg.ingest(advert(me, "192.168.1.2:1", "me", Source::Mdns), t)
+                .is_none()
+        );
+        assert!(
+            reg.ingest(advert(peer, "192.168.1.3:47650", "Phone", Source::Mdns), t)
+                .is_some()
+        );
         // Same data again: no event.
-        assert!(reg.ingest(advert(peer, "192.168.1.3:47650", "", Source::Beacon), t).is_none());
+        assert!(
+            reg.ingest(advert(peer, "192.168.1.3:47650", "", Source::Beacon), t)
+                .is_none()
+        );
         // New address merges.
-        let ev = reg.ingest(advert(peer, "[fe80::5]:47650", "", Source::Beacon), t).unwrap();
+        let ev = reg
+            .ingest(advert(peer, "[fe80::5]:47650", "", Source::Beacon), t)
+            .unwrap();
         match ev {
             DiscoveryEvent::Updated(a) => {
                 assert_eq!(a.addresses.len(), 2);
@@ -156,7 +167,10 @@ mod tests {
         let t = Instant::now();
         reg.ingest(advert(peer, "10.0.0.2:1", "x", Source::Beacon), t);
         assert!(reg.sweep(t + Duration::from_secs(5)).is_empty());
-        assert_eq!(reg.sweep(t + PEER_TTL + Duration::from_secs(1)), vec![DiscoveryEvent::Lost(peer)]);
+        assert_eq!(
+            reg.sweep(t + PEER_TTL + Duration::from_secs(1)),
+            vec![DiscoveryEvent::Lost(peer)]
+        );
         assert_eq!(reg.peers().count(), 0);
     }
 }

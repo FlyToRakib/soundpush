@@ -19,7 +19,10 @@ use crate::power::SleepInhibitor;
 /// "<endpoint> (<device>)", kept in sync with its INF strings; Linux uses a null sink feeding a
 /// separate source.
 #[cfg(windows)]
-const OWN_FEED: (&str, Option<&str>) = ("SoundPush Microphone Feed", Some("SoundPush Microphone (SoundPush Virtual Audio)"));
+const OWN_FEED: (&str, Option<&str>) = (
+    "SoundPush Microphone Feed",
+    Some("SoundPush Microphone (SoundPush Virtual Audio)"),
+);
 #[cfg(not(windows))]
 const OWN_FEED: (&str, Option<&str>) = ("SoundPush Microphone Feed", Some("SoundPush Microphone"));
 
@@ -31,10 +34,19 @@ const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
     // macOS driver: one device name for both directions.
     ("SoundPush Microphone", None),
     ("CABLE Input", Some("CABLE Output (VB-Audio Virtual Cable)")),
-    ("Hi-Fi Cable Input", Some("Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)")),
+    (
+        "Hi-Fi Cable Input",
+        Some("Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)"),
+    ),
     ("BlackHole", None),
-    ("Voicemeeter Input", Some("Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)")),
-    ("Voicemeeter AUX Input", Some("Voicemeeter Out B2 (VB-Audio Voicemeeter AUX VAIO)")),
+    (
+        "Voicemeeter Input",
+        Some("Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)"),
+    ),
+    (
+        "Voicemeeter AUX Input",
+        Some("Voicemeeter Out B2 (VB-Audio Voicemeeter AUX VAIO)"),
+    ),
     ("Loopback Audio", None),
 ];
 
@@ -107,7 +119,11 @@ impl DesktopHooks {
 
     pub fn set_prevent_sleep(&self, prevent: bool) {
         if let Ok(mut guard) = self.inhibitor.lock() {
-            *guard = if prevent { SleepInhibitor::acquire() } else { None };
+            *guard = if prevent {
+                SleepInhibitor::acquire()
+            } else {
+                None
+            };
         }
     }
 
@@ -118,7 +134,9 @@ impl DesktopHooks {
         let Ok(mut cache) = self.outputs_cache.lock() else {
             return Vec::new();
         };
-        let fresh = cache.0.is_some_and(|t| t.elapsed() < Duration::from_secs(10));
+        let fresh = cache
+            .0
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(10));
         if !fresh {
             *cache = (Some(Instant::now()), self.backend.output_device_names());
         }
@@ -159,7 +177,11 @@ impl PlatformHooks for DesktopHooks {
     fn default_device_name(&self) -> String {
         let name = gethostname::gethostname().to_string_lossy().to_string();
         let name = name.trim_end_matches(".local").trim();
-        if name.is_empty() { "My computer".into() } else { name.chars().take(64).collect() }
+        if name.is_empty() {
+            "My computer".into()
+        } else {
+            name.chars().take(64).collect()
+        }
     }
 
     fn audio_backend(&self) -> Arc<dyn AudioBackend> {
@@ -250,7 +272,10 @@ fn storage_key(dir: &Path) -> [u8; 32] {
     let decode = |hex: &str| -> Option<[u8; 32]> {
         let bytes: Option<Vec<u8>> = (0..hex.len())
             .step_by(2)
-            .map(|i| hex.get(i..i + 2).and_then(|b| u8::from_str_radix(b, 16).ok()))
+            .map(|i| {
+                hex.get(i..i + 2)
+                    .and_then(|b| u8::from_str_radix(b, 16).ok())
+            })
             .collect();
         bytes?.try_into().ok()
     };
@@ -261,7 +286,10 @@ fn storage_key(dir: &Path) -> [u8; 32] {
     // Development builds are re-signed on every build, which would make macOS show a Keychain
     // prompt after each rebuild. They keep the key in a user-only file (migrated once from the Keychain).
     if cfg!(debug_assertions) {
-        if let Some(key) = std::fs::read_to_string(&fallback).ok().and_then(|s| decode(s.trim())) {
+        if let Some(key) = std::fs::read_to_string(&fallback)
+            .ok()
+            .and_then(|s| decode(s.trim()))
+        {
             return key;
         }
         let migrated = keyring::Entry::new(SERVICE, ACCOUNT)
@@ -300,7 +328,10 @@ fn storage_key(dir: &Path) -> [u8; 32] {
         warn!("OS keystore unavailable; using protected key file");
     }
 
-    if let Some(key) = std::fs::read_to_string(&fallback).ok().and_then(|s| decode(s.trim())) {
+    if let Some(key) = std::fs::read_to_string(&fallback)
+        .ok()
+        .and_then(|s| decode(s.trim()))
+    {
         return key;
     }
     let key = random_key();
@@ -334,7 +365,10 @@ mod tests {
     fn windows_soundpush_driver_feeds_its_capture_endpoint() {
         assert_eq!(cable_input_name(WINDOWS_FEED).as_deref(), Some(WINDOWS_MIC));
         // The macOS device keeps one name for both sides.
-        assert_eq!(cable_input_name("SoundPush Microphone").as_deref(), Some("SoundPush Microphone"));
+        assert_eq!(
+            cable_input_name("SoundPush Microphone").as_deref(),
+            Some("SoundPush Microphone")
+        );
     }
 
     #[test]
@@ -348,7 +382,10 @@ mod tests {
             Some(WINDOWS_FEED)
         );
         // Without the SoundPush driver, VB-CABLE is used exactly as before.
-        assert_eq!(preferred_virtual_cable(&outputs(&[speakers, vb_cable])).as_deref(), Some(vb_cable));
+        assert_eq!(
+            preferred_virtual_cable(&outputs(&[speakers, vb_cable])).as_deref(),
+            Some(vb_cable)
+        );
         assert_eq!(preferred_virtual_cable(&outputs(&[speakers])), None);
     }
 
@@ -358,8 +395,14 @@ mod tests {
             cable_input_name("CABLE Input (VB-Audio Virtual Cable)").as_deref(),
             Some("CABLE Output (VB-Audio Virtual Cable)")
         );
-        assert_eq!(cable_input_name("BlackHole 2ch").as_deref(), Some("BlackHole 2ch"));
-        assert_eq!(cable_input_name("SoundPush Microphone").as_deref(), Some("SoundPush Microphone"));
+        assert_eq!(
+            cable_input_name("BlackHole 2ch").as_deref(),
+            Some("BlackHole 2ch")
+        );
+        assert_eq!(
+            cable_input_name("SoundPush Microphone").as_deref(),
+            Some("SoundPush Microphone")
+        );
         // Linux names (on Windows the feed belongs to SoundPush's own driver instead).
         #[cfg(not(windows))]
         assert_eq!(
@@ -368,6 +411,9 @@ mod tests {
         );
         assert_eq!(cable_input_name("Built-in Audio Analog Stereo"), None);
         assert_eq!(cable_input_name("MacBook Air Speakers"), None);
-        assert_eq!(cable_input_name("BenQ EW3270U (NVIDIA High Definition Audio)"), None);
+        assert_eq!(
+            cable_input_name("BenQ EW3270U (NVIDIA High Definition Audio)"),
+            None
+        );
     }
 }

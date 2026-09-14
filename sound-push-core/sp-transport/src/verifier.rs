@@ -9,7 +9,9 @@
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::{CryptoProvider, WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
+use rustls::crypto::{
+    CryptoProvider, WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature,
+};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, DistinguishedName, Error, SignatureScheme};
@@ -26,7 +28,9 @@ fn check_cert(cert: &CertificateDer<'_>, pinned: Option<DeviceId>) -> Result<(),
     // The engine still checks the full public key against the trust store after the handshake.
     if let Some(expected) = pinned {
         if Fingerprint::of_public_key(&key).device_id() != expected {
-            return Err(Error::InvalidCertificate(rustls::CertificateError::ApplicationVerificationFailure));
+            return Err(Error::InvalidCertificate(
+                rustls::CertificateError::ApplicationVerificationFailure,
+            ));
         }
     }
     Ok(())

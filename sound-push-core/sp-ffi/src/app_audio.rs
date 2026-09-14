@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex};
 
 use sp_audio_io::cpal_backend::CpalBackend;
 use sp_audio_io::{
-    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureConverter, CaptureSource, DeviceInfo,
-    ErrorCallback, RenderCallback, RenderTarget, StreamInfo,
+    AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureConverter, CaptureSource,
+    DeviceInfo, ErrorCallback, RenderCallback, RenderTarget, StreamInfo,
 };
 use tracing::warn;
 
@@ -50,7 +50,10 @@ fn push_pcm16(slot: &Slot, pcm: &[u8]) {
             return;
         }
         scratch.clear();
-        scratch.extend(pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0));
+        scratch.extend(
+            pcm.chunks_exact(2)
+                .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0),
+        );
         for feed in feeds.iter_mut() {
             let converted = feed.converter.process(scratch);
             (feed.callback)(converted);
@@ -141,7 +144,9 @@ impl MobileAudioBackend {
     /// Choose the playback path for new and running streams: `true` hands playback to the
     /// platform (Kotlin AudioTrack), `false` returns to the low-latency path.
     pub fn set_platform_output(&self, enabled: bool) {
-        let Ok(mut guard) = self.renders.lock() else { return };
+        let Ok(mut guard) = self.renders.lock() else {
+            return;
+        };
         if guard.platform == enabled {
             return;
         }
@@ -152,12 +157,20 @@ impl MobileAudioBackend {
                 drop(entry.fast.take());
                 entry.info = platform_info(entry.channels);
             } else if entry.fast.is_none() {
-                match open_fast(&self.inner, &entry.target, entry.channels, &entry.callback, &entry.on_error) {
+                match open_fast(
+                    &self.inner,
+                    &entry.target,
+                    entry.channels,
+                    &entry.callback,
+                    &entry.on_error,
+                ) {
                     Ok(stream) => {
                         entry.info = stream.info();
                         entry.fast = Some(stream);
                     }
-                    Err(e) => warn!(error = %e, "low-latency output unavailable, staying on platform output"),
+                    Err(e) => {
+                        warn!(error = %e, "low-latency output unavailable, staying on platform output")
+                    }
                 }
             }
         }
@@ -176,7 +189,9 @@ impl MobileAudioBackend {
     pub fn pull_playback_pcm16(&self, frames: usize) -> Vec<u8> {
         let frames = frames.min(MAX_PULL_FRAMES);
         let mut out = vec![0u8; frames * 4];
-        let Ok(mut guard) = self.renders.lock() else { return out };
+        let Ok(mut guard) = self.renders.lock() else {
+            return out;
+        };
         let Renders { entries, mix, .. } = &mut *guard;
         mix.clear();
         mix.resize(frames * 2, 0.0);
@@ -188,7 +203,11 @@ impl MobileAudioBackend {
                 (f)(&mut entry.scratch);
             }
             for (frame, chunk) in entry.scratch.chunks_exact(ch).enumerate() {
-                let (l, r) = if ch == 1 { (chunk[0], chunk[0]) } else { (chunk[0], chunk[1]) };
+                let (l, r) = if ch == 1 {
+                    (chunk[0], chunk[0])
+                } else {
+                    (chunk[0], chunk[1])
+                };
                 mix[frame * 2] += l;
                 mix[frame * 2 + 1] += r;
             }
@@ -210,15 +229,28 @@ impl MobileAudioBackend {
     }
 
     pub fn app_audio_active(&self) -> bool {
-        self.app_audio.lock().map(|g| !g.feeds.is_empty()).unwrap_or(false)
+        self.app_audio
+            .lock()
+            .map(|g| !g.feeds.is_empty())
+            .unwrap_or(false)
     }
 
     pub fn mic_capture_active(&self) -> bool {
-        self.mic.lock().map(|g| !g.feeds.is_empty()).unwrap_or(false)
+        self.mic
+            .lock()
+            .map(|g| !g.feeds.is_empty())
+            .unwrap_or(false)
     }
 
-    fn open_feed(slot: &Slot, device_channels: u16, channels: u16, on_audio: CaptureCallback) -> Result<Box<dyn AudioStream>, AudioError> {
-        let mut guard = slot.lock().map_err(|_| AudioError::Backend("poisoned".into()))?;
+    fn open_feed(
+        slot: &Slot,
+        device_channels: u16,
+        channels: u16,
+        on_audio: CaptureCallback,
+    ) -> Result<Box<dyn AudioStream>, AudioError> {
+        let mut guard = slot
+            .lock()
+            .map_err(|_| AudioError::Backend("poisoned".into()))?;
         let id = NEXT_FEED.fetch_add(1, Ordering::Relaxed);
         guard.feeds.push(Feed {
             id,
@@ -287,9 +319,13 @@ impl AudioBackend for MobileAudioBackend {
         on_error: ErrorCallback,
     ) -> Result<Box<dyn AudioStream>, AudioError> {
         match source {
-            CaptureSource::Input(id) if id == APP_AUDIO_DEVICE => Self::open_feed(&self.app_audio, 2, channels, on_audio),
+            CaptureSource::Input(id) if id == APP_AUDIO_DEVICE => {
+                Self::open_feed(&self.app_audio, 2, channels, on_audio)
+            }
             // Android microphone goes through Kotlin AudioRecord for input presets and effects.
-            CaptureSource::DefaultInput | CaptureSource::Input(_) if cfg!(target_os = "android") => {
+            CaptureSource::DefaultInput | CaptureSource::Input(_)
+                if cfg!(target_os = "android") =>
+            {
                 Self::open_feed(&self.mic, 1, channels, on_audio)
             }
             other => self.inner.open_capture(other, channels, on_audio, on_error),
@@ -305,7 +341,10 @@ impl AudioBackend for MobileAudioBackend {
     ) -> Result<Box<dyn AudioStream>, AudioError> {
         let callback = Arc::new(Mutex::new(on_audio));
         let on_error = Arc::new(Mutex::new(on_error));
-        let mut guard = self.renders.lock().map_err(|_| AudioError::Backend("poisoned".into()))?;
+        let mut guard = self
+            .renders
+            .lock()
+            .map_err(|_| AudioError::Backend("poisoned".into()))?;
         let fast = if guard.platform {
             None
         } else {
@@ -320,7 +359,10 @@ impl AudioBackend for MobileAudioBackend {
             }
         };
         let id = NEXT_FEED.fetch_add(1, Ordering::Relaxed);
-        let info = fast.as_ref().map(|s| s.info()).unwrap_or_else(|| platform_info(channels));
+        let info = fast
+            .as_ref()
+            .map(|s| s.info())
+            .unwrap_or_else(|| platform_info(channels));
         guard.entries.push(RenderEntry {
             id,
             target: target.clone(),
@@ -381,7 +423,12 @@ mod tests {
         let backend = MobileAudioBackend::new();
         let received = Arc::new(AtomicUsize::new(0));
         let stream = backend
-            .open_capture(&CaptureSource::Input(APP_AUDIO_DEVICE.into()), 1, counting(&received), Box::new(|_| {}))
+            .open_capture(
+                &CaptureSource::Input(APP_AUDIO_DEVICE.into()),
+                1,
+                counting(&received),
+                Box::new(|_| {}),
+            )
             .unwrap();
         assert!(backend.app_audio_active());
         // 10 ms stereo s16le = 1920 bytes → 480 mono samples.
@@ -398,8 +445,12 @@ mod tests {
         let backend = MobileAudioBackend::new();
         let (a, b) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
         let source = CaptureSource::Input(APP_AUDIO_DEVICE.into());
-        let first = backend.open_capture(&source, 1, counting(&a), Box::new(|_| {})).unwrap();
-        let second = backend.open_capture(&source, 2, counting(&b), Box::new(|_| {})).unwrap();
+        let first = backend
+            .open_capture(&source, 1, counting(&a), Box::new(|_| {}))
+            .unwrap();
+        let second = backend
+            .open_capture(&source, 2, counting(&b), Box::new(|_| {}))
+            .unwrap();
         backend.push_app_audio_pcm16(&vec![0u8; 1920]);
         assert_eq!(a.load(Ordering::Relaxed), 480);
         assert_eq!(b.load(Ordering::Relaxed), 960);
@@ -428,10 +479,20 @@ mod tests {
         backend.set_platform_output(true);
         assert!(!backend.platform_output_active());
         let mono = backend
-            .open_render(&RenderTarget::DefaultOutput, 1, constant(0.25), Box::new(|_| {}))
+            .open_render(
+                &RenderTarget::DefaultOutput,
+                1,
+                constant(0.25),
+                Box::new(|_| {}),
+            )
             .unwrap();
         let stereo = backend
-            .open_render(&RenderTarget::DefaultOutput, 2, constant(0.25), Box::new(|_| {}))
+            .open_render(
+                &RenderTarget::DefaultOutput,
+                2,
+                constant(0.25),
+                Box::new(|_| {}),
+            )
             .unwrap();
         assert!(backend.platform_output_active());
         assert_eq!(mono.info().latency_ms, PLATFORM_LATENCY_MS);
@@ -455,10 +516,27 @@ mod tests {
     fn platform_mix_clips_and_bounds_pull_size() {
         let backend = MobileAudioBackend::new();
         backend.set_platform_output(true);
-        let _a = backend.open_render(&RenderTarget::DefaultOutput, 2, constant(0.8), Box::new(|_| {})).unwrap();
-        let _b = backend.open_render(&RenderTarget::DefaultOutput, 2, constant(0.8), Box::new(|_| {})).unwrap();
+        let _a = backend
+            .open_render(
+                &RenderTarget::DefaultOutput,
+                2,
+                constant(0.8),
+                Box::new(|_| {}),
+            )
+            .unwrap();
+        let _b = backend
+            .open_render(
+                &RenderTarget::DefaultOutput,
+                2,
+                constant(0.8),
+                Box::new(|_| {}),
+            )
+            .unwrap();
         let pcm = backend.pull_playback_pcm16(4);
         assert_eq!(sample(&pcm, 0), i16::MAX);
-        assert_eq!(backend.pull_playback_pcm16(usize::MAX).len(), MAX_PULL_FRAMES * 4);
+        assert_eq!(
+            backend.pull_playback_pcm16(usize::MAX).len(),
+            MAX_PULL_FRAMES * 4
+        );
     }
 }

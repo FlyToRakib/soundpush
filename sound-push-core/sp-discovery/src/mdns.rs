@@ -29,7 +29,10 @@ pub struct MdnsRecord<'a> {
 impl MdnsAdvertiser {
     pub fn new() -> Result<Self, DiscoveryError> {
         let daemon = ServiceDaemon::new().map_err(|e| DiscoveryError::Mdns(e.to_string()))?;
-        Ok(Self { daemon, fullname: None })
+        Ok(Self {
+            daemon,
+            fullname: None,
+        })
     }
 
     pub fn daemon(&self) -> &ServiceDaemon {
@@ -117,11 +120,24 @@ fn advert_from_info(info: &ServiceInfo) -> Option<PeerAdvert> {
     Some(PeerAdvert {
         device_id,
         public_key: None,
-        name: info.get_property_val_str("n").unwrap_or_default().to_string(),
-        platform: info.get_property_val_str("pl").unwrap_or_default().to_string(),
+        name: info
+            .get_property_val_str("n")
+            .unwrap_or_default()
+            .to_string(),
+        platform: info
+            .get_property_val_str("pl")
+            .unwrap_or_default()
+            .to_string(),
         addresses,
-        capabilities: Capabilities(info.get_property_val_str("c").and_then(|v| v.parse().ok()).unwrap_or(0)),
-        protocol_max: info.get_property_val_str("v").and_then(|v| v.parse().ok()).unwrap_or(0),
+        capabilities: Capabilities(
+            info.get_property_val_str("c")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+        ),
+        protocol_max: info
+            .get_property_val_str("v")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         source: Source::Mdns,
     })
 }

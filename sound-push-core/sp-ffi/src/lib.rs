@@ -17,7 +17,10 @@ use std::sync::Arc;
 use sp_audio_io::{AudioBackend, CaptureSource};
 use sp_engine::settings::Settings;
 use sp_engine::state::RouteKind;
-use sp_engine::{DeviceProfile, EngineConfig, EngineError, EngineHandle, KeepAlive, PermissionKind, PlatformHooks, Policy};
+use sp_engine::{
+    DeviceProfile, EngineConfig, EngineError, EngineHandle, KeepAlive, PermissionKind,
+    PlatformHooks, Policy,
+};
 
 use crate::app_audio::{APP_AUDIO_DEVICE, MobileAudioBackend};
 
@@ -27,7 +30,11 @@ uniffi::setup_scaffolding!();
 pub enum FfiError {
     // Not named `message`: Kotlin exceptions already define that property.
     #[error("{detail}")]
-    Engine { key: String, detail: String, fix: Option<String> },
+    Engine {
+        key: String,
+        detail: String,
+        fix: Option<String>,
+    },
 }
 
 impl From<EngineError> for FfiError {
@@ -36,7 +43,10 @@ impl From<EngineError> for FfiError {
         Self::Engine {
             key: view.key.to_string(),
             detail: view.message,
-            fix: view.fix.and_then(|f| serde_json::to_value(f).ok()).and_then(|v| v.as_str().map(str::to_string)),
+            fix: view
+                .fix
+                .and_then(|f| serde_json::to_value(f).ok())
+                .and_then(|v| v.as_str().map(str::to_string)),
         }
     }
 }
@@ -88,7 +98,11 @@ impl PlatformHooks for Hooks {
     }
 
     fn platform(&self) -> &'static str {
-        if cfg!(target_os = "ios") { "ios" } else { "android" }
+        if cfg!(target_os = "ios") {
+            "ios"
+        } else {
+            "android"
+        }
     }
 
     fn default_device_name(&self) -> String {
@@ -119,7 +133,8 @@ impl PlatformHooks for Hooks {
     }
 
     fn attention_needed(&self, title_key: &str, peer_name: &str) {
-        self.platform.attention_needed(title_key.to_string(), peer_name.to_string());
+        self.platform
+            .attention_needed(title_key.to_string(), peer_name.to_string());
     }
 }
 
@@ -130,13 +145,17 @@ pub struct SoundPushEngine {
 }
 
 fn parse_kind(kind: &str) -> Result<RouteKind, FfiError> {
-    serde_json::from_value(serde_json::Value::String(kind.to_string())).map_err(|_| invalid("route kind"))
+    serde_json::from_value(serde_json::Value::String(kind.to_string()))
+        .map_err(|_| invalid("route kind"))
 }
 
 #[uniffi::export]
 impl SoundPushEngine {
     #[uniffi::constructor]
-    pub fn new(platform: Arc<dyn MobilePlatform>, app_version: String) -> Result<Arc<Self>, FfiError> {
+    pub fn new(
+        platform: Arc<dyn MobilePlatform>,
+        app_version: String,
+    ) -> Result<Arc<Self>, FfiError> {
         init_logging();
         // Rust panics leave a local, redacted report (never uploaded); the engine mentions it once.
         sp_engine::crash::install(&PathBuf::from(platform.data_dir()), &app_version);
@@ -167,7 +186,9 @@ impl SoundPushEngine {
         std::thread::Builder::new()
             .name("sp-state".into())
             .spawn(move || {
-                listener.on_state(serde_json::to_string(&*rx.borrow_and_update().clone()).unwrap_or_default());
+                listener.on_state(
+                    serde_json::to_string(&*rx.borrow_and_update().clone()).unwrap_or_default(),
+                );
                 while pollster::block_on(rx.changed()).is_ok() {
                     let state = rx.borrow_and_update().clone();
                     listener.on_state(serde_json::to_string(&*state).unwrap_or_default());
@@ -228,7 +249,12 @@ impl SoundPushEngine {
         Ok(self.handle.set_auto_connect(device_id, enabled)?)
     }
 
-    pub fn set_permission(&self, device_id: String, kind: String, policy: String) -> Result<(), FfiError> {
+    pub fn set_permission(
+        &self,
+        device_id: String,
+        kind: String,
+        policy: String,
+    ) -> Result<(), FfiError> {
         let kind = match kind.as_str() {
             "receiveMyAudio" => PermissionKind::ReceiveMyAudio,
             "useMyMicrophone" => PermissionKind::UseMyMicrophone,
@@ -246,9 +272,15 @@ impl SoundPushEngine {
     }
 
     /// `profile_json`: a `DeviceProfile` (absent fields follow the global setting); `None` clears it.
-    pub fn set_device_profile(&self, device_id: String, profile_json: Option<String>) -> Result<(), FfiError> {
+    pub fn set_device_profile(
+        &self,
+        device_id: String,
+        profile_json: Option<String>,
+    ) -> Result<(), FfiError> {
         let profile = match profile_json {
-            Some(json) => Some(serde_json::from_str::<DeviceProfile>(&json).map_err(|_| invalid("profile"))?),
+            Some(json) => {
+                Some(serde_json::from_str::<DeviceProfile>(&json).map_err(|_| invalid("profile"))?)
+            }
             None => None,
         };
         Ok(self.handle.set_device_profile(device_id, profile)?)
@@ -269,7 +301,9 @@ impl SoundPushEngine {
 
     pub fn start_route(&self, device_id: String, kind: String) -> Result<String, FfiError> {
         let kind = parse_kind(&kind)?;
-        Ok(pollster::block_on(self.handle.start_route(device_id, kind))?)
+        Ok(pollster::block_on(
+            self.handle.start_route(device_id, kind),
+        )?)
     }
 
     pub fn stop_route(&self, route_id: String) -> Result<(), FfiError> {
@@ -292,8 +326,15 @@ impl SoundPushEngine {
         Ok(self.handle.set_peer_speakers_muted(device_id, muted)?)
     }
 
-    pub fn respond_route_request(&self, request_id: u64, accept: bool, remember: bool) -> Result<(), FfiError> {
-        Ok(self.handle.respond_route_request(request_id, accept, remember)?)
+    pub fn respond_route_request(
+        &self,
+        request_id: u64,
+        accept: bool,
+        remember: bool,
+    ) -> Result<(), FfiError> {
+        Ok(self
+            .handle
+            .respond_route_request(request_id, accept, remember)?)
     }
 
     // ------------------------------------------------------------ local audio
@@ -348,7 +389,8 @@ impl SoundPushEngine {
     // ------------------------------------------------------------ settings & lifecycle
 
     pub fn update_settings(&self, settings_json: String) -> Result<String, FfiError> {
-        let settings: Settings = serde_json::from_str(&settings_json).map_err(|_| invalid("settings"))?;
+        let settings: Settings =
+            serde_json::from_str(&settings_json).map_err(|_| invalid("settings"))?;
         let saved = pollster::block_on(self.handle.update_settings(settings))?;
         Ok(serde_json::to_string(&saved).unwrap_or_default())
     }
@@ -368,7 +410,11 @@ impl SoundPushEngine {
 
 #[cfg(target_os = "android")]
 fn init_logging() {
-    android_logger::init_once(android_logger::Config::default().with_tag("SoundPush").with_max_level(log::LevelFilter::Info));
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_tag("SoundPush")
+            .with_max_level(log::LevelFilter::Info),
+    );
 }
 
 #[cfg(not(target_os = "android"))]

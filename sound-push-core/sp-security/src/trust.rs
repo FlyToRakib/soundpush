@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::SecurityError;
 use crate::identity::{DeviceId, DeviceIdentity, Fingerprint};
 use crate::permissions::Permissions;
 use crate::secretbox::{open, seal, write_atomic};
-use crate::SecurityError;
 
 const TRUST_AD: &[u8] = b"soundpush-trust-v1";
 const IDENTITY_AD: &[u8] = b"soundpush-identity-v1";
@@ -95,7 +95,8 @@ impl TrustStore {
     /// Returns the trusted, non-blocked device whose key matches `public_key`.
     pub fn authorize(&self, public_key: &[u8; 32]) -> Option<&TrustedDevice> {
         let id = Fingerprint::of_public_key(public_key).device_id();
-        self.get(&id).filter(|d| !d.blocked && &d.public_key == public_key)
+        self.get(&id)
+            .filter(|d| !d.blocked && &d.public_key == public_key)
     }
 
     pub fn list(&self) -> impl Iterator<Item = &TrustedDevice> {
@@ -107,7 +108,11 @@ impl TrustStore {
         self.save()
     }
 
-    pub fn update<F: FnOnce(&mut TrustedDevice)>(&mut self, id: &DeviceId, f: F) -> Result<bool, SecurityError> {
+    pub fn update<F: FnOnce(&mut TrustedDevice)>(
+        &mut self,
+        id: &DeviceId,
+        f: F,
+    ) -> Result<bool, SecurityError> {
         let Some(device) = self.devices.get_mut(&id.to_hex()) else {
             return Ok(false);
         };
@@ -165,11 +170,18 @@ impl TrustStore {
 /// A file that cannot be decrypted (the storage key changed, the file was damaged) is moved
 /// aside and a new identity is made, so the app still starts; the second value is then
 /// `true`, and the user must pair their devices again.
-pub fn load_or_create_identity(path: &Path, key: &[u8; 32]) -> Result<(DeviceIdentity, bool), SecurityError> {
+pub fn load_or_create_identity(
+    path: &Path,
+    key: &[u8; 32],
+) -> Result<(DeviceIdentity, bool), SecurityError> {
     match fs::read(path) {
         Ok(bytes) => {
-            let secret = open(key, IDENTITY_AD, &bytes)
-                .and_then(|plain| plain.as_slice().try_into().map_err(|_| SecurityError::Corrupted));
+            let secret = open(key, IDENTITY_AD, &bytes).and_then(|plain| {
+                plain
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| SecurityError::Corrupted)
+            });
             match secret {
                 Ok(secret) => Ok((DeviceIdentity::from_secret_bytes(&secret), false)),
                 Err(_) => {
@@ -178,14 +190,19 @@ pub fn load_or_create_identity(path: &Path, key: &[u8; 32]) -> Result<(DeviceIde
                 }
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((create_identity(path, key)?, false)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok((create_identity(path, key)?, false))
+        }
         Err(e) => Err(e.into()),
     }
 }
 
 fn create_identity(path: &Path, key: &[u8; 32]) -> Result<DeviceIdentity, SecurityError> {
     let identity = DeviceIdentity::generate();
-    write_atomic(path, &seal(key, IDENTITY_AD, identity.secret_bytes().as_ref()))?;
+    write_atomic(
+        path,
+        &seal(key, IDENTITY_AD, identity.secret_bytes().as_ref()),
+    )?;
     Ok(identity)
 }
 
@@ -222,9 +239,15 @@ mod tests {
 
         let (mut store, _) = TrustStore::load(&path, key).unwrap();
         assert!(store.authorize(&peer.public_key()).is_some());
-        assert!(store.authorize(&DeviceIdentity::generate().public_key()).is_none());
+        assert!(
+            store
+                .authorize(&DeviceIdentity::generate().public_key())
+                .is_none()
+        );
 
-        store.update(&peer.device_id(), |d| d.blocked = true).unwrap();
+        store
+            .update(&peer.device_id(), |d| d.blocked = true)
+            .unwrap();
         assert!(store.authorize(&peer.public_key()).is_none());
 
         assert!(store.remove(&peer.device_id()).unwrap());
@@ -246,10 +269,17 @@ mod tests {
             d.blocked = true;
             d.public_key = [0; 32];
         }));
-        assert_eq!(store.get(&peer.device_id()).unwrap().public_key, peer.public_key());
+        assert_eq!(
+            store.get(&peer.device_id()).unwrap().public_key,
+            peer.public_key()
+        );
         assert!(!store.get(&peer.device_id()).unwrap().blocked);
         let (reloaded, _) = TrustStore::load(&path, key).unwrap();
-        assert_eq!(reloaded.get(&peer.device_id()).unwrap().last_seen_unix, 1, "not written yet");
+        assert_eq!(
+            reloaded.get(&peer.device_id()).unwrap().last_seen_unix,
+            1,
+            "not written yet"
+        );
 
         store.flush().unwrap();
         let (reloaded, _) = TrustStore::load(&path, key).unwrap();

@@ -45,7 +45,11 @@ impl Credentials {
 
     /// TLS 1.3 client presenting our certificate; with `pinned`, the handshake fails unless the
     /// server's key has that device ID.
-    pub fn client_config(&self, pinned: Option<DeviceId>, alpn: &[u8]) -> Result<rustls::ClientConfig, TransportError> {
+    pub fn client_config(
+        &self,
+        pinned: Option<DeviceId>,
+        alpn: &[u8],
+    ) -> Result<rustls::ClientConfig, TransportError> {
         let mut config = rustls::ClientConfig::builder_with_provider(self.provider.clone())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(|e| TransportError::Tls(e.to_string()))?
