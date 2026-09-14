@@ -1,0 +1,36 @@
+# Template: tools/release/fill-manifests.mjs fills in the placeholders. See packaging/README.md.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+PackageIdentifier: SoundPush.SoundPush
+PackageVersion: "@VERSION@"
+PackageLocale: en-US
+Publisher: SoundPush contributors
+PublisherUrl: "@REPO_URL@"
+PublisherSupportUrl: "@REPO_URL@/issues"
+PrivacyUrl: "@DOCS_URL@/privacy/"
+Author: SoundPush contributors
+PackageName: SoundPush
+PackageUrl: "@DOCS_URL@/"
+License: GPL-3.0-or-later
+LicenseUrl: "@REPO_URL@/blob/HEAD/LICENSE"
+Copyright: SoundPush contributors
+ShortDescription: Use your phone as a speaker, microphone or headset for your computer
+Description: |-
+  SoundPush streams audio between your computer and your Android phone over Wi-Fi or USB.
+  Listen to your computer on your phone, use the phone as a microphone in any app (through VB-CABLE on Windows),
+  use it as a headset, or play phone audio on the computer. Pairing is by QR code, and audio is encrypted end to end.
+  Free and open source, with no accounts, ads or tracking.
+Moniker: soundpush
+Tags:
+  - audio
+  - microphone
+  - speaker
+  - headset
+  - android
+  - streaming
+  - open-source
+ReleaseNotesUrl: "@REPO_URL@/releases/tag/v@VERSION@"
+Documentations:
+  - DocumentLabel: User guide
+    DocumentUrl: "@DOCS_URL@/user-guide/"
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0
