@@ -13,16 +13,20 @@
 //! against its trust store using [`SecureConnection::peer_public_key`]. When the
 //! caller knows who it is dialing, the expected fingerprint is pinned during the
 //! handshake itself.
-#![forbid(unsafe_code)]
+//!
+//! No `unsafe` except the Windows qWAVE calls that DSCP-mark media flows (`qos.rs`).
+#![deny(unsafe_code)]
 
 mod connection;
 mod endpoint;
+mod qos;
 mod tcp;
 mod tls;
 mod verifier;
 
 pub use connection::{ControlReceiver, ControlSender, PathStats, SecureConnection, TransportKind};
 pub use endpoint::{DEFAULT_PORT, Endpoint, EndpointConfig, Handshake};
+pub use qos::DSCP_EF;
 pub use tcp::{ALPN_TCP, STALE_AFTER, TcpEndpoint, TcpHandshake};
 
 /// ALPN protocol identifier.

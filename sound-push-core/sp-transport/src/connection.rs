@@ -14,6 +14,7 @@ use sp_security::{Fingerprint, public_key_from_cert};
 use tokio::sync::mpsc;
 
 use crate::TransportError;
+use crate::qos::Flow;
 use crate::tcp::{Outbound, TcpShared};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -42,10 +43,15 @@ enum Inner {
 pub struct SecureConnection {
     inner: Inner,
     peer_key: [u8; 32],
+    /// DSCP marking of this peer's traffic while any clone is alive (Windows qWAVE flow).
+    _qos: Option<Arc<Flow>>,
 }
 
 impl SecureConnection {
-    pub(crate) fn from_quic(conn: quinn::Connection) -> Result<Self, TransportError> {
+    pub(crate) fn from_quic(
+        conn: quinn::Connection,
+        qos: Option<Arc<Flow>>,
+    ) -> Result<Self, TransportError> {
         let certs = conn
             .peer_identity()
             .and_then(|id| id.downcast::<Vec<CertificateDer<'static>>>().ok())
@@ -56,6 +62,7 @@ impl SecureConnection {
         Ok(Self {
             inner: Inner::Quic(conn),
             peer_key,
+            _qos: qos,
         })
     }
 
@@ -63,6 +70,7 @@ impl SecureConnection {
         Self {
             inner: Inner::Tcp(shared),
             peer_key,
+            _qos: None,
         }
     }
 

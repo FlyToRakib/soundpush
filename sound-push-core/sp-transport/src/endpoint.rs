@@ -8,6 +8,7 @@ use sp_security::{DeviceId, DeviceIdentity};
 use tracing::{debug, warn};
 
 use crate::connection::SecureConnection;
+use crate::qos::{Flow, Marker};
 use crate::tls::{Credentials, SERVER_NAME};
 use crate::{ALPN, TransportError};
 
@@ -19,6 +20,9 @@ pub struct EndpointConfig {
     pub preferred_port: u16,
     pub keep_alive: Duration,
     pub idle_timeout: Duration,
+    /// DSCP-mark media traffic as Expedited Forwarding where the platform allows (plan §16.3,
+    /// `qos.rs`). Best effort: never fails the endpoint or a connection.
+    pub dscp: bool,
 }
 
 impl Default for EndpointConfig {
@@ -27,6 +31,7 @@ impl Default for EndpointConfig {
             preferred_port: DEFAULT_PORT,
             keep_alive: Duration::from_secs(1),
             idle_timeout: Duration::from_secs(10),
+            dscp: true,
         }
     }
 }
@@ -37,6 +42,7 @@ pub struct Endpoint {
     transport: Arc<quinn::TransportConfig>,
     /// True when bound to a dual-stack IPv6 socket (IPv4 targets are then IPv4-mapped).
     ipv6: bool,
+    marker: Option<Arc<Marker>>,
 }
 
 impl Endpoint {
@@ -69,6 +75,7 @@ impl Endpoint {
 
         let socket = bind_socket(config.preferred_port)?;
         let ipv6 = socket.local_addr().is_ok_and(|a| a.is_ipv6());
+        let marker = config.dscp.then(|| Marker::for_socket(&socket));
         let runtime = quinn::default_runtime()
             .ok_or_else(|| TransportError::Tls("no async runtime".into()))?;
         let inner = quinn::Endpoint::new(
@@ -84,6 +91,7 @@ impl Endpoint {
             credentials,
             transport,
             ipv6,
+            marker,
         })
     }
 
@@ -108,17 +116,18 @@ impl Endpoint {
         debug!(%addr, "dialing peer");
         let connecting = self.inner.connect_with(client_config, addr, SERVER_NAME)?;
         let conn = connecting.await?;
-        SecureConnection::from_quic(conn)
+        let flow = mark_peer(self.marker.as_ref(), conn.remote_address());
+        SecureConnection::from_quic(conn, flow)
     }
 
     /// Wait for the next connection attempt. Returns `None` when the endpoint is closed.
     /// The handshake is completed by [`Handshake::finish`], so a caller can run several at
     /// once and one stalled peer does not hold up the others.
     pub async fn accept(&self) -> Option<Handshake> {
-        self.inner
-            .accept()
-            .await
-            .map(|incoming| Handshake { incoming })
+        self.inner.accept().await.map(|incoming| Handshake {
+            incoming,
+            marker: self.marker.clone(),
+        })
     }
 
     pub fn close(&self) {
@@ -136,6 +145,11 @@ impl Endpoint {
 /// An accepted connection attempt whose QUIC handshake has not run yet.
 pub struct Handshake {
     incoming: quinn::Incoming,
+    marker: Option<Arc<Marker>>,
+}
+
+fn mark_peer(marker: Option<&Arc<Marker>>, peer: SocketAddr) -> Option<Arc<Flow>> {
+    marker.and_then(|m| m.mark_peer(peer))
 }
 
 impl Handshake {
@@ -147,7 +161,10 @@ impl Handshake {
     pub async fn finish(self) -> Result<SecureConnection, TransportError> {
         let remote = self.incoming.remote_address();
         match self.incoming.await {
-            Ok(conn) => SecureConnection::from_quic(conn),
+            Ok(conn) => {
+                let flow = mark_peer(self.marker.as_ref(), conn.remote_address());
+                SecureConnection::from_quic(conn, flow)
+            }
             Err(e) => {
                 warn!(%remote, error = %e, "incoming handshake failed");
                 Err(e.into())

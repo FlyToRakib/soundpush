@@ -11,6 +11,10 @@ Supported range: **1.0 – 1.1**. Everything added in 1.1 is gated by a capabili
 - Preferred port **47650/udp**; falls back to an ephemeral port. The real port is advertised by discovery and pairing codes.
 - Both sides present a self-signed certificate whose key is the device's Ed25519 identity key. Trust is decided by the engine after the handshake (see `docs/security/pairing.md`).
 - Keep-alive 1 s, idle timeout 10 s.
+- QoS (plan §16.3): media is marked DSCP EF (46) where the platform allows, best effort. Windows: a qWAVE flow per
+  peer (traffic type Voice, then EF when the process may set it). Linux, Android, macOS: `IP_TOS`/`IPV6_TCLASS` on
+  the sockets; TLS-over-TCP carries it, but QUIC packets do not yet, because quinn-udp 0.5 sets a per-packet TOS
+  holding only ECN bits (`sp-transport/src/qos.rs`).
 - Connection migration is enabled: a peer whose address changes within the idle timeout keeps its connection.
 
 ### TLS over TCP (1.1, `TRANSPORT_TCP`)
@@ -57,7 +61,7 @@ Routes:
 | `RouteUpdate{route, profile}` | either | Live profile change. |
 | `VolumeSet` / `MuteSet` | either | Remote control (`target = RouteStream` or `DeviceSpeakers`); requires the ControlMe permission. |
 | `StatsReport` | receiver → sender, 1 Hz | Loss, jitter, buffer, drift; drives adaptive bitrate. |
-| `Goodbye{reason}` | either | Orderly close. |
+| `Goodbye{reason}` | either | Orderly close. Reason 13 `RateLimited`: too many pairing attempts from this address (5/min, `docs/security/pairing.md`); peers that do not know it treat it as an ordinary close. |
 
 Endpoint ids: sources `system`, `apps`, `mic`; sinks `speaker`, `virtual-mic`.
 
