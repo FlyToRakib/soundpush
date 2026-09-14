@@ -11,6 +11,8 @@ mod convert;
 #[cfg(feature = "cpal-backend")]
 pub mod cpal_backend;
 #[cfg(all(target_os = "macos", feature = "cpal-backend"))]
+pub mod macos_sck;
+#[cfg(all(target_os = "macos", feature = "cpal-backend"))]
 pub mod macos_tap;
 pub mod null;
 #[cfg(all(target_os = "linux", feature = "pulse"))]
@@ -46,8 +48,9 @@ pub enum CaptureSource {
     Input(String),
     /// Everything played on an output device (default output when `None`).
     SystemLoopback(Option<String>),
-    /// What one app plays (by executable name, e.g. "spotify.exe"), or everything except that
-    /// app when `exclude` is set. Windows 10 version 2004+ (WASAPI process loopback).
+    /// What one app plays (by executable name, e.g. "spotify.exe" on Windows, "spotify" on
+    /// Linux), or everything except that app when `exclude` is set. Windows 10 version 2004+
+    /// (WASAPI process loopback) and Linux with a sound server (streams moved to a private sink).
     Application { process: String, exclude: bool },
 }
 

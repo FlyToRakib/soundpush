@@ -23,7 +23,8 @@ pub struct SystemStatus {
     pub bluetooth_outputs: Vec<String>,
     /// Name of the default playback device.
     pub default_output: Option<String>,
-    /// Per-app capture of "this computer's audio" works here (Windows 10 2004+).
+    /// Per-app capture of "this computer's audio" works here (Windows 10 2004+, or Linux with a
+    /// PipeWire or PulseAudio sound server).
     pub app_capture: bool,
 }
 
@@ -59,6 +60,7 @@ pub fn status() -> SystemStatus {
         system_audio: crate::macos::system_audio_permission(),
         bluetooth_outputs: crate::macos::bluetooth_outputs(),
         default_output: default_output(),
+        autostart_disabled_by_os: crate::macos::login_item_needs_approval(),
         ..SystemStatus::default()
     };
     #[allow(unreachable_code)]
@@ -66,6 +68,8 @@ pub fn status() -> SystemStatus {
         microphone: "unknown",
         system_audio: "unknown",
         default_output: default_output(),
+        #[cfg(target_os = "linux")]
+        app_capture: sp_audio_io::pulse::available(),
         ..SystemStatus::default()
     }
 }
@@ -111,6 +115,7 @@ pub fn settings_url(topic: &str) -> Option<&'static str> {
         }
         "sound" => Some("x-apple.systempreferences:com.apple.Sound-Settings.extension"),
         "network" => Some("x-apple.systempreferences:com.apple.Network-Settings.extension"),
+        "startup" => Some("x-apple.systempreferences:com.apple.LoginItems-Settings.extension"),
         _ => None,
     };
     #[allow(unreachable_code)]
