@@ -2,7 +2,10 @@
 
 use std::process::Child;
 #[cfg(unix)]
-use std::process::{Command, Stdio};
+use std::process::Command;
+// Only the Linux sleep inhibitor pipes its child's stdin.
+#[cfg(all(unix, not(target_os = "macos")))]
+use std::process::Stdio;
 
 /// Keeps the system awake while alive.
 pub enum SleepInhibitor {
