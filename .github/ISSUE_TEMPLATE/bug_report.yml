@@ -1,0 +1,81 @@
+name: Bug report
+description: Something doesn't work as expected.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem.
+        **Security issues:** please don't file them here. Use *Security → Report a vulnerability* instead (see SECURITY.md).
+        The in-app troubleshooter (Settings → Help & diagnostics) and the [user guide](https://github.com/FlyToRakib/soundpush/blob/HEAD/docs/user-guide.md#troubleshooting) solve many problems.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: I started "Use phone as microphone" from the computer. Discord shows no input level.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Pair the phone with the QR code
+        2. Home → Use phone as microphone
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: task
+    attributes:
+      label: Which task?
+      multiple: true
+      options:
+        - Listen to computer on phone
+        - Phone as computer microphone
+        - Headset mode
+        - Phone audio on computer
+        - Pairing / finding devices
+        - USB
+        - Installing or updating
+        - Something else
+  - type: input
+    id: desktop
+    attributes:
+      label: Computer
+      description: SoundPush version (Settings → About) and operating system.
+      placeholder: SoundPush 0.1.0 on Windows 11 24H2
+  - type: input
+    id: phone
+    attributes:
+      label: Phone
+      description: SoundPush version and phone model / Android version.
+      placeholder: SoundPush 0.1.0 on Redmi Note 9 Pro, Android 12
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options:
+        - Same Wi-Fi
+        - Phone hotspot
+        - USB tethering
+        - USB (ADB)
+        - Other / not sure
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Settings → Help & diagnostics → Export diagnostics creates a report on your computer. It contains no audio,
+        and addresses are removed, but please read it before attaching it. Nothing is uploaded automatically.
+      placeholder: Drag the diagnostics file here, or paste the relevant log lines.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I reviewed any attached logs or diagnostics for personal information.
+          required: true
