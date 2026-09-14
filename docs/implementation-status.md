@@ -41,7 +41,8 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | ⏳ | replaces VB-CABLE once Microsoft-signed |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
 | Linux PipeWire virtual source created by the app | ⏳ | |
-| Push-to-talk / mute global hotkey | ⏳ | setting exists; tray mute works |
+| Push-to-talk / mute global hotkey | 🟡 | `src-tauri/src/hotkeys.rs` (global-shortcut plugin), recorder on the Audio page, conflict errors, tray check mark follows the engine's `micMuted`; mute also silences the phone mic feeding the virtual mic |
+| Auto-start phone mic when an app opens the virtual mic | 🟡 | `desktop.autoStartMic`; `PlatformHooks::virtual_mic_in_use` (Windows: active sessions on "CABLE Output"; macOS: `DeviceIsRunningSomewhere`); engine `actor/local_audio.rs` starts the last mic phone and stops it 15 s after the app lets go. Linux: call site in `hooks.rs` |
 
 ## Phase 3 — Parity completion
 
@@ -57,12 +58,18 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Custom bitrate steps incl. AudioRelay's | ✅ | |
 | USB tethering | 🟡 | works as IP network |
 | USB via ADB (TLS-over-TCP transport) | ⏳ | ADR-0005 |
-| Windows per-app capture, PipeWire app capture | ⏳ | ADR-0002 |
+| Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
+| PipeWire app capture | ⏳ | ADR-0002 |
 | Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
-| Media Feature Pack detection (Windows N) | ⏳ | |
-| Diagnostics export, troubleshooter tips, logs | ✅ (desktop) / 🟡 (Android tips only) | |
+| Media Feature Pack detection (Windows N) | 🟡 | `src-tauri/src/system.rs` (missing `mfplat.dll`), Home banner → Optional features |
+| Windows Firewall / Public network fix | 🟡 | `src-tauri/src/network.rs`: firewall policy + network category read as a normal user; "Allow SoundPush" runs `netsh` through UAC (UDP, this exe, private/domain; public only if chosen); the uninstaller removes the rule with one UAC prompt (`windows/hooks.nsh`) |
+| Audio device changes (follow default, device lost) | 🟡 | `src-tauri/src/device_watch.rs` (`IMMNotificationClient`, Core Audio listeners) → `EngineHandle::audio_devices_changed`; routes on the default device reopen, pinned devices report lost |
+| Audio cues | 🟡 | `src-tauri/src/cues.rs`, generated tones, `settings.audioCues` |
+| Diagnostics export, guided troubleshooter, logs | ✅ (desktop) / 🟡 (Android tips only) | desktop troubleshooter runs checks (firewall, network profile, driver, devices, permissions, Bluetooth) with fix buttons |
+| macOS permissions (microphone, System Audio Recording) | 🟡 | `src-tauri/src/macos.rs`: status without prompting, deep links to System Settings. Not yet compiled on macOS |
+| Windows ARM64 installer | 🟡 | `windows-build.yml` matrix, artifact `SoundPush-Windows-arm64` (cross-compiled, not yet run) |
 | i18n infrastructure (English) | ✅ | translations via community later |
 | Accessibility pass with screen readers | ⏳ | components are labelled; audit pending |
 
