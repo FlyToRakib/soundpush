@@ -4,6 +4,10 @@
 //! - a reliable, length-framed **control stream** (first bidirectional stream), and
 //! - unreliable **datagrams** for media.
 //!
+//! TLS 1.3 over TCP ([`TcpEndpoint`]) carries the same two channels as typed frames on one
+//! stream, for links that forward TCP only (USB via `adb reverse`). Both produce a
+//! [`SecureConnection`] with the same API.
+//!
 //! Both sides present self-signed certificates bound to their Ed25519 identity.
 //! TLS verifies handshake signatures; *authorization* is done by the engine
 //! against its trust store using [`SecureConnection::peer_public_key`]. When the
@@ -13,17 +17,20 @@
 
 mod connection;
 mod endpoint;
+mod tcp;
+mod tls;
 mod verifier;
 
-pub use connection::{ControlReceiver, ControlSender, PathStats, SecureConnection};
+pub use connection::{ControlReceiver, ControlSender, PathStats, SecureConnection, TransportKind};
 pub use endpoint::{DEFAULT_PORT, Endpoint, EndpointConfig, Handshake};
+pub use tcp::{ALPN_TCP, STALE_AFTER, TcpEndpoint, TcpHandshake};
 
 /// ALPN protocol identifier.
 pub const ALPN: &[u8] = b"soundpush/1";
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
-    #[error("failed to bind UDP socket: {0}")]
+    #[error("failed to bind socket: {0}")]
     Bind(std::io::Error),
     #[error("tls configuration error: {0}")]
     Tls(String),
@@ -31,6 +38,8 @@ pub enum TransportError {
     Connect(#[from] quinn::ConnectError),
     #[error("connection error: {0}")]
     Connection(#[from] quinn::ConnectionError),
+    #[error("i/o error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("peer certificate missing or invalid")]
     PeerIdentity,
     #[error("stream write error: {0}")]

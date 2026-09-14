@@ -4,17 +4,15 @@ use std::net::{Ipv6Addr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use sp_security::{DeviceId, DeviceIdentity};
 use tracing::{debug, warn};
 
 use crate::connection::SecureConnection;
-use crate::verifier::{PeerClientVerifier, PeerServerVerifier};
+use crate::tls::{Credentials, SERVER_NAME};
 use crate::{ALPN, TransportError};
 
 /// Preferred listening port (UDP). Falls back to an ephemeral port when busy.
 pub const DEFAULT_PORT: u16 = 47650;
-const SERVER_NAME: &str = "soundpush.local";
 
 #[derive(Debug, Clone)]
 pub struct EndpointConfig {
@@ -35,9 +33,7 @@ impl Default for EndpointConfig {
 
 pub struct Endpoint {
     inner: quinn::Endpoint,
-    provider: Arc<rustls::crypto::CryptoProvider>,
-    cert: CertificateDer<'static>,
-    key: Arc<Vec<u8>>,
+    credentials: Credentials,
     transport: Arc<quinn::TransportConfig>,
     /// True when bound to a dual-stack IPv6 socket (IPv4 targets are then IPv4-mapped).
     ipv6: bool,
@@ -46,10 +42,7 @@ pub struct Endpoint {
 impl Endpoint {
     /// Bind on all interfaces (dual-stack when available). Tries the preferred port first.
     pub fn bind(identity: &DeviceIdentity, config: &EndpointConfig) -> Result<Self, TransportError> {
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let cert = identity.certificate()?;
-        let cert_der = CertificateDer::from(cert.cert_der.clone());
-        let key = Arc::new(cert.key_pkcs8_der.to_vec());
+        let credentials = Credentials::new(identity)?;
 
         let mut transport = quinn::TransportConfig::default();
         transport.keep_alive_interval(Some(config.keep_alive));
@@ -60,18 +53,14 @@ impl Endpoint {
         transport.datagram_send_buffer_size(1 << 20);
         let transport = Arc::new(transport);
 
-        let server_crypto = rustls::ServerConfig::builder_with_provider(provider.clone())
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .map_err(|e| TransportError::Tls(e.to_string()))?
-            .with_client_cert_verifier(PeerClientVerifier::new(&provider))
-            .with_single_cert(vec![cert_der.clone()], private_key(&key))
-            .map_err(|e| TransportError::Tls(e.to_string()))?;
-        let mut server_crypto = server_crypto;
-        server_crypto.alpn_protocols = vec![ALPN.to_vec()];
-        let quic_server = quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
+        let quic_server = quinn::crypto::rustls::QuicServerConfig::try_from(credentials.server_config(ALPN)?)
             .map_err(|e| TransportError::Tls(e.to_string()))?;
         let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server));
         server_config.transport_config(transport.clone());
+        // Connection migration: a peer whose address changes (Wi-Fi roam, DHCP renewal, switching
+        // between networks within the idle timeout) keeps its session. The wildcard-bound socket
+        // sends from whatever address the OS now routes through; quinn validates the new path.
+        server_config.migration(true);
 
         let socket = bind_socket(config.preferred_port)?;
         let ipv6 = socket.local_addr().is_ok_and(|a| a.is_ipv6());
@@ -81,9 +70,7 @@ impl Endpoint {
 
         Ok(Self {
             inner,
-            provider,
-            cert: cert_der,
-            key,
+            credentials,
             transport,
             ipv6,
         })
@@ -99,17 +86,9 @@ impl Endpoint {
         addr: SocketAddr,
         pinned: Option<DeviceId>,
     ) -> Result<SecureConnection, TransportError> {
-        let client_crypto = rustls::ClientConfig::builder_with_provider(self.provider.clone())
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .map_err(|e| TransportError::Tls(e.to_string()))?
-            .dangerous()
-            .with_custom_certificate_verifier(PeerServerVerifier::new(&self.provider, pinned))
-            .with_client_auth_cert(vec![self.cert.clone()], private_key(&self.key))
-            .map_err(|e| TransportError::Tls(e.to_string()))?;
-        let mut client_crypto = client_crypto;
-        client_crypto.alpn_protocols = vec![ALPN.to_vec()];
-        let quic_client = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
-            .map_err(|e| TransportError::Tls(e.to_string()))?;
+        let quic_client =
+            quinn::crypto::rustls::QuicClientConfig::try_from(self.credentials.client_config(pinned, ALPN)?)
+                .map_err(|e| TransportError::Tls(e.to_string()))?;
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client));
         client_config.transport_config(self.transport.clone());
 
@@ -117,7 +96,7 @@ impl Endpoint {
         debug!(%addr, "dialing peer");
         let connecting = self.inner.connect_with(client_config, addr, SERVER_NAME)?;
         let conn = connecting.await?;
-        SecureConnection::new(conn)
+        SecureConnection::from_quic(conn)
     }
 
     /// Wait for the next connection attempt. Returns `None` when the endpoint is closed.
@@ -129,6 +108,13 @@ impl Endpoint {
 
     pub fn close(&self) {
         self.inner.close(0u32.into(), b"shutdown");
+    }
+
+    /// Move the endpoint to another socket, as happens when a device changes networks.
+    #[cfg(test)]
+    pub(crate) fn rebind_for_test(&self) -> std::io::Result<()> {
+        let socket = bind_socket(0).map_err(|e| std::io::Error::other(e.to_string()))?;
+        self.inner.rebind(socket)
     }
 }
 
@@ -146,17 +132,13 @@ impl Handshake {
     pub async fn finish(self) -> Result<SecureConnection, TransportError> {
         let remote = self.incoming.remote_address();
         match self.incoming.await {
-            Ok(conn) => SecureConnection::new(conn),
+            Ok(conn) => SecureConnection::from_quic(conn),
             Err(e) => {
                 warn!(%remote, error = %e, "incoming handshake failed");
                 Err(e.into())
             }
         }
     }
-}
-
-fn private_key(der: &[u8]) -> PrivateKeyDer<'static> {
-    PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(der.to_vec()))
 }
 
 /// Bind a dual-stack IPv6 socket so one socket serves IPv4 and IPv6 peers.

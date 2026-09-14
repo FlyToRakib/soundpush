@@ -11,6 +11,8 @@ sp-protocol = { path = "../sp-protocol" }
 sp-security = { path = "../sp-security" }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# TLS over TCP for USB via adb reverse; ring only, like quinn (no aws-lc cross-compilation).
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
 bytes = "1"
 socket2 = "0.5"

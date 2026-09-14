@@ -146,9 +146,10 @@ impl From<sp_transport::TransportError> for EngineError {
     fn from(e: sp_transport::TransportError) -> Self {
         match e {
             sp_transport::TransportError::Timeout => Self::Unreachable,
-            sp_transport::TransportError::Connect(_) | sp_transport::TransportError::Connection(_) => {
-                Self::Unreachable
-            }
+            sp_transport::TransportError::Connect(_)
+            | sp_transport::TransportError::Connection(_)
+            | sp_transport::TransportError::Io(_)
+            | sp_transport::TransportError::Closed => Self::Unreachable,
             other => Self::Internal(other.to_string()),
         }
     }
