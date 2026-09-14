@@ -303,6 +303,24 @@ impl SoundPushEngine {
         self.backend.mic_capture_active()
     }
 
+    /// Play through the platform (Android AudioTrack) instead of the low-latency path, so the
+    /// device's effects and equalizers apply. Running streams switch live.
+    pub fn set_platform_output(&self, enabled: bool) {
+        self.backend.set_platform_output(enabled);
+    }
+
+    /// True while any stream plays through the platform path (the app should run AudioTrack),
+    /// either because the user chose it or because the low-latency path failed to open.
+    pub fn platform_output_active(&self) -> bool {
+        self.backend.platform_output_active()
+    }
+
+    /// Mixed 48 kHz interleaved stereo s16le for the platform player: `frames` frames, silence
+    /// when nothing plays there. Call from the player thread, never the UI thread.
+    pub fn pull_playback_pcm16(&self, frames: u32) -> Vec<u8> {
+        self.backend.pull_playback_pcm16(frames as usize)
+    }
+
     // ------------------------------------------------------------ settings & lifecycle
 
     pub fn update_settings(&self, settings_json: String) -> Result<String, FfiError> {
