@@ -14,12 +14,20 @@ use tracing::warn;
 
 use crate::power::SleepInhibitor;
 
+/// SoundPush's own virtual microphone: the playback side the engine feeds → the recording side
+/// apps pick. Windows (drivers/windows-virtual-audio, test-signed only for now) names endpoints
+/// "<endpoint> (<device>)", kept in sync with its INF strings; Linux uses a null sink feeding a
+/// separate source.
+#[cfg(windows)]
+const OWN_FEED: (&str, Option<&str>) = ("SoundPush Microphone Feed", Some("SoundPush Microphone (SoundPush Virtual Audio)"));
+#[cfg(not(windows))]
+const OWN_FEED: (&str, Option<&str>) = ("SoundPush Microphone Feed", Some("SoundPush Microphone"));
+
 /// Virtual cables in preference order: (part of the playback device name, recording-side
 /// name that apps select as a microphone). `None` when both sides share the device name.
 const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
-    // SoundPush's own Windows driver (drivers/windows-virtual-audio, test-signed only for now).
-    // Windows names endpoints "<endpoint> (<device>)"; keep in sync with its INF strings.
-    ("SoundPush Microphone Feed", Some("SoundPush Microphone (SoundPush Virtual Audio)")),
+    // SoundPush's own virtual microphone (see OWN_FEED). Before the macOS entry, whose name it contains.
+    OWN_FEED,
     // macOS driver: one device name for both directions.
     ("SoundPush Microphone", None),
     ("CABLE Input", Some("CABLE Output (VB-Audio Virtual Cable)")),
@@ -201,8 +209,8 @@ impl PlatformHooks for DesktopHooks {
     fn virtual_mic_in_use(&self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            // Linux integration: return `crate::virtual_mic::linux::virtual_mic_in_use()` here.
-            false
+            // Recording streams on the SoundPush source (level meters in sound settings excluded).
+            crate::virtual_mic::virtual_mic_in_use()
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -320,6 +328,7 @@ mod tests {
     const WINDOWS_FEED: &str = "SoundPush Microphone Feed (SoundPush Virtual Audio)";
     const WINDOWS_MIC: &str = "SoundPush Microphone (SoundPush Virtual Audio)";
 
+    #[cfg(windows)]
     #[test]
     fn windows_soundpush_driver_feeds_its_capture_endpoint() {
         assert_eq!(cable_input_name(WINDOWS_FEED).as_deref(), Some(WINDOWS_MIC));
@@ -349,6 +358,14 @@ mod tests {
             Some("CABLE Output (VB-Audio Virtual Cable)")
         );
         assert_eq!(cable_input_name("BlackHole 2ch").as_deref(), Some("BlackHole 2ch"));
+        assert_eq!(cable_input_name("SoundPush Microphone").as_deref(), Some("SoundPush Microphone"));
+        // Linux names (on Windows the feed belongs to SoundPush's own driver instead).
+        #[cfg(not(windows))]
+        assert_eq!(
+            cable_input_name("SoundPush Microphone Feed").as_deref(),
+            Some("SoundPush Microphone")
+        );
+        assert_eq!(cable_input_name("Built-in Audio Analog Stereo"), None);
         assert_eq!(cable_input_name("MacBook Air Speakers"), None);
         assert_eq!(cable_input_name("BenQ EW3270U (NVIDIA High Definition Audio)"), None);
     }

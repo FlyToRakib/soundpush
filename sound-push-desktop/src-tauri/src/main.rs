@@ -122,6 +122,7 @@ fn main() {
             tray::create(app)?;
             device_watch::start(handle.clone());
             watch_network(hooks.clone());
+            virtual_mic::restore();
 
             // Show the window right away; the UI displays "Starting…" until the engine is ready.
             let autostarted = std::env::args().any(|a| a == "--autostart");

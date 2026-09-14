@@ -42,6 +42,14 @@
     },
     "macOS": {
       "minimumSystemVersion": "14.2"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libpulse0"]
+      },
+      "rpm": {
+        "depends": ["pulseaudio-libs"]
+      }
     }
   }
 }

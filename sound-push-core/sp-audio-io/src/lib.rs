@@ -15,6 +15,8 @@ pub mod macos_tap;
 pub mod null;
 #[cfg(windows)]
 pub mod wasapi_process;
+#[cfg(all(target_os = "linux", feature = "pulse"))]
+pub mod pulse;
 
 pub use convert::{CaptureConverter, RenderConverter};
 

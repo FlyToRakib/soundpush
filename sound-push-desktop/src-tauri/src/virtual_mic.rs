@@ -8,6 +8,9 @@
 //!   setup (UAC prompt, the user clicks "Install Driver"), then offers a restart, which VB-CABLE
 //!   requires. It is not bundled into the SoundPush installer until VB-Audio agrees (see
 //!   docs/virtual-microphone.md §4). Our own signed driver replaces it later (plan stage 2).
+//! - **Linux:** no driver. SoundPush asks the sound server (PipeWire through pipewire-pulse, or
+//!   PulseAudio) for a null sink "SoundPush Microphone Feed" and a source "SoundPush Microphone"
+//!   remapped from its monitor. No root, no password.
 //!
 //! Detection of the device itself lives in the engine hooks (`hooks.rs`, `VIRTUAL_CABLES`).
 
@@ -38,6 +41,12 @@ pub fn status() -> Status {
         installed: windows::installed(),
         provider: "vbcable",
     };
+    #[cfg(target_os = "linux")]
+    return Status {
+        supported: true,
+        installed: linux::installed(),
+        provider: "soundpush",
+    };
     #[allow(unreachable_code)]
     Status {
         supported: false,
@@ -55,6 +64,11 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         let _ = app;
         windows::install()
     };
+    #[cfg(target_os = "linux")]
+    return {
+        let _ = app;
+        linux::install()
+    };
     #[allow(unreachable_code)]
     {
         let _ = app;
@@ -66,8 +80,23 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
 pub fn uninstall() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     return macos::uninstall();
+    #[cfg(target_os = "linux")]
+    return linux::uninstall();
     #[allow(unreachable_code)]
     Err("not available on this platform".into())
+}
+
+/// Bring back a virtual microphone that lives only as long as the sound server (Linux).
+/// Returns at once; the work happens on a background thread.
+pub fn restore() {
+    #[cfg(target_os = "linux")]
+    linux::restore();
+}
+
+/// Whether an app is recording from SoundPush Microphone right now (Linux).
+#[cfg(target_os = "linux")]
+pub fn virtual_mic_in_use() -> bool {
+    linux::in_use()
 }
 
 /// Restart the computer to finish a driver install (Windows, VB-CABLE).
@@ -152,6 +181,231 @@ mod macos {
     pub fn uninstall() -> Result<(), String> {
         let dst = quote(&Path::new(HAL_DIR).join(DRIVER).to_string_lossy());
         run_as_admin(&format!("rm -rf {dst} && ({RESTART_AUDIO})"))
+    }
+}
+
+/// The device is two modules on the sound server, loaded by SoundPush (never root):
+///
+/// 1. `module-null-sink` "SoundPush Microphone Feed": the engine plays the phone microphone into it.
+/// 2. `module-remap-source` "SoundPush Microphone" on the sink's monitor: apps record from it.
+///
+/// Loaded modules last until the sound server stops (logout, reboot, restart). To keep the device:
+/// - a marker in SoundPush's data folder makes every SoundPush start load them again (`restore`);
+/// - on PipeWire, a pipewire-pulse drop-in (`~/.config/pipewire/pipewire-pulse.conf.d/`) loads
+///   them at login too, so apps find their chosen microphone even before SoundPush starts.
+///   PulseAudio has no per-user drop-in without replacing `default.pa`, so it relies on the first.
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use sp_audio_io::pulse::{Device, Pulse, SourceOutput};
+    use tracing::{info, warn};
+
+    const SINK: &str = "soundpush_microphone_feed";
+    const SINK_DESCRIPTION: &str = "SoundPush Microphone Feed";
+    const SOURCE: &str = "soundpush_microphone";
+    const SOURCE_DESCRIPTION: &str = "SoundPush Microphone";
+    /// Sound settings' level meters record from every source; they are not apps using the microphone.
+    const LEVEL_METERS: &[&str] = &["org.PulseAudio.pavucontrol", "org.gnome.VolumeControl"];
+
+    fn sink_args() -> String {
+        format!("sink_name={SINK} rate=48000 sink_properties=\"device.description='{SINK_DESCRIPTION}'\"")
+    }
+
+    fn source_args() -> String {
+        format!("master={SINK}.monitor source_name={SOURCE} source_properties=\"device.description='{SOURCE_DESCRIPTION}'\"")
+    }
+
+    fn marker() -> PathBuf {
+        crate::hooks::data_dir().join("virtual-microphone")
+    }
+
+    fn drop_in() -> Option<PathBuf> {
+        dirs::config_dir().map(|d| d.join("pipewire/pipewire-pulse.conf.d/soundpush-microphone.conf"))
+    }
+
+    fn drop_in_text() -> String {
+        let escape = |s: String| s.replace('"', "\\\"");
+        format!(
+            "# SoundPush Microphone, added by SoundPush (Audio → Install SoundPush Microphone).\n\
+             # pipewire-pulse creates it at login. Remove it in SoundPush, or delete this file.\n\
+             pulse.cmd = [\n\
+             \x20   {{ cmd = \"load-module\" args = \"module-null-sink {}\" flags = [ \"nofail\" ] }}\n\
+             \x20   {{ cmd = \"load-module\" args = \"module-remap-source {}\" flags = [ \"nofail\" ] }}\n\
+             ]\n",
+            escape(sink_args()),
+            escape(source_args())
+        )
+    }
+
+    /// The user installed it; the sound server may still need to load it again (see `restore`).
+    pub fn installed() -> bool {
+        marker().exists()
+    }
+
+    /// Load the modules that are not loaded yet.
+    fn ensure_loaded(pulse: &mut Pulse) -> Result<(), String> {
+        if !pulse.sinks().map_err(|e| e.to_string())?.iter().any(|d| d.name == SINK) {
+            pulse
+                .load_module("module-null-sink", &sink_args())
+                .map_err(|e| e.to_string())?;
+        }
+        if !pulse.sources().map_err(|e| e.to_string())?.iter().any(|d| d.name == SOURCE) {
+            pulse
+                .load_module("module-remap-source", &source_args())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Creates the device now. Running it again re-creates a device the sound server forgot.
+    pub fn install() -> Result<(), String> {
+        let mut pulse = Pulse::connect().map_err(|e| e.to_string())?;
+        ensure_loaded(&mut pulse)?;
+        let marker = marker();
+        if let Some(dir) = marker.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&marker, b"").map_err(|e| e.to_string())?;
+        if pulse.server().is_ok_and(|s| s.is_pipewire())
+            && let Some(path) = drop_in()
+        {
+            let written = path
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&path, drop_in_text()));
+            // The device works without it; it only would not come back before SoundPush starts.
+            if let Err(e) = written {
+                warn!(error = %e, path = %path.display(), "could not save the PipeWire configuration");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn uninstall() -> Result<(), String> {
+        for path in [Some(marker()), drop_in()].into_iter().flatten() {
+            match std::fs::remove_file(&path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("{}: {e}", path.display())),
+                _ => {}
+            }
+        }
+        // Without a sound server nothing is loaded.
+        let Ok(mut pulse) = Pulse::connect() else {
+            return Ok(());
+        };
+        let modules = pulse.modules().map_err(|e| e.to_string())?;
+        // The source reads the sink's monitor, so it goes first.
+        let ours = [
+            ("module-remap-source", format!("source_name={SOURCE}")),
+            ("module-null-sink", format!("sink_name={SINK}")),
+        ];
+        for (name, pair) in ours {
+            for module in modules.iter().filter(|m| m.name == name && has_argument(&m.argument, &pair)) {
+                pulse.unload_module(module.index).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn restore() {
+        if !installed() {
+            return;
+        }
+        let spawned = std::thread::Builder::new().name("sp-virtual-mic".into()).spawn(|| {
+            // At login SoundPush may start before the sound server does.
+            for _ in 0..30 {
+                if let Ok(mut pulse) = Pulse::connect() {
+                    match ensure_loaded(&mut pulse) {
+                        Ok(()) => info!("SoundPush Microphone is available"),
+                        Err(e) => warn!(error = %e, "could not restore SoundPush Microphone"),
+                    }
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            }
+            warn!("no sound server; SoundPush Microphone was not restored");
+        });
+        if let Err(e) = spawned {
+            warn!(error = %e, "could not restore SoundPush Microphone");
+        }
+    }
+
+    pub fn in_use() -> bool {
+        let Ok(mut pulse) = Pulse::connect() else {
+            return false;
+        };
+        match (pulse.sources(), pulse.source_outputs()) {
+            (Ok(sources), Ok(outputs)) => recording_from(SOURCE, &sources, &outputs),
+            _ => false,
+        }
+    }
+
+    /// Whether an app (not a level meter) is recording, unpaused, from the source named `source`.
+    fn recording_from(source: &str, sources: &[Device], outputs: &[SourceOutput]) -> bool {
+        let Some(index) = sources.iter().find(|d| d.name == source).map(|d| d.index) else {
+            return false;
+        };
+        outputs
+            .iter()
+            .any(|o| o.source == index && !o.corked && !LEVEL_METERS.contains(&o.application_id.as_str()))
+    }
+
+    /// Whether a module argument string contains `pair` ("key=value") as a whole word.
+    fn has_argument(argument: &str, pair: &str) -> bool {
+        argument.split_whitespace().any(|word| word == pair)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn source(name: &str, index: u32) -> Device {
+            Device {
+                name: name.into(),
+                description: String::new(),
+                index,
+                channels: 2,
+                sample_rate: 48_000,
+                monitor: None,
+                is_monitor: false,
+            }
+        }
+
+        fn output(source: u32, corked: bool, application_id: &str) -> SourceOutput {
+            SourceOutput {
+                source,
+                corked,
+                application_id: application_id.into(),
+            }
+        }
+
+        #[test]
+        fn in_use_only_when_an_app_records_from_our_source() {
+            let sources = [source("alsa_input.usb-mic", 3), source(SOURCE, 7)];
+            assert!(recording_from(SOURCE, &sources, &[output(7, false, "com.discordapp.Discord")]));
+            assert!(recording_from(SOURCE, &sources, &[output(3, false, ""), output(7, false, "")]));
+            // Another microphone, a paused stream, or a level meter.
+            assert!(!recording_from(SOURCE, &sources, &[output(3, false, "com.discordapp.Discord")]));
+            assert!(!recording_from(SOURCE, &sources, &[output(7, true, "com.discordapp.Discord")]));
+            assert!(!recording_from(SOURCE, &sources, &[output(7, false, "org.PulseAudio.pavucontrol")]));
+            // Not installed.
+            assert!(!recording_from(SOURCE, &sources[..1], &[output(7, false, "")]));
+        }
+
+        #[test]
+        fn modules_are_matched_by_whole_arguments() {
+            assert!(has_argument(&sink_args(), "sink_name=soundpush_microphone_feed"));
+            assert!(has_argument(&source_args(), "source_name=soundpush_microphone"));
+            assert!(!has_argument("source_name=soundpush_microphone_2", "source_name=soundpush_microphone"));
+        }
+
+        #[test]
+        fn drop_in_escapes_quotes_inside_args() {
+            let text = drop_in_text();
+            assert!(text.contains(r#"args = "module-null-sink sink_name=soundpush_microphone_feed rate=48000 sink_properties=\"device.description='SoundPush Microphone Feed'\"""#));
+            assert!(text.contains("module-remap-source master=soundpush_microphone_feed.monitor"));
+        }
     }
 }
 

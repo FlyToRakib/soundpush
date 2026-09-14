@@ -80,9 +80,43 @@ Microsoft signed it.
   (UAC, then "Install Driver") and offers **Restart now** (`src-tauri/src/virtual_mic.rs`).
   The user never visits a website or unzips anything.
 
-### Linux 🟡
+### Linux: built in, no driver 🟡
 
-- Planned: a PipeWire virtual source created by the app (no driver or signing needed).
+- **No driver, no root, no password.** SoundPush talks to the sound server with the PulseAudio
+  protocol. PipeWire serves it through pipewire-pulse, so this works on PipeWire desktops
+  (current Ubuntu, Fedora) and on PulseAudio-only systems. It loads two modules:
+  1. `module-null-sink` **"SoundPush Microphone Feed"**: the engine plays the phone microphone into it.
+  2. `module-remap-source` **"SoundPush Microphone"**, reading that sink's monitor: apps choose
+     it as their microphone.
+- **Keeping it.** Loaded modules last until the sound server stops (logout, reboot, a restart of
+  PipeWire). SoundPush keeps the device in two ways:
+  - A marker file (`~/.local/share/SoundPush/virtual-microphone`) makes every SoundPush start
+    create it again. SoundPush retries for a minute because it can start before the sound server at login.
+  - On PipeWire, SoundPush also writes `~/.config/pipewire/pipewire-pulse.conf.d/soundpush-microphone.conf`,
+    so pipewire-pulse creates the device at login before SoundPush starts, and apps keep it
+    selected. PulseAudio has no per-user drop-in short of replacing `default.pa`, so there it
+    depends on SoundPush starting (turn on **Launch at login**).
+  - If the device is gone anyway, the Audio page says so; **Install SoundPush Microphone** brings it back.
+- **Remove:** Audio → **Remove SoundPush Microphone** unloads both modules and deletes the marker
+  and the drop-in.
+- **Detection:** "SoundPush Microphone Feed" is the playback side, "SoundPush Microphone" the
+  recording side (`VIRTUAL_CABLES`). SoundPush hides the feed from its own speaker lists, but
+  desktop sound settings show it as an output; don't choose it as your speakers.
+- **In use:** `virtual_mic::virtual_mic_in_use()` tells whether an app is recording from the
+  source (pavucontrol's and GNOME Settings' level meters don't count). It is not wired into the
+  engine yet.
+- **Tested:** in a container with PulseAudio 16 (modules load, a tone played into the feed comes
+  out of SoundPush Microphone, modules unload), and PipeWire 0.3.65 (modules load, the drop-in
+  brings them back after pipewire-pulse restarts). Audio through PipeWire still needs a real
+  desktop session to verify.
+
+Testing on Linux:
+
+1. Install SoundPush (GitHub → Actions → "Linux build" → artifact `SoundPush-Linux`).
+2. SoundPush → Audio → Virtual microphone → **Install SoundPush Microphone**. It should say
+   *Ready… choose "SoundPush Microphone"*. In a terminal, `pactl list short sources` lists `soundpush_microphone`.
+3. Phone → **Use as computer microphone** → pick the PC.
+4. Discord, Zoom or Meet → microphone → **SoundPush Microphone**.
 
 ## 4. Windows: what a built-in driver requires
 
@@ -153,5 +187,6 @@ before the signed driver exists, and SoundPush Microphone after.
 | Capabilities re-announced to the phone when they change | `actor.rs` → `tick` (mid-session `Hello`) |
 | macOS driver | `sound-push-desktop/drivers/macos-virtual-mic/` |
 | Windows driver (test-signed, not used yet) | `sound-push-desktop/drivers/windows-virtual-audio/`, `.github/workflows/windows-driver.yml` |
+| Linux sound server client (devices, streams, modules) | `sound-push-core/sp-audio-io/src/pulse.rs` |
 | Install / remove / status commands | `sound-push-desktop/src-tauri/src/virtual_mic.rs`, `commands.rs` |
 | Audio page UI | `sound-push-desktop/ui/src/features/Audio.svelte` |

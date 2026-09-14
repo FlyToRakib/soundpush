@@ -27,6 +27,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | `sp-audio-io` (trait, cpal backend, null backend, converters) | 🟡 | unit-tested; device paths need hardware |
 | `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | 13 tests incl. two-engine pairing → audio → prompt → stop → forget → restart-reconnect |
 | Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, 9 UI tests |
+| Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`); speakers are not muted while sending on PulseAudio (its monitors follow the sink mute) |
 | Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test |
 
 ## Phase 2 — Microphone & headset
@@ -41,9 +42,9 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
 | Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | 🟡 | `sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT: "SoundPush Microphone Feed" → "SoundPush Microphone"); x64 builds locally with `/W4 /WX /analyze`, infverif, inf2cat and ApiValidator clean; CI builds x64 + ARM64 and test-signs (`windows-driver.yml`). Not yet installed on a test-signing PC. Not used by the app: VB-CABLE stays active until attestation signing |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
-| Linux PipeWire virtual source created by the app | ⏳ | |
+| Linux virtual microphone created by the app (PipeWire/PulseAudio null sink + remap source) | 🟡 | `virtual_mic.rs`; tested against PulseAudio in a container (load, audio, unload) and PipeWire (load, drop-in restore); PipeWire audio needs a desktop session. See [virtual-microphone.md](virtual-microphone.md) |
 | Push-to-talk / mute global hotkey | 🟡 | `src-tauri/src/hotkeys.rs` (global-shortcut plugin), recorder on the Audio page, conflict errors, tray check mark follows the engine's `micMuted`; mute also silences the phone mic feeding the virtual mic |
-| Auto-start phone mic when an app opens the virtual mic | 🟡 | `desktop.autoStartMic`; `PlatformHooks::virtual_mic_in_use` (Windows: active sessions on "CABLE Output"; macOS: `DeviceIsRunningSomewhere`); engine `actor/local_audio.rs` starts the last mic phone and stops it 15 s after the app lets go. Linux: call site in `hooks.rs` |
+| Auto-start phone mic when an app opens the virtual mic | 🟡 | `desktop.autoStartMic`; `PlatformHooks::virtual_mic_in_use` (Windows: active sessions on "CABLE Output"; macOS: `DeviceIsRunningSomewhere`; Linux: recording streams on the SoundPush source); engine `actor/local_audio.rs` starts the last mic phone and stops it 15 s after the app lets go |
 
 ## Phase 3 — Parity completion
 
@@ -60,7 +61,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | USB tethering | 🟡 | works as IP network |
 | USB via ADB (TLS-over-TCP transport) | ⏳ | ADR-0005 |
 | Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
-| PipeWire app capture | ⏳ | ADR-0002 |
+| PipeWire app capture | ⏳ | ADR-0002. On Linux it means moving the app's stream to a private null sink and recording its monitor; `CaptureSource::Application` exists (Windows) but has no Linux implementation yet |
 | Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |

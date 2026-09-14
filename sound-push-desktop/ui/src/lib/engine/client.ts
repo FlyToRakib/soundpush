@@ -22,7 +22,7 @@ export interface VirtualMicStatus {
   supported: boolean;
   /** Driver files installed; the device may still need a restart (Windows) to appear. */
   installed: boolean;
-  /** "soundpush" = our own driver (macOS), "vbcable" = VB-Audio's VB-CABLE (Windows). */
+  /** "soundpush" = our own (macOS driver, Linux PipeWire/PulseAudio device), "vbcable" = VB-Audio's VB-CABLE (Windows). */
   provider: "soundpush" | "vbcable" | "none";
 }
 
