@@ -102,6 +102,57 @@ export interface DesktopSettings {
   virtualMicDevice: string | null;
 }
 
+/** Per-device overrides of StreamSettings; absent fields follow the global setting. */
+export interface DeviceProfile {
+  latency?: LatencyMode;
+  customMinMs?: number;
+  customMaxMs?: number;
+  quality?: QualityMode;
+  opusBitrate?: number;
+  redundancy?: boolean;
+}
+
+export interface SavedRoute {
+  peerId: string;
+  kind: RouteKind;
+  /** True for "Keep running after restart"; false when saved by "Resume streams after restart". */
+  keep: boolean;
+}
+
+export interface Recommendation {
+  latency: LatencyMode;
+  quality: QualityMode;
+  opusBitrate: number;
+  redundancy: boolean;
+  /** i18n keys, most important first. */
+  tips: string[];
+}
+
+export interface NetworkReport {
+  transport: "quic" | "tcp";
+  rttMs: number;
+  rttP95Ms: number;
+  jitterMs: number;
+  lossPct: number;
+  achievableKbps: number;
+  maxDatagramBytes: number;
+  probesSent: number;
+  probesReceived: number;
+  durationMs: number;
+  recommendation: Recommendation;
+}
+
+export type NetworkTestStatus = "running" | "done" | "failed" | "cancelled";
+
+export interface NetworkTestView {
+  peerId: string;
+  status: NetworkTestStatus;
+  progress: number;
+  report: NetworkReport | null;
+  error: ErrorView | null;
+  startedUnix: number;
+}
+
 export interface Settings {
   version: number;
   deviceName: string;
@@ -116,9 +167,11 @@ export interface Settings {
   mobile: { stayAvailable: boolean; remindAfterRestart: boolean };
   autoConnectTrusted: boolean;
   resumeRoutesOnStart: boolean;
-  savedRoutes: { peerId: string; kind: RouteKind }[];
+  savedRoutes: SavedRoute[];
   dismissedTips: string[];
   audioCues: boolean;
+  /** Keyed by device id. */
+  deviceProfiles: Record<string, DeviceProfile>;
 }
 
 export interface LocalDevice {
@@ -127,6 +180,8 @@ export interface LocalDevice {
   name: string;
   platform: string;
   port: number;
+  /** Loopback TCP port for USB via adb reverse (0 = not listening). */
+  tcpPort: number;
   addresses: string[];
   appVersion: string;
 }
@@ -150,6 +205,8 @@ export interface PeerView {
   canSendMic: boolean;
   canPlay: boolean;
   hasVirtualMic: boolean;
+  /** "quic" or "tcp" (USB) while connected, "" otherwise. */
+  transport: "" | "quic" | "tcp";
 }
 
 export interface RouteStats {
@@ -242,4 +299,5 @@ export interface EngineState {
   };
   audioDevices: AudioDeviceView[];
   micLevelDb: number;
+  networkTests: NetworkTestView[];
 }

@@ -1,5 +1,5 @@
 // In-browser mock engine so the UI can be previewed and tested without Tauri.
-import type { EngineState, RouteKind, Settings } from "./types";
+import type { DeviceProfile, EngineState, NetworkReport, RouteKind, Settings } from "./types";
 
 const settings: Settings = {
   version: 1,
@@ -45,6 +45,7 @@ const settings: Settings = {
   savedRoutes: [],
   dismissedTips: [],
   audioCues: false,
+  deviceProfiles: {},
 };
 
 let state: EngineState = {
@@ -55,6 +56,7 @@ let state: EngineState = {
     name: settings.deviceName,
     platform: "windows",
     port: 47650,
+    tcpPort: 47650,
     addresses: ["192.168.1.10:47650"],
     appVersion: "0.1.0",
   },
@@ -78,6 +80,7 @@ let state: EngineState = {
       canSendMic: true,
       canPlay: true,
       hasVirtualMic: false,
+      transport: "quic",
     },
   ],
   routes: [],
@@ -99,6 +102,27 @@ let state: EngineState = {
     { id: "Microphone", name: "Microphone", isInput: true, isDefault: true, virtualCable: false },
   ],
   micLevelDb: -120,
+  networkTests: [],
+};
+
+const mockReport: NetworkReport = {
+  transport: "quic",
+  rttMs: 4.2,
+  rttP95Ms: 7.9,
+  jitterMs: 1.1,
+  lossPct: 0,
+  achievableKbps: 1600,
+  maxDatagramBytes: 1162,
+  probesSent: 420,
+  probesReceived: 420,
+  durationMs: 9400,
+  recommendation: {
+    latency: "lowLatency",
+    quality: "auto",
+    opusBitrate: 128000,
+    redundancy: false,
+    tips: ["nettest.tip.good", "nettest.tip.losslessOk"],
+  },
 };
 
 const listeners = new Set<(s: EngineState) => void>();
@@ -167,6 +191,22 @@ export const mockEngine = {
         return undefined as T;
       case "export_diagnostics":
         return "/tmp/soundpush-diagnostics.zip" as T;
+      case "set_device_profile": {
+        const profiles = { ...state.settings.deviceProfiles };
+        const profile = args?.profile as DeviceProfile | null;
+        if (profile && Object.keys(profile).length > 0) profiles[String(args?.deviceId)] = profile;
+        else delete profiles[String(args?.deviceId)];
+        emit({ settings: { ...state.settings, deviceProfiles: profiles } });
+        return undefined as T;
+      }
+      case "run_network_test": {
+        const peerId = String(args?.deviceId);
+        const others = state.networkTests.filter((t) => t.peerId !== peerId);
+        emit({ networkTests: [...others, { peerId, status: "done", progress: 1, report: mockReport, error: null, startedUnix: Date.now() / 1000 }] });
+        return mockReport as T;
+      }
+      case "usb_status":
+        return { adbFound: true, devices: [{ serial: "mock123", model: "Redmi Note 9 Pro", authorized: true }], tcpPort: state.local.tcpPort } as T;
       case "virtual_mic_status":
         return { supported: true, installed: mockDriverInstalled, provider: "soundpush" } as T;
       case "install_virtual_mic":

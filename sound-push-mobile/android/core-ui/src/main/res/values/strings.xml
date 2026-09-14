@@ -227,4 +227,30 @@
     <string name="common_cancel">Cancel</string>
     <string name="common_close">Close</string>
     <string name="common_save">Save</string>
+
+    <!-- Device sheet: per-device audio profile, network test, USB -->
+    <string name="devices_profile">Audio for this device</string>
+    <string name="devices_profile_desc">Latency applies to sound you receive from this device; quality applies to streams you start.</string>
+    <string name="devices_profile_default">Default</string>
+    <string name="devices_profile_latency">Latency</string>
+    <string name="devices_profile_quality">Quality</string>
+    <string name="devices_profile_redundancy">Extra protection against dropouts</string>
+    <string name="devices_profile_on">On</string>
+    <string name="devices_profile_off">Off</string>
+    <string name="devices_transport_usb">Connected by USB</string>
+    <string name="nettest_title">Network test</string>
+    <string name="nettest_desc">Measures delay, jitter, packet loss and speed to this device. Takes about 10 seconds.</string>
+    <string name="nettest_run">Test connection</string>
+    <string name="nettest_running">Testing… %1$d%%</string>
+    <string name="nettest_cancel">Cancel</string>
+    <string name="nettest_failed">The test couldn\'t finish.</string>
+    <string name="nettest_result">Delay %1$d ms · jitter %2$d ms · loss %3$s%% · %4$d kb/s</string>
+    <string name="nettest_apply">Use recommended settings</string>
+    <string name="nettest_tip_good">This connection is good for streaming.</string>
+    <string name="nettest_tip_losslessOk">Fast enough for lossless audio.</string>
+    <string name="nettest_tip_loss">Packets are being lost. Move closer to the router, use 5 GHz Wi-Fi, or connect by USB.</string>
+    <string name="nettest_tip_jitter">The delay varies a lot. Other traffic on the network may be interfering.</string>
+    <string name="nettest_tip_latency">The delay is high. Check that both devices are on the same network.</string>
+    <string name="nettest_tip_bandwidth">The connection is slow. A lower bitrate avoids dropouts.</string>
+    <string name="notice_crash_report">SoundPush closed unexpectedly. A crash report was saved on this phone.</string>
 </resources>

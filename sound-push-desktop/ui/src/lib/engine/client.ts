@@ -1,9 +1,17 @@
 // Typed client for the Tauri commands exposed by src-tauri/src/commands.rs.
 // Outside Tauri (plain `vite` preview, tests) a mock engine is used instead.
-import type { EngineState, PermissionKind, Policy, RouteKind, Settings } from "./types";
+import type { DeviceProfile, EngineState, NetworkReport, PermissionKind, Policy, RouteKind, Settings } from "./types";
 import { mockEngine } from "./mock";
 
 type Unlisten = () => void;
+
+/** Android phones reachable over USB with adb (see src-tauri/src/usb.rs). */
+export interface UsbStatus {
+  adbFound: boolean;
+  devices: { serial: string; model: string; authorized: boolean }[];
+  /** Engine loopback TCP port the phone is forwarded to (0 = unavailable). */
+  tcpPort: number;
+}
 
 /** Virtual microphone driver state (see src-tauri/src/virtual_mic.rs). */
 export interface VirtualMicStatus {
@@ -59,6 +67,12 @@ export const engine = {
   setAutoConnect: (deviceId: string, enabled: boolean) => call<void>("set_auto_connect", { deviceId, enabled }),
   setPermission: (deviceId: string, kind: PermissionKind, policy: Policy) =>
     call<void>("set_permission", { deviceId, kind, policy }),
+  setDeviceProfile: (deviceId: string, profile: DeviceProfile | null) =>
+    call<void>("set_device_profile", { deviceId, profile }),
+  runNetworkTest: (deviceId: string) => call<NetworkReport>("run_network_test", { deviceId }),
+  cancelNetworkTest: (deviceId: string) => call<void>("cancel_network_test", { deviceId }),
+  usbStatus: () => call<UsbStatus>("usb_status"),
+  usbConnect: (serial: string) => call<void>("usb_connect", { serial }),
 
   // routes
   startRoute: (deviceId: string, kind: RouteKind) => call<string>("start_route", { deviceId, kind }),

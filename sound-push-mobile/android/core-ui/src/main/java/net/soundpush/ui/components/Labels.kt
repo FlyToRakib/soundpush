@@ -56,7 +56,20 @@ object Labels {
         "notice.trustStoreRecovered" -> R.string.notice_trust_store_recovered
         "notice.settingsRecovered" -> R.string.notice_settings_recovered
         "notice.muteSpeakersUnsupported" -> R.string.notice_mute_speakers_unsupported
+        "notice.crashReport" -> R.string.notice_crash_report
         else -> R.string.notice_generic
+    }
+
+    /** Network test tips (`NetworkReport.recommendation.tips`). */
+    @StringRes
+    fun networkTip(key: String): Int? = when (key) {
+        "nettest.tip.good" -> R.string.nettest_tip_good
+        "nettest.tip.losslessOk" -> R.string.nettest_tip_losslessOk
+        "nettest.tip.loss" -> R.string.nettest_tip_loss
+        "nettest.tip.jitter" -> R.string.nettest_tip_jitter
+        "nettest.tip.latency" -> R.string.nettest_tip_latency
+        "nettest.tip.bandwidth" -> R.string.nettest_tip_bandwidth
+        else -> null
     }
 
     @StringRes

@@ -5,6 +5,7 @@ mod commands;
 mod hooks;
 mod power;
 mod tray;
+mod usb;
 mod virtual_mic;
 
 use std::path::PathBuf;
@@ -88,6 +89,9 @@ fn main() {
     let data_dir = hooks::data_dir();
     let log_dir = data_dir.join("logs");
     let _log_guard = init_logging(&log_dir);
+    // Panics leave a redacted report in the data folder (never uploaded); the engine mentions it
+    // once on the next start and diagnostics exports include it.
+    sp_engine::crash::install(&data_dir, env!("CARGO_PKG_VERSION"));
     info!(version = env!("CARGO_PKG_VERSION"), "SoundPush starting");
 
     let app = tauri::Builder::default()
@@ -162,6 +166,11 @@ fn main() {
             commands::rename_device,
             commands::set_auto_connect,
             commands::set_permission,
+            commands::set_device_profile,
+            commands::run_network_test,
+            commands::cancel_network_test,
+            commands::usb_status,
+            commands::usb_connect,
             commands::start_route,
             commands::stop_route,
             commands::set_route_volume,

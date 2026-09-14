@@ -17,7 +17,7 @@ use std::sync::Arc;
 use sp_audio_io::{AudioBackend, CaptureSource};
 use sp_engine::settings::Settings;
 use sp_engine::state::RouteKind;
-use sp_engine::{EngineConfig, EngineError, EngineHandle, KeepAlive, PermissionKind, PlatformHooks, Policy};
+use sp_engine::{DeviceProfile, EngineConfig, EngineError, EngineHandle, KeepAlive, PermissionKind, PlatformHooks, Policy};
 
 use crate::app_audio::{APP_AUDIO_DEVICE, MobileAudioBackend};
 
@@ -138,6 +138,8 @@ impl SoundPushEngine {
     #[uniffi::constructor]
     pub fn new(platform: Arc<dyn MobilePlatform>, app_version: String) -> Result<Arc<Self>, FfiError> {
         init_logging();
+        // Rust panics leave a local, redacted report (never uploaded); the engine mentions it once.
+        sp_engine::crash::install(&PathBuf::from(platform.data_dir()), &app_version);
         let backend = Arc::new(MobileAudioBackend::new());
         let hooks = Arc::new(Hooks {
             platform,
@@ -147,6 +149,8 @@ impl SoundPushEngine {
             hooks,
             EngineConfig {
                 app_version,
+                // Phones dial a computer's USB forward; they never listen on TCP.
+                tcp_listener: false,
                 ..EngineConfig::default()
             },
         )?;
@@ -239,6 +243,26 @@ impl SoundPushEngine {
             _ => return Err(invalid("policy")),
         };
         Ok(self.handle.set_permission(device_id, kind, policy)?)
+    }
+
+    /// `profile_json`: a `DeviceProfile` (absent fields follow the global setting); `None` clears it.
+    pub fn set_device_profile(&self, device_id: String, profile_json: Option<String>) -> Result<(), FfiError> {
+        let profile = match profile_json {
+            Some(json) => Some(serde_json::from_str::<DeviceProfile>(&json).map_err(|_| invalid("profile"))?),
+            None => None,
+        };
+        Ok(self.handle.set_device_profile(device_id, profile)?)
+    }
+
+    /// Blocks for the whole test (about 10 s); returns the `NetworkReport` as JSON.
+    /// Progress and the result are also in the state (`networkTests`).
+    pub fn run_network_test(&self, device_id: String) -> Result<String, FfiError> {
+        let report = pollster::block_on(self.handle.run_network_test(device_id))?;
+        Ok(serde_json::to_string(&report).unwrap_or_default())
+    }
+
+    pub fn cancel_network_test(&self, device_id: String) -> Result<(), FfiError> {
+        Ok(self.handle.cancel_network_test(device_id)?)
     }
 
     // ------------------------------------------------------------ routes

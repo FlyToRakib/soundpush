@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use sp_engine::settings::Settings;
 use sp_engine::state::RouteKind;
-use sp_engine::{EngineError, EngineState, ErrorView, PermissionKind, Policy};
+use sp_engine::{DeviceProfile, EngineError, EngineState, ErrorView, NetworkReport, PermissionKind, Policy};
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
@@ -113,6 +113,44 @@ pub fn set_permission(state: State<'_, AppState>, device_id: String, kind: Strin
 }
 
 #[tauri::command]
+pub fn set_device_profile(state: State<'_, AppState>, device_id: String, profile: Option<DeviceProfile>) -> CmdResult<()> {
+    Ok(state.engine()?.set_device_profile(device_id, profile)?)
+}
+
+/// About ten seconds; progress is also published in the engine state.
+#[tauri::command]
+pub async fn run_network_test(state: State<'_, AppState>, device_id: String) -> CmdResult<NetworkReport> {
+    Ok(state.engine()?.run_network_test(device_id).await?)
+}
+
+#[tauri::command]
+pub fn cancel_network_test(state: State<'_, AppState>, device_id: String) -> CmdResult<()> {
+    Ok(state.engine()?.cancel_network_test(device_id)?)
+}
+
+/// adb availability and connected phones. Runs adb, so off the UI thread.
+#[tauri::command]
+pub async fn usb_status(state: State<'_, AppState>) -> CmdResult<crate::usb::UsbStatus> {
+    let tcp_port = state.engine()?.state().local.tcp_port;
+    tauri::async_runtime::spawn_blocking(move || crate::usb::status(tcp_port))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
+/// Forward the phone's SoundPush port to this computer over USB (`adb reverse`).
+#[tauri::command]
+pub async fn usb_connect(state: State<'_, AppState>, serial: String) -> CmdResult<()> {
+    let engine = state.engine()?.clone();
+    let local = engine.state().local.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::usb::connect(&serial, local.port, local.tcp_port))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()))?
+        .map_err(EngineError::Internal)?;
+    // Retry now instead of waiting for the next reconnect attempt.
+    Ok(engine.network_changed()?)
+}
+
+#[tauri::command]
 pub async fn start_route(state: State<'_, AppState>, device_id: String, kind: RouteKind) -> CmdResult<String> {
     Ok(state.engine()?.start_route(device_id, kind).await?)
 }
@@ -211,6 +249,14 @@ fn write_diagnostics(snapshot: &EngineState, data_dir: &std::path::Path, log_dir
     }
     report.push_str("== State ==\n");
     report.push_str(&serde_json::to_string_pretty(&redacted).unwrap_or_default());
+    // Written by the panic hook, already redacted; stored locally only.
+    let crashes = sp_engine::crash::recent(data_dir, 5);
+    if !crashes.is_empty() {
+        report.push_str("\n\n== Crash reports ==\n");
+        for (name, contents) in crashes {
+            report.push_str(&format!("--- {name}\n{contents}\n"));
+        }
+    }
     report.push_str("\n\n== Recent log ==\n");
     if let Some(latest) = latest_log(log_dir) {
         if let Ok(file) = std::fs::File::open(latest) {

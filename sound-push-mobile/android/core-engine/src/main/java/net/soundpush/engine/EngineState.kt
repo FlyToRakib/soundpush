@@ -22,6 +22,7 @@ data class EngineState(
     val settings: Settings = Settings(),
     val capabilities: Capabilities = Capabilities(),
     val micLevelDb: Float = -120f,
+    val networkTests: List<NetworkTestView> = emptyList(),
 ) {
     val trustedPeers get() = peers.filter { it.trusted }
     val connectedPeers get() = trustedPeers.filter { it.connection == "connected" }
@@ -75,6 +76,53 @@ data class PeerView(
     val canSendMic: Boolean = false,
     val canPlay: Boolean = false,
     val hasVirtualMic: Boolean = false,
+    /** "quic" or "tcp" (USB) while connected. */
+    val transport: String = "",
+)
+
+@Serializable
+data class Recommendation(
+    val latency: String = "balanced",
+    val quality: String = "auto",
+    val opusBitrate: Int = 128_000,
+    val redundancy: Boolean = false,
+    val tips: List<String> = emptyList(),
+)
+
+@Serializable
+data class NetworkReport(
+    val transport: String = "",
+    val rttMs: Double = 0.0,
+    val rttP95Ms: Double = 0.0,
+    val jitterMs: Double = 0.0,
+    val lossPct: Double = 0.0,
+    val achievableKbps: Int = 0,
+    val maxDatagramBytes: Int = 0,
+    val probesSent: Int = 0,
+    val probesReceived: Int = 0,
+    val durationMs: Int = 0,
+    val recommendation: Recommendation = Recommendation(),
+)
+
+@Serializable
+data class NetworkTestView(
+    val peerId: String,
+    /** running | done | failed | cancelled */
+    val status: String = "running",
+    val progress: Float = 0f,
+    val report: NetworkReport? = null,
+    val error: ErrorView? = null,
+)
+
+/** Per-device overrides; null follows the global setting. */
+@Serializable
+data class DeviceProfile(
+    val latency: String? = null,
+    val customMinMs: Int? = null,
+    val customMaxMs: Int? = null,
+    val quality: String? = null,
+    val opusBitrate: Int? = null,
+    val redundancy: Boolean? = null,
 )
 
 @Serializable
@@ -203,7 +251,7 @@ data class DesktopSettings(
 data class MobileSettings(val stayAvailable: Boolean = false, val remindAfterRestart: Boolean = true)
 
 @Serializable
-data class SavedRoute(val peerId: String, val kind: String)
+data class SavedRoute(val peerId: String, val kind: String, val keep: Boolean = true)
 
 @Serializable
 data class Settings(
@@ -223,4 +271,6 @@ data class Settings(
     val savedRoutes: List<SavedRoute> = emptyList(),
     val dismissedTips: List<String> = emptyList(),
     val audioCues: Boolean = false,
+    /** Keyed by device id; kept here so settings written from this app don't drop profiles. */
+    val deviceProfiles: Map<String, DeviceProfile> = emptyMap(),
 )
