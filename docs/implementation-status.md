@@ -26,6 +26,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | `sp-audio-io` (trait, cpal backend, null backend, converters) | 🟡 | unit-tested; device paths need hardware |
 | `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | 13 tests incl. two-engine pairing → audio → prompt → stop → forget → restart-reconnect |
 | Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, 9 UI tests |
+| Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`); speakers are not muted while sending on PulseAudio (its monitors follow the sink mute) |
 | Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test |
 
 ## Phase 2 — Microphone & headset
@@ -40,7 +41,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
 | Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | ⏳ | replaces VB-CABLE once Microsoft-signed |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
-| Linux PipeWire virtual source created by the app | ⏳ | |
+| Linux virtual microphone created by the app (PipeWire/PulseAudio null sink + remap source) | 🟡 | `virtual_mic.rs`; tested against PulseAudio in a container (load, audio, unload) and PipeWire (load, drop-in restore); PipeWire audio needs a desktop session. See [virtual-microphone.md](virtual-microphone.md) |
 | Push-to-talk / mute global hotkey | ⏳ | setting exists; tray mute works |
 
 ## Phase 3 — Parity completion
@@ -57,7 +58,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Custom bitrate steps incl. AudioRelay's | ✅ | |
 | USB tethering | 🟡 | works as IP network |
 | USB via ADB (TLS-over-TCP transport) | ⏳ | ADR-0005 |
-| Windows per-app capture, PipeWire app capture | ⏳ | ADR-0002 |
+| Windows per-app capture, PipeWire app capture | ⏳ | ADR-0002. Linux deferred: `CaptureSource` has no per-app source and the UI has no app picker yet; on Linux it means moving the app's stream to a private null sink and recording its monitor |
 | Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
