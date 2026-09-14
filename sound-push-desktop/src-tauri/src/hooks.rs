@@ -1,6 +1,7 @@
 //! Desktop implementation of the engine's platform hooks.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -50,6 +51,9 @@ pub struct DesktopHooks {
     /// Playback device names and when they were listed.
     outputs_cache: Mutex<(Option<Instant>, Vec<String>)>,
     inhibitor: Mutex<Option<SleepInhibitor>>,
+    /// Last firewall and network profile check (`network.rs`).
+    network: Mutex<crate::network::NetworkStatus>,
+    inbound_blocked: AtomicBool,
 }
 
 impl DesktopHooks {
@@ -68,7 +72,25 @@ impl DesktopHooks {
             backend: Arc::new(CpalBackend::new()),
             outputs_cache: Mutex::new((None, Vec::new())),
             inhibitor: Mutex::new(None),
+            network: Mutex::new(crate::network::NetworkStatus::default()),
+            inbound_blocked: AtomicBool::new(false),
         }
+    }
+
+    pub fn backend(&self) -> Arc<CpalBackend> {
+        self.backend.clone()
+    }
+
+    pub fn set_network_status(&self, status: crate::network::NetworkStatus) {
+        self.inbound_blocked
+            .store(status.firewall_enabled && status.blocked, Ordering::Relaxed);
+        if let Ok(mut current) = self.network.lock() {
+            *current = status;
+        }
+    }
+
+    pub fn network_status(&self) -> crate::network::NetworkStatus {
+        self.network.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
     pub fn set_prevent_sleep(&self, prevent: bool) {
@@ -162,6 +184,34 @@ impl PlatformHooks for DesktopHooks {
             }
         }
         ok
+    }
+
+    fn microphone_permitted(&self) -> bool {
+        !matches!(crate::system::microphone(), "denied" | "restricted")
+    }
+
+    fn virtual_mic_in_use(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            // Linux integration: return `crate::virtual_mic::linux::virtual_mic_in_use()` here.
+            false
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // The recording side of every virtual cable that is present.
+            let outputs = self.output_names();
+            VIRTUAL_CABLES
+                .iter()
+                .filter_map(|(playback, recording)| {
+                    let output = outputs.iter().find(|o| o.contains(playback))?;
+                    Some(recording.map_or_else(|| output.clone(), str::to_string))
+                })
+                .any(|input| crate::system::capture_device_in_use(&input))
+        }
+    }
+
+    fn inbound_blocked(&self) -> bool {
+        self.inbound_blocked.load(Ordering::Relaxed)
     }
 
     fn keep_alive(&self, _reason: KeepAlive) {
