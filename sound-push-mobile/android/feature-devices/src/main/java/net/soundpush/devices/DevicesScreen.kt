@@ -43,7 +43,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.util.Locale
+import kotlin.math.roundToInt
+import net.soundpush.engine.DeviceProfile
+import net.soundpush.engine.EngineJson
 import net.soundpush.engine.EngineState
+import net.soundpush.engine.NetworkTestView
 import net.soundpush.engine.PeerView
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
@@ -105,7 +110,12 @@ fun DevicesScreen(state: EngineState, onScan: () -> Unit, onShowMessage: (String
 
     if (addressOpen) AddressDialog(onDismiss = { addressOpen = false })
     state.trustedPeers.firstOrNull { it.deviceId == selectedId }?.let { peer ->
-        DeviceSheet(peer, onDismiss = { selectedId = null })
+        DeviceSheet(
+            peer,
+            profile = state.settings.deviceProfiles[peer.deviceId] ?: DeviceProfile(),
+            test = state.networkTests.firstOrNull { it.peerId == peer.deviceId },
+            onDismiss = { selectedId = null },
+        )
     }
 }
 
@@ -183,9 +193,132 @@ private fun AddressDialog(onDismiss: () -> Unit) {
     )
 }
 
+/** Save a device's audio profile; an all-default profile is removed. */
+private fun setProfile(deviceId: String, profile: DeviceProfile) {
+    val json = if (profile == DeviceProfile()) null else EngineJson.encodeToString(DeviceProfile.serializer(), profile)
+    SoundPush.command { setDeviceProfile(deviceId, json) }
+}
+
+@Composable
+private fun ProfileCard(peer: PeerView, profile: DeviceProfile) {
+    val default = Choice("", stringResource(R.string.devices_profile_default))
+    SectionTitle(stringResource(R.string.devices_profile))
+    SpCard {
+        Text(
+            stringResource(R.string.devices_profile_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = Tokens.Space.sm),
+        )
+        SettingChoice(
+            stringResource(R.string.devices_profile_latency),
+            profile.latency ?: "",
+            listOf(
+                default,
+                Choice("lowLatency", stringResource(R.string.latency_lowLatency)),
+                Choice("balanced", stringResource(R.string.latency_balanced)),
+                Choice("stable", stringResource(R.string.latency_stable)),
+            ),
+        ) { v -> setProfile(peer.deviceId, profile.copy(latency = v.ifEmpty { null })) }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+        SettingChoice(
+            stringResource(R.string.devices_profile_quality),
+            profile.quality ?: "",
+            listOf(
+                default,
+                Choice("auto", stringResource(R.string.quality_auto)),
+                Choice("opus", stringResource(R.string.quality_opus)),
+                Choice("lossless", stringResource(R.string.quality_lossless)),
+            ),
+        ) { v -> setProfile(peer.deviceId, profile.copy(quality = v.ifEmpty { null })) }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+        SettingChoice(
+            stringResource(R.string.devices_profile_redundancy),
+            when (profile.redundancy) {
+                true -> "on"
+                false -> "off"
+                null -> ""
+            },
+            listOf(
+                default,
+                Choice("on", stringResource(R.string.devices_profile_on)),
+                Choice("off", stringResource(R.string.devices_profile_off)),
+            ),
+        ) { v ->
+            setProfile(
+                peer.deviceId,
+                profile.copy(redundancy = when (v) { "on" -> true; "off" -> false; else -> null }),
+            )
+        }
+    }
+}
+
+@Composable
+private fun NetworkTestCard(peer: PeerView, test: NetworkTestView?) {
+    SectionTitle(stringResource(R.string.nettest_title))
+    SpCard {
+        Text(
+            stringResource(R.string.nettest_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = Tokens.Space.sm),
+        )
+        if (test?.status == "running") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.nettest_running, (test.progress * 100).roundToInt()),
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { SoundPush.command { cancelNetworkTest(peer.deviceId) } }) {
+                    Text(stringResource(R.string.nettest_cancel))
+                }
+            }
+        } else {
+            OutlinedButton(
+                enabled = peer.connection == "connected",
+                onClick = { SoundPush.command { runNetworkTest(peer.deviceId) } },
+            ) { Text(stringResource(R.string.nettest_run)) }
+        }
+        if (test?.status == "failed") {
+            Text(stringResource(R.string.nettest_failed), color = MaterialTheme.colorScheme.error)
+        }
+        val report = test?.report
+        if (report != null && test.status != "running") {
+            Text(
+                stringResource(
+                    R.string.nettest_result,
+                    report.rttMs.roundToInt(),
+                    report.jitterMs.roundToInt(),
+                    String.format(Locale.getDefault(), "%.1f", report.lossPct),
+                    report.achievableKbps,
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = Tokens.Space.sm),
+            )
+            report.recommendation.tips.forEach { tip ->
+                Labels.networkTip(tip)?.let {
+                    Text(stringResource(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            TextButton(onClick = {
+                val rec = report.recommendation
+                setProfile(
+                    peer.deviceId,
+                    DeviceProfile(
+                        latency = rec.latency,
+                        quality = rec.quality,
+                        opusBitrate = if (rec.quality == "opus") rec.opusBitrate else null,
+                        redundancy = rec.redundancy,
+                    ),
+                )
+            }) { Text(stringResource(R.string.nettest_apply)) }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DeviceSheet(peer: PeerView, onDismiss: () -> Unit) {
+private fun DeviceSheet(peer: PeerView, profile: DeviceProfile, test: NetworkTestView?, onDismiss: () -> Unit) {
     var confirmForget by remember { mutableStateOf(false) }
     var alias by remember(peer.deviceId) { mutableStateOf(peer.name) }
     val policies = listOf(
@@ -208,8 +341,9 @@ private fun DeviceSheet(peer: PeerView, onDismiss: () -> Unit) {
                 Spacer(Modifier.width(Tokens.Space.md))
                 Column(Modifier.weight(1f)) {
                     Text(peer.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val status = stringResource(Labels.status(peer.connection))
                     Text(
-                        stringResource(Labels.status(peer.connection)),
+                        if (peer.transport == "tcp") stringResource(R.string.status_with_link, status, stringResource(R.string.peer_via_usb)) else status,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -261,6 +395,9 @@ private fun DeviceSheet(peer: PeerView, onDismiss: () -> Unit) {
                     }
                 }
             }
+
+            ProfileCard(peer, profile)
+            NetworkTestCard(peer, test)
 
             SpCard {
                 SettingSwitch(

@@ -19,13 +19,13 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 
 | Item | Status | Notes |
 |---|---|---|
-| `sp-protocol` (messages, media header, framing, versions) | ✅ | 12 tests |
-| `sp-security` (identity, QR proof, SAS, encrypted trust store) | ✅ | 13 tests |
-| `sp-transport` (QUIC, mutual TLS, pinning, datagrams, exporter) | ✅ | real QUIC tests |
+| `sp-protocol` (messages, media header, framing, versions) | ✅ | protocol 1.0–1.1 (capability-gated session tickets, network-test probes, TCP stream frames); 20 tests |
+| `sp-security` (identity, QR proof, SAS, encrypted trust store) | ✅ | 16 tests |
+| `sp-transport` (QUIC, TLS over TCP, mutual TLS, pinning, datagrams, exporter, migration) | ✅ | real QUIC and TCP tests, including a client address change mid-session |
 | `sp-discovery` (mDNS, signed beacons, registry, ranking) | 🟡 | unit-tested; multicast needs real-network check |
 | `sp-media` (Opus/PCM, adaptive jitter buffer, drift, DSP, RNNoise) | ✅ | 19 tests incl. 1-hour drift simulation |
 | `sp-audio-io` (trait, cpal backend, null backend, converters) | 🟡 | unit-tested; device paths need hardware |
-| `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | 13 tests incl. two-engine pairing → audio → prompt → stop → forget → restart-reconnect |
+| `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | unit tests plus two-engine tests: pairing → audio → prompt → stop → forget, restart-reconnect, resume without a second prompt, shared encoder, live codec switch, USB (TCP) + network test, resume after restart. Audio devices open off the actor |
 | Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, 9 UI tests |
 | Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`); speakers are not muted while sending on PulseAudio (its monitors follow the sink mute) |
 | Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test |
@@ -52,14 +52,18 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 |---|---|---|
 | Android app audio → PC (playback capture) | 🟡 | `AppAudioCapture` |
 | PC mic → phone, PC↔PC, phone↔phone | 🟡 | same route model; untested on hardware |
-| Multi-device streaming | 🟡 | engine supports N sessions/routes; encoder sharing ⏳ |
+| Multi-device streaming | ✅ / 🟡 | encoder groups: one capture and encoder per (source, profile) shared by every route that can use it (engine test: two receivers, one capture); needs a multi-phone hardware check |
 | Per-stream volume, balance, mono, A/V offset, remote volume/mute, "Mute PC" | ✅ / 🟡 | engine + UI; OS mute via platform calls |
 | Adaptive bitrate from receiver stats | ✅ | |
 | Packet redundancy (auto on >1 % loss) | ✅ | test recovers frames with 20 % simulated loss |
 | Session timer, quality badge, connection details | ✅ | |
 | Custom bitrate steps incl. AudioRelay's | ✅ | |
 | USB tethering | 🟡 | works as IP network |
-| USB via ADB (TLS-over-TCP transport) | ⏳ | ADR-0005 |
+| USB via ADB (TLS-over-TCP transport) | 🟡 | ADR-0005: `sp-transport/src/tcp.rs`; desktop listens on loopback, Devices page finds adb and runs `adb reverse`; the phone dials its loopback candidate after 2 s of network candidates. Tested engine to engine over TCP; needs a real phone |
+| Session resume after a network interruption | ✅ / 🟡 | single-use resume tokens bound to the peer key (10 min) + QUIC migration; an approved "Ask" route resumes without a second prompt (engine test); needs a Wi-Fi roam check |
+| Per-device audio profiles (latency, quality, bitrate, redundancy) | ✅ / 🟡 | `settings.deviceProfiles`, applied at route start and live (bitrate/redundancy live, codec changes renegotiated); desktop Devices page, Android device sheet |
+| Network self-test (RTT, jitter, loss, achievable bitrate, recommendation) | ✅ / 🟡 | probes over the media path, ~10 s, cancellable; "Use recommended settings" applies a device profile |
+| Local crash reports for Rust panics | ✅ | redacted report in the data folder, notice once on next start, included in the desktop diagnostics export; nothing uploaded |
 | Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
 | PipeWire app capture | ⏳ | ADR-0002. On Linux it means moving the app's stream to a private null sink and recording its monitor; `CaptureSource::Application` exists (Windows) but has no Linux implementation yet |
 | Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
@@ -88,7 +92,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 
 | Item | Status |
 |---|---|
-| Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices) |
+| Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices); in-process soak and latency harness: `tools/soak` |
 | External security review | ⏳ |
 | Release workflow: NSIS, universal DMG, deb/rpm/AppImage, APK, SHA256SUMS, CycloneDX SBOMs, draft GitHub Release | 🟡 (`release.yml`, not yet run on GitHub) |
 | Desktop auto-update signed with a free minisign key; Android update check against GitHub Releases | 🟡 (needs the `TAURI_SIGNING_*` secrets and a first published release) |

@@ -1,0 +1,15 @@
+[package]
+name = "soundpush-soak"
+description = "Soak and latency harness: two SoundPush engines on loopback with generated audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sp-engine = { path = "../../sound-push-core/sp-engine" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[lints]
+workspace = true

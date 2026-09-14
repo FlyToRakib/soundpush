@@ -10,6 +10,7 @@ members = [
     "sound-push-core/sp-engine",
     "sound-push-core/sp-ffi",
     "sound-push-desktop/src-tauri",
+    "tools/soak",
 ]
 
 [workspace.package]

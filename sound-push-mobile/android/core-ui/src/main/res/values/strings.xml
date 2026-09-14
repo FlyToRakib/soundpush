@@ -234,7 +234,6 @@
     <string name="devices_profile_redundancy">Extra protection against dropouts</string>
     <string name="devices_profile_on">On</string>
     <string name="devices_profile_off">Off</string>
-    <string name="devices_transport_usb">Connected by USB</string>
     <string name="nettest_title">Network test</string>
     <string name="nettest_desc">Measures delay, jitter, packet loss and speed to this device. Takes about 10 seconds.</string>
     <string name="nettest_run">Test connection</string>

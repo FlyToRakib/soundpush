@@ -4913,6 +4913,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "soundpush-soak"
+version = "0.1.0"
+dependencies = [
+ "sp-engine",
+ "tokio",
+]
+
+[[package]]
 name = "soup3"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
