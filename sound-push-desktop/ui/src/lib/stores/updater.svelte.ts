@@ -56,7 +56,9 @@ export class UpdaterStore {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     if (!enabled) return;
-    void this.checkIfDue();
+    // Called from a component effect: start the check on the next tick so the state it reads
+    // is not tracked by that effect (tracking it re-ran the effect on every status change).
+    setTimeout(() => void this.checkIfDue(), 0);
     this.timer = setInterval(() => void this.checkIfDue(), POLL_MS);
   }
 
@@ -70,6 +72,9 @@ export class UpdaterStore {
     const before = this.status;
     this.status = "checking";
     if (manual) this.errorKey = null;
+    // A background attempt counts even when it fails, so an unreachable or missing update
+    // feed is tried again after the daily interval, not immediately.
+    if (!manual) writeLastCheck(this.now());
     try {
       const update = await this.checker();
       writeLastCheck(this.now());

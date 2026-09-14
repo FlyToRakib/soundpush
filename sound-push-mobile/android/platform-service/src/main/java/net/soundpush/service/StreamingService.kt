@@ -9,8 +9,6 @@ import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.net.ConnectivityManager
-import android.net.Network
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -34,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -41,6 +40,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.MicSettings
+import net.soundpush.engine.OutputPreference
 import net.soundpush.engine.PlatformDelegate
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
@@ -62,6 +62,7 @@ class StreamingService : Service() {
     private var focusRequest: AudioFocusRequest? = null
     private var focusMode: String? = null
     private var mutedByFocus = false
+    private var duckedByFocus = false
     private var capture: AppAudioCapture? = null
         set(value) {
             field = value
@@ -93,17 +94,26 @@ class StreamingService : Service() {
             IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(networkCallback)
+        // Network changes reach the engine through its own process-level watcher (NetworkWatcher).
         scope.launch {
             SoundPush.state.collectLatest { state ->
                 if (state == null) return@collectLatest
                 updateMediaSession(state)
                 updateNotification()
-                restartMicIfSettingsChanged(state.settings.mic)
+                restartMicIfSettingsChanged(state)
                 if (types.playback) updateAudioFocus()
                 updateCallWatch()
                 syncPlatformPlayback(state)
                 syncAppAudioCapture(state)
+            }
+        }
+        // The notification names the current output (speaker, headphones, Bluetooth).
+        scope.launch { DeviceStatus.output.collect { updateNotification() } }
+        // A chosen output (Settings → Audio) follows its device as it connects and disconnects.
+        scope.launch {
+            combine(OutputPreference.target, DeviceStatus.output) { _, _ -> }.collect {
+                syncPlatformPlayback(SoundPush.state.value)
+                playback?.setPreferredDevice(preferredOutput())
             }
         }
     }
@@ -223,13 +233,17 @@ class StreamingService : Service() {
         val legacy = state?.settings?.output?.compatibilityOutput == true
         if (wanted && (playback == null || playbackLegacy != legacy)) {
             playback?.stop()
-            playback = PlatformPlayback.start(this, legacy)
+            playback = PlatformPlayback.start(this, legacy, preferredOutput())
             playbackLegacy = legacy
         } else if (!wanted && playback != null) {
             playback?.stop()
             playback = null
         }
     }
+
+    /** The connected device for the output the user chose, or null to follow Android's routing. */
+    private fun preferredOutput() =
+        getSystemService(AudioManager::class.java)?.let { OutputPreference.device(it, OutputPreference.target.value) }
 
     private fun appVisible() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
@@ -281,13 +295,20 @@ class StreamingService : Service() {
     }
 
     private fun buildNotification() =
-        Notifications.streaming(this, SoundPush.state.value, types.microphone, session?.sessionToken, types.listenStarting)
+        Notifications.streaming(
+            this,
+            SoundPush.state.value,
+            types.microphone,
+            session?.sessionToken,
+            types.listenStarting,
+            DeviceStatus.output.value,
+        )
 
     /** Run the microphone recorder exactly while the engine needs mic input. */
     private fun updateMicCapture() {
         val wanted = types.microphone
         if (wanted && mic == null) {
-            val settings = SoundPush.state.value?.settings?.mic ?: return
+            val settings = recorderMicSettings(SoundPush.state.value) ?: return
             mic = MicCapture.start(settings)
             micSettingsInUse = settings
         } else if (!wanted && mic != null) {
@@ -297,9 +318,17 @@ class StreamingService : Service() {
         }
     }
 
-    /** The recorder's source and platform effects are fixed when it opens: reopen it when they change mid-stream. */
-    private fun restartMicIfSettingsChanged(settings: MicSettings) {
+    /** The user's microphone settings, with the voice-call preset and echo cancellation during the headset task. */
+    private fun recorderMicSettings(state: EngineState?): MicSettings? =
+        state?.let { HeadsetMode.recorderSettings(it.settings.mic, HeadsetMode.active(it.routes)) }
+
+    /**
+     * The recorder's source and platform effects are fixed when it opens: reopen it when they change
+     * mid-stream, including when the headset task starts or ends (back to the user's own preset).
+     */
+    private fun restartMicIfSettingsChanged(state: EngineState) {
         val inUse = micSettingsInUse ?: return
+        val settings = recorderMicSettings(state) ?: return
         if (mic == null || MicCapture.recorderSettings(inUse) == MicCapture.recorderSettings(settings)) return
         mic?.stop()
         mic = MicCapture.start(settings)
@@ -445,29 +474,39 @@ class StreamingService : Service() {
         val receiving = SoundPush.state.value?.routes?.filter { !it.isSending }.orEmpty()
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                setDucked(false)
                 mutedByFocus = true
                 receiving.forEach { r -> SoundPush.command { setRouteMuted(r.routeId, true) } }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 if (mode == "duck") {
-                    receiving.forEach { r -> SoundPush.command { setRouteVolume(r.routeId, 0.3f) } }
+                    setDucked(true)
                 } else {
                     mutedByFocus = true
                     receiving.forEach { r -> SoundPush.command { setRouteMuted(r.routeId, true) } }
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                // Auto-resume after the interruption ends.
-                receiving.forEach { r ->
-                    SoundPush.command { setRouteVolume(r.routeId, 1f) }
-                    if (mutedByFocus) SoundPush.command { setRouteMuted(r.routeId, false) }
-                }
+                // Auto-resume after the interruption ends. Volumes were never touched, so nothing to restore.
+                setDucked(false)
+                if (mutedByFocus) receiving.forEach { r -> SoundPush.command { setRouteMuted(r.routeId, false) } }
                 mutedByFocus = false
             }
         }
     }
 
+    /**
+     * "Lower volume" ducks the whole output with a separate gain in the audio backend, so the
+     * volume the user set on each stream is never overwritten and survives the interruption.
+     */
+    private fun setDucked(ducked: Boolean) {
+        if (duckedByFocus == ducked) return
+        duckedByFocus = ducked
+        SoundPush.command { setOutputDuck(if (ducked) DUCK_GAIN else 1f) }
+    }
+
     private fun abandonFocus() {
+        setDucked(false)
         val request = focusRequest ?: return
         getSystemService(AudioManager::class.java)?.abandonAudioFocusRequest(request)
         focusRequest = null
@@ -530,15 +569,8 @@ class StreamingService : Service() {
         }
     }
 
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            SoundPush.command { networkChanged() }
-        }
-    }
-
     override fun onDestroy() {
         runCatching { unregisterReceiver(noisyReceiver) }
-        runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(networkCallback) }
         capture?.stop()
         capture = null
         mic?.stop()
@@ -576,6 +608,8 @@ class StreamingService : Service() {
         private const val CUSTOM_ACTION_STOP = "net.soundpush.session.STOP"
         private const val LISTEN_KIND = "receiveSystemAudio"
         private const val LISTEN_WAIT_MS = 20_000L
+        /** Output level while another app briefly asks us to lower the volume (about −10 dB). */
+        private const val DUCK_GAIN = 0.3f
 
         private val _capturing = MutableStateFlow(false)
 

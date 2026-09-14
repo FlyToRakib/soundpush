@@ -78,6 +78,8 @@ data class PeerView(
     val hasVirtualMic: Boolean = false,
     /** "quic" or "tcp" (USB) while connected. */
     val transport: String = "",
+    /** This phone muted the device's own speakers ("Mute computer speakers") in this session. */
+    val speakersMuted: Boolean = false,
 )
 
 @Serializable

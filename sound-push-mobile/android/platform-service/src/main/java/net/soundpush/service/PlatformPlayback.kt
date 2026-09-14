@@ -3,6 +3,7 @@ package net.soundpush.service
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTimestamp
@@ -58,6 +59,11 @@ class PlatformPlayback private constructor(private val context: Context, private
         running = false
     }
 
+    /** Play on [device] (Settings → Audio → Output), or where Android routes media when null. */
+    fun setPreferredDevice(device: AudioDeviceInfo?) {
+        runCatching { track.setPreferredDevice(device) }
+    }
+
     /** Lets equalizer apps (and the system's sound effects screen) attach to this session. */
     private fun openEffectSession(open: Boolean) {
         val action = if (open) AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION else AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION
@@ -76,7 +82,7 @@ class PlatformPlayback private constructor(private val context: Context, private
         private const val BYTES_PER_FRAME = 4
         private const val FRAMES_PER_PULL = 480 // 10 ms
 
-        fun start(context: Context, legacy: Boolean): PlatformPlayback? {
+        fun start(context: Context, legacy: Boolean, preferred: AudioDeviceInfo? = null): PlatformPlayback? {
             val minBuffer = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
             val bufferBytes = maxOf(minBuffer, FRAMES_PER_PULL * BYTES_PER_FRAME * 4)
             val track = runCatching {
@@ -112,6 +118,7 @@ class PlatformPlayback private constructor(private val context: Context, private
                         .build()
                 }
             }.getOrNull()?.takeIf { it.state == AudioTrack.STATE_INITIALIZED } ?: return null
+            if (preferred != null) runCatching { track.setPreferredDevice(preferred) }
             return PlatformPlayback(context.applicationContext, track)
         }
     }

@@ -36,7 +36,7 @@ import net.soundpush.ui.theme.Tokens
 
 /** Settings → About: this device, version and licence, update check, and help links. */
 @Composable
-internal fun AboutSection(state: EngineState) {
+internal fun AboutSection(state: EngineState, onOpenLicenses: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val version = state.local.appVersion
@@ -97,6 +97,18 @@ internal fun AboutSection(state: EngineState) {
             openUrl(context, ProjectLinks.LICENSE)
         }
         NavRow(stringResource(R.string.settings_source)) { openUrl(context, ProjectLinks.SOURCE) }
+        NavRow(stringResource(R.string.settings_licenses), stringResource(R.string.settings_licenses_desc), onOpenLicenses)
+        NavRow(stringResource(R.string.settings_share_app)) { shareApp(context) }
+    }
+}
+
+/** Share sheet with a short description and the project link (plan §4.4 "Share app"). */
+private fun shareApp(context: Context) {
+    val send = Intent(Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(Intent.EXTRA_TEXT, context.getString(R.string.share_app_text, ProjectLinks.SOURCE))
+    runCatching {
+        context.startActivity(Intent.createChooser(send, context.getString(R.string.settings_share_app)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 
