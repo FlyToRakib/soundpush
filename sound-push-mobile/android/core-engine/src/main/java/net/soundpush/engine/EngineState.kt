@@ -223,4 +223,5 @@ data class Settings(
     val savedRoutes: List<SavedRoute> = emptyList(),
     val dismissedTips: List<String> = emptyList(),
     val audioCues: Boolean = false,
+    val checkForUpdates: Boolean = true,
 )

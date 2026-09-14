@@ -130,20 +130,13 @@ fun SettingsScreen(state: EngineState, onOpenAudio: () -> Unit) {
             NavRow(stringResource(R.string.settings_get_desktop)) {
                 val share = Intent(Intent.ACTION_SEND)
                     .setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, "https://github.com/soundpush/soundpush/releases")
+                    .putExtra(Intent.EXTRA_TEXT, ProjectLinks.RELEASES)
                 runCatching { context.startActivity(Intent.createChooser(share, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             }
         }
 
         SectionTitle(stringResource(R.string.settings_about))
-        SpCard {
-            Column(Modifier.padding(vertical = Tokens.Space.sm)) {
-                Text(state.local.name, style = MaterialTheme.typography.bodyLarge)
-                Caption(state.local.displayCode)
-                if (state.local.addresses.isNotEmpty()) Caption(state.local.addresses.take(2).joinToString(" · "))
-                Caption(stringResource(R.string.settings_version, state.local.appVersion))
-            }
-        }
+        AboutSection(state)
     }
 }
 
