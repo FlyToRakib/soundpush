@@ -1,10 +1,7 @@
 package net.soundpush.settings
 
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,6 +18,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
@@ -41,13 +40,18 @@ import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.theme.Tokens
 
-private val isXiaomi = Build.MANUFACTURER.equals("xiaomi", ignoreCase = true)
-
 @Composable
-fun SettingsScreen(state: EngineState, onOpenAudio: () -> Unit) {
+fun SettingsScreen(
+    state: EngineState,
+    onOpenAudio: () -> Unit,
+    onOpenTroubleshooter: () -> Unit = {},
+    onOpenBatteryGuide: () -> Unit = {},
+    onExportDiagnostics: () -> Unit = {},
+) {
     val s = state.settings
     val context = LocalContext.current
     val focus = LocalFocusManager.current
+    val network by DeviceStatus.network.collectAsState()
     var name by remember(s.deviceName) { mutableStateOf(s.deviceName) }
     val saveName = {
         val value = name.trim()
@@ -87,6 +91,11 @@ fun SettingsScreen(state: EngineState, onOpenAudio: () -> Unit) {
                     Choice("dark", stringResource(R.string.theme_dark)),
                 ),
             ) { v -> SoundPush.updateSettings { it.copy(theme = v) } }
+            SettingSwitch(
+                stringResource(R.string.settings_audio_cues),
+                s.audioCues,
+                stringResource(R.string.settings_audio_cues_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(audioCues = v) } }
             Divider()
             NavRow(stringResource(R.string.settings_audio), onClick = onOpenAudio)
         }
@@ -97,15 +106,32 @@ fun SettingsScreen(state: EngineState, onOpenAudio: () -> Unit) {
                 stringResource(R.string.settings_stay_available),
                 s.mobile.stayAvailable,
                 stringResource(R.string.settings_stay_available_desc),
-            ) { v -> SoundPush.updateSettings { it.copy(mobile = it.mobile.copy(stayAvailable = v)) } }
+            ) { v ->
+                SoundPush.updateSettings { it.copy(mobile = it.mobile.copy(stayAvailable = v)) }
+                // Long background use is exactly when the battery exemption is justified.
+                if (v && !BatteryGuides.isUnrestricted(context)) BatteryGuides.requestUnrestricted(context)
+            }
             SettingSwitch(stringResource(R.string.settings_remind), s.mobile.remindAfterRestart) { v ->
                 SoundPush.updateSettings { it.copy(mobile = it.mobile.copy(remindAfterRestart = v)) }
             }
             Divider()
-            NavRow(
-                stringResource(R.string.settings_battery),
-                stringResource(if (isXiaomi) R.string.settings_battery_miui else R.string.settings_battery_desc),
-            ) { openBackgroundSettings(context) }
+            NavRow(stringResource(R.string.settings_battery), stringResource(R.string.settings_battery_desc), onOpenBatteryGuide)
+        }
+
+        SectionTitle(stringResource(R.string.settings_usb))
+        SpCard {
+            Caption(stringResource(if (network.usbTethering) R.string.settings_usb_on else R.string.settings_usb_off))
+            Caption(stringResource(if (network.sharesMobileData) R.string.hint_tether_data_body else R.string.settings_usb_desc))
+            Divider()
+            NavRow(stringResource(R.string.settings_usb_open)) {
+                BatteryGuides.open(
+                    context,
+                    listOf(
+                        Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.TetherSettings")),
+                        Intent(AndroidSettings.ACTION_WIRELESS_SETTINGS),
+                    ),
+                )
+            }
         }
 
         SectionTitle(stringResource(R.string.settings_privacy))
@@ -124,13 +150,14 @@ fun SettingsScreen(state: EngineState, onOpenAudio: () -> Unit) {
 
         SectionTitle(stringResource(R.string.settings_help))
         SpCard {
-            Caption(stringResource(R.string.trouble_no_devices))
-            Caption(stringResource(R.string.trouble_crackles))
+            NavRow(stringResource(R.string.settings_troubleshoot), stringResource(R.string.settings_troubleshoot_desc), onOpenTroubleshooter)
+            Divider()
+            NavRow(stringResource(R.string.settings_diagnostics), stringResource(R.string.settings_diagnostics_desc), onExportDiagnostics)
             Divider()
             NavRow(stringResource(R.string.settings_get_desktop)) {
                 val share = Intent(Intent.ACTION_SEND)
                     .setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, "https://github.com/soundpush/soundpush/releases")
+                    .putExtra(Intent.EXTRA_TEXT, DESKTOP_DOWNLOAD_URL)
                 runCatching { context.startActivity(Intent.createChooser(share, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             }
         }
@@ -147,6 +174,8 @@ fun SettingsScreen(state: EngineState, onOpenAudio: () -> Unit) {
     }
 }
 
+const val DESKTOP_DOWNLOAD_URL = "https://github.com/soundpush/soundpush/releases"
+
 @Composable
 private fun Divider() = HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
@@ -161,16 +190,3 @@ private fun Caption(text: String) {
 }
 
 private fun Int.dp() = androidx.compose.ui.unit.Dp(toFloat())
-
-/** Opens the most useful "let this app run in the background" screen for this phone. */
-private fun openBackgroundSettings(context: Context) {
-    val candidates = buildList {
-        if (isXiaomi) {
-            add(Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")))
-        }
-        add(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
-    }
-    for (intent in candidates) {
-        if (runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
-    }
-}

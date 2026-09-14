@@ -40,11 +40,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import net.soundpush.ui.R
@@ -135,12 +140,22 @@ fun TaskCard(
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val muted = !enabled && !active
+    val stateText = when {
+        active -> stringResource(R.string.a11y_active)
+        muted -> stringResource(R.string.a11y_unavailable)
+        else -> null
+    }
     Surface(
         onClick = onClick,
         shape = MaterialTheme.shapes.medium,
         color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
         border = BorderStroke(if (active) 1.5.dp else 1.dp, if (active) accent else MaterialTheme.colorScheme.outline),
-        modifier = Modifier.fillMaxWidth().semantics { selected = active },
+        // Stays enabled when unavailable (tapping explains why), so say so instead of "disabled".
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
+            role = Role.Button
+            selected = active
+            if (stateText != null) stateDescription = stateText
+        },
     ) {
         Row(Modifier.padding(Tokens.Space.md), verticalAlignment = Alignment.CenterVertically) {
             IconTile(icon, active = !muted, filled = active)
@@ -254,7 +269,11 @@ fun SettingSlider(
             valueRange = range,
             steps = steps,
             colors = SliderDefaults.colors(inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant),
-            modifier = Modifier.semantics { contentDescription = label },
+            // Announce the formatted value ("+6 dB", "120%") rather than a raw percentage.
+            modifier = Modifier.semantics {
+                contentDescription = label
+                stateDescription = format(local)
+            },
         )
     }
 }
@@ -264,27 +283,37 @@ data class Choice(val value: String, val label: String)
 @Composable
 fun SettingChoice(label: String, value: String, choices: List<Choice>, onChange: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
+    val current = choices.firstOrNull { it.value == value }?.label ?: value
     Box {
         Row(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
-                .clickable(role = Role.DropdownList) { open = true },
+                .clickable(role = Role.DropdownList) { open = true }
+                .semantics(mergeDescendants = true) { stateDescription = current },
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Both sides may wrap at large font sizes; neither can push the other off screen.
             Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(end = Tokens.Space.md))
             Text(
-                choices.firstOrNull { it.value == value }?.label ?: value,
+                current,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics { },
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             choices.forEach { choice ->
-                DropdownMenuItem(text = { Text(choice.label) }, onClick = {
-                    open = false
-                    onChange(choice.value)
-                })
+                DropdownMenuItem(
+                    text = { Text(choice.label) },
+                    onClick = {
+                        open = false
+                        onChange(choice.value)
+                    },
+                    trailingIcon = if (choice.value == value) ({ Icon(SpIcons.Check, null) }) else null,
+                    modifier = Modifier.semantics { selected = choice.value == value },
+                )
             }
         }
     }
@@ -294,7 +323,7 @@ fun SettingChoice(label: String, value: String, choices: List<Choice>, onChange:
 @Composable
 fun NavRow(label: String, description: String? = null, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(vertical = Tokens.Space.xs),
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = Tokens.Space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(end = Tokens.Space.md)) {
@@ -307,24 +336,77 @@ fun NavRow(label: String, description: String? = null, onClick: () -> Unit) {
     }
 }
 
-/** Connection-status banner with one clear action. */
+/** A contextual banner (problem or tip) with one fix action and, for tips, Dismiss. */
+data class BannerModel(
+    val key: String,
+    val title: String,
+    val message: String? = null,
+    val actionLabel: String? = null,
+    val onAction: (() -> Unit)? = null,
+    val icon: ImageVector = SpIcons.Info,
+    val warning: Boolean = false,
+    val dismissLabel: String? = null,
+    val onDismiss: (() -> Unit)? = null,
+)
+
 @Composable
-fun StatusBanner(title: String, message: String?, actionLabel: String?, onAction: (() -> Unit)?) {
+fun StatusBanner(model: BannerModel) = StatusBanner(
+    title = model.title,
+    message = model.message,
+    actionLabel = model.actionLabel,
+    onAction = model.onAction,
+    icon = model.icon,
+    warning = model.warning,
+    dismissLabel = model.dismissLabel,
+    onDismiss = model.onDismiss,
+)
+
+/**
+ * Connection-status banner with one clear action. With [onDismiss] the actions move under the text,
+ * so two buttons still fit at large font sizes. Announced politely when it appears.
+ */
+@Composable
+fun StatusBanner(
+    title: String,
+    message: String?,
+    actionLabel: String?,
+    onAction: (() -> Unit)?,
+    icon: ImageVector = SpIcons.Wifi,
+    warning: Boolean = false,
+    dismissLabel: String? = null,
+    onDismiss: (() -> Unit)? = null,
+) {
+    val tint = if (warning) LocalSpColors.current.warning else MaterialTheme.colorScheme.primary
+    val hasAction = actionLabel != null && onAction != null
+    val stacked = dismissLabel != null && onDismiss != null
     Surface(
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = if (warning) LocalSpColors.current.warning.copy(alpha = 0.12f) else MaterialTheme.colorScheme.secondaryContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.padding(start = Tokens.Space.md, end = Tokens.Space.xs, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(SpIcons.Wifi, null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                if (message != null) {
-                    Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.padding(start = Tokens.Space.md, end = Tokens.Space.xs, top = 12.dp, bottom = if (stacked) 4.dp else 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = tint)
+                Spacer(Modifier.width(12.dp))
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .padding(end = Tokens.Space.xs)
+                        .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    if (message != null) {
+                        Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (hasAction && !stacked) TextButton(onClick = onAction!!) { Text(actionLabel!!) }
+            }
+            if (stacked) {
+                Row(Modifier.align(Alignment.End)) {
+                    TextButton(onClick = onDismiss!!) { Text(dismissLabel!!) }
+                    if (hasAction) TextButton(onClick = onAction!!) { Text(actionLabel!!) }
                 }
             }
-            if (actionLabel != null && onAction != null) TextButton(onClick = onAction) { Text(actionLabel) }
         }
     }
 }

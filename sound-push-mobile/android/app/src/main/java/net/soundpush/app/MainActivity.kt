@@ -1,11 +1,14 @@
 package net.soundpush.app
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings as AndroidSettings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -37,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.os.BundleCompat
 import androidx.navigation.NavHostController
@@ -56,21 +61,29 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import java.io.Serializable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.soundpush.audio.AudioScreen
 import net.soundpush.devices.DevicesScreen
 import net.soundpush.devices.QrScanner
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.RouteRequestPrompt
 import net.soundpush.engine.SoundPush
 import net.soundpush.home.HomeScreen
 import net.soundpush.service.StreamingService
+import net.soundpush.settings.BatteryGuideScreen
 import net.soundpush.settings.SettingsScreen
+import net.soundpush.settings.TroubleTopic
+import net.soundpush.settings.TroubleshootTopicScreen
+import net.soundpush.settings.TroubleshooterScreen
 import net.soundpush.ui.R
+import net.soundpush.ui.components.BannerModel
 import net.soundpush.ui.components.Labels
 import net.soundpush.ui.components.ScreenHeader
 import net.soundpush.ui.icons.SpIcons
@@ -99,6 +112,16 @@ class MainActivity : ComponentActivity() {
     private var afterCameraGranted: (() -> Unit)? = null
     private val messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
+    /** Whether notifications can be shown; re-read on every resume (the user may change it in settings). */
+    private var notificationsEnabled by mutableStateOf(true)
+
+    /** Explain notifications once per launch, the first time a stream starts without them. */
+    private var notificationRationale by mutableStateOf(false)
+    private var rationaleShown = false
+    private var exporting = false
+
+    private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
+
     private fun takePending(): Pending? = pending.also { pending = null }
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -116,7 +139,9 @@ class MainActivity : ComponentActivity() {
         if (granted) next?.invoke() else messages.tryEmit(getString(R.string.scan_camera_denied))
     }
 
-    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        refreshNotificationsEnabled()
+    }
 
     private val projectionConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
@@ -135,11 +160,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // The engine starts with the first screen, not with the process (see SoundPushApplication).
+        SoundPush.ensureStarted(applicationContext)
+        DeviceStatus.start(this)
         pending = savedInstanceState?.let { BundleCompat.getSerializable(it, KEY_PENDING, Pending::class.java) }
-        // Ask once per launch, not again on every rotation after a "don't allow".
-        if (savedInstanceState == null && Build.VERSION.SDK_INT >= 33 && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         setContent {
             val state by SoundPush.state.collectAsState()
             val startError by SoundPush.startError.collectAsState()
@@ -170,6 +194,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshNotificationsEnabled()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putSerializable(KEY_PENDING, pending)
@@ -177,6 +206,35 @@ class MainActivity : ComponentActivity() {
 
     private fun hasPermission(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun refreshNotificationsEnabled() {
+        notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled() &&
+            (Build.VERSION.SDK_INT < 33 || hasPermission(Manifest.permission.POST_NOTIFICATIONS))
+    }
+
+    /**
+     * Ask for notifications with the system dialog while Android still offers it; after "Don't
+     * allow" twice (or when turned off in settings) only the app's notification settings can help.
+     */
+    private fun requestNotifications() {
+        if (Build.VERSION.SDK_INT >= 33 && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+            val asked = prefs.getBoolean(KEY_NOTIFICATIONS_ASKED, false)
+            if (!asked || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+                prefs.edit().putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        openSettings(
+            Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, packageName),
+        )
+    }
+
+    private fun openSettings(vararg intents: Intent) {
+        for (intent in intents) {
+            if (runCatching { startActivity(intent) }.isSuccess) return
+        }
+    }
 
     /** Screen-capture consent is single-use and only needed while no app-audio recorder runs. */
     private fun needsCaptureConsent() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !StreamingService.capturing.value
@@ -189,6 +247,11 @@ class MainActivity : ComponentActivity() {
 
     /** Check the permissions each route kind needs, then start. */
     private fun startRoutes(peerId: String, kinds: List<String>) {
+        // Streams work without notifications, so explain alongside the start instead of blocking it.
+        if (!notificationsEnabled && !rationaleShown) {
+            rationaleShown = true
+            notificationRationale = true
+        }
         val needsMic = kinds.any { it.startsWith("sendMic") }
         val needsProjection = kinds.contains("sendAppAudio")
         if (needsMic && !hasPermission(Manifest.permission.RECORD_AUDIO)) {
@@ -212,6 +275,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun dismissTip(key: String) {
+        SoundPush.updateSettings { if (key in it.dismissedTips) it else it.copy(dismissedTips = it.dismissedTips + key) }
+    }
+
     @Composable
     private fun App(state: EngineState) {
         val nav = rememberNavController()
@@ -221,6 +288,30 @@ class MainActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
         val showMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+
+        // First run only; people who already paired a device (an update) skip it silently.
+        val startDestination = remember { if (ONBOARDING_TIP !in state.settings.dismissedTips && state.trustedPeers.isEmpty()) "onboarding" else "home" }
+        LaunchedEffect(Unit) {
+            if (ONBOARDING_TIP !in state.settings.dismissedTips && state.trustedPeers.isNotEmpty()) dismissTip(ONBOARDING_TIP)
+        }
+        val finishOnboarding: (String) -> Unit = { destination ->
+            dismissTip(ONBOARDING_TIP)
+            nav.navigate(destination) { popUpTo("onboarding") { inclusive = true } }
+        }
+        val fromOnboarding = nav.previousBackStackEntry?.destination?.route == "onboarding"
+        val fullScreen = route == "scan" || route == "onboarding"
+
+        val exportDiagnostics: () -> Unit = {
+            if (!exporting) {
+                exporting = true
+                scope.launch {
+                    showMessage(context.getString(R.string.diagnostics_preparing))
+                    val uri = Diagnostics.export(context)
+                    exporting = false
+                    if (uri != null) Diagnostics.share(this@MainActivity, uri) else showMessage(context.getString(R.string.diagnostics_failed))
+                }
+            }
+        }
 
         LaunchedEffect(Unit) {
             SoundPush.errors.collect { snackbar.showSnackbar(context.getString(Labels.error(it.key))) }
@@ -241,6 +332,12 @@ class MainActivity : ComponentActivity() {
                 }
         }
 
+        // A crash last time is mentioned once; the report itself stays on the phone.
+        var crashNotice by rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            if (withContext(Dispatchers.IO) { CrashReports.hasUnseen(context) }) crashNotice = true
+        }
+
         // App-audio routes opened without this screen (a remembered permission, resume on start) carry
         // silence until the user grants screen capture. Ask once such a route has been open a moment;
         // the moment covers the normal path, where the recorder starts right after consent.
@@ -255,22 +352,42 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val banners = homeBanners(state)
+        val network by DeviceStatus.network.collectAsState()
+        val usbLabel = stringResource(R.string.peer_via_usb)
+
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
-                if (route != "scan") {
+                if (!fullScreen) {
+                    val title = if (route == "troubleshoot/{topic}") {
+                        TroubleTopic.from(backStack?.arguments?.getString("topic"))?.title ?: titleFor(route)
+                    } else {
+                        titleFor(route)
+                    }
                     ScreenHeader(
-                        title = stringResource(titleFor(route)),
-                        onBack = if (route == "audio") ({ nav.popBackStack() }) else null,
+                        title = stringResource(title),
+                        onBack = if (route in SETTINGS_SUBSCREENS) ({ nav.popBackStack() }) else null,
                     )
                 }
             },
             bottomBar = {
-                if (route != "scan") BottomBar(route) { destination -> nav.navigateToTab(destination) }
+                if (!fullScreen && !fromOnboarding) BottomBar(route) { destination -> nav.navigateToTab(destination) }
             },
         ) { padding ->
-            NavHost(nav, startDestination = "home", modifier = Modifier.padding(padding)) {
+            NavHost(nav, startDestination = startDestination, modifier = Modifier.padding(padding)) {
+                composable("onboarding") {
+                    OnboardingScreen(
+                        state = state,
+                        notificationsEnabled = notificationsEnabled,
+                        onRequestNotifications = ::requestNotifications,
+                        onOpenBatteryGuide = { nav.navigate("battery") },
+                        onScan = { withCamera { nav.navigate("scan") } },
+                        onEnterAddress = { finishOnboarding("devices") },
+                        onFinish = { finishOnboarding("home") },
+                    )
+                }
                 composable("home") {
                     HomeScreen(
                         state = state,
@@ -278,13 +395,40 @@ class MainActivity : ComponentActivity() {
                         onPair = { withCamera { nav.navigate("scan") } },
                         onOpenDevices = { nav.navigateToTab("devices") },
                         onShowMessage = showMessage,
+                        banners = banners,
+                        peerLabel = { peer ->
+                            val viaUsb = network.usbTethering && peer.connection == "connected" && peer.addresses.any(network::isTetherAddress)
+                            if (viaUsb) usbLabel else null
+                        },
                     )
                 }
                 composable("devices") {
                     DevicesScreen(state, onScan = { withCamera { nav.navigate("scan") } }, onShowMessage = showMessage)
                 }
-                composable("settings") { SettingsScreen(state, onOpenAudio = { nav.navigate("audio") }) }
+                composable("settings") {
+                    SettingsScreen(
+                        state,
+                        onOpenAudio = { nav.navigate("audio") },
+                        onOpenTroubleshooter = { nav.navigate("troubleshoot") },
+                        onOpenBatteryGuide = { nav.navigate("battery") },
+                        onExportDiagnostics = exportDiagnostics,
+                    )
+                }
                 composable("audio") { AudioScreen(state) }
+                composable("troubleshoot") {
+                    TroubleshooterScreen(onOpenTopic = { nav.navigate("troubleshoot/$it") }, onExportDiagnostics = exportDiagnostics)
+                }
+                composable("troubleshoot/{topic}") { entry ->
+                    TroubleshootTopicScreen(
+                        topicKey = entry.arguments?.getString("topic").orEmpty(),
+                        state = state,
+                        onOpenDevices = { nav.navigateToTab("devices") },
+                        onOpenHome = { nav.navigateToTab("home") },
+                        onOpenBatteryGuide = { nav.navigate("battery") },
+                        onExportDiagnostics = exportDiagnostics,
+                    )
+                }
+                composable("battery") { BatteryGuideScreen() }
                 composable("scan") {
                     QrScanner(
                         onResult = { uri ->
@@ -298,6 +442,119 @@ class MainActivity : ComponentActivity() {
         }
 
         Overlays(state)
+
+        if (crashNotice) {
+            val close = {
+                crashNotice = false
+                scope.launch(Dispatchers.IO) { CrashReports.markSeen(context) }
+            }
+            AlertDialog(
+                onDismissRequest = { close() },
+                icon = { Icon(SpIcons.Alert, null) },
+                title = { Text(stringResource(R.string.crash_title), textAlign = TextAlign.Center) },
+                text = { Text(stringResource(R.string.crash_body)) },
+                confirmButton = {
+                    Button(onClick = {
+                        close()
+                        exportDiagnostics()
+                    }) { Text(stringResource(R.string.settings_diagnostics)) }
+                },
+                dismissButton = { TextButton(onClick = { close() }) { Text(stringResource(R.string.common_close)) } },
+            )
+        } else if (notificationRationale) {
+            AlertDialog(
+                onDismissRequest = { notificationRationale = false },
+                icon = { Icon(SpIcons.Alert, null) },
+                title = { Text(stringResource(R.string.notif_rationale_title), textAlign = TextAlign.Center) },
+                text = { Text(stringResource(R.string.notif_rationale_body)) },
+                confirmButton = {
+                    Button(onClick = {
+                        notificationRationale = false
+                        requestNotifications()
+                    }) { Text(stringResource(R.string.notif_rationale_allow)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { notificationRationale = false }) { Text(stringResource(R.string.common_not_now)) }
+                },
+            )
+        }
+    }
+
+    /**
+     * Contextual banners on Home, each with one fix and (for tips) Dismiss, remembered in
+     * settings.dismissedTips like the desktop's tips.
+     */
+    @Composable
+    private fun homeBanners(state: EngineState): List<BannerModel> {
+        val output by DeviceStatus.output.collectAsState()
+        val network by DeviceStatus.network.collectAsState()
+        val measuredMs by DeviceStatus.outputLatencyMs.collectAsState()
+        val tips = state.settings.dismissedTips
+        val receiving = state.routes.any { !it.isSending && it.status != "stopped" }
+        val dismiss = stringResource(R.string.common_dismiss)
+        return buildList {
+            if (state.routes.isNotEmpty() && !notificationsEnabled) {
+                add(
+                    BannerModel(
+                        key = "notifications",
+                        title = stringResource(R.string.home_banner_notifications),
+                        message = stringResource(R.string.home_banner_notifications_body),
+                        actionLabel = stringResource(R.string.notif_rationale_allow),
+                        onAction = ::requestNotifications,
+                        icon = SpIcons.Alert,
+                        warning = true,
+                    ),
+                )
+            }
+            if (receiving && output == DeviceStatus.Output.Bluetooth && TIP_BLUETOOTH !in tips) {
+                val stable = state.settings.stream.latency == "stable"
+                add(
+                    BannerModel(
+                        key = TIP_BLUETOOTH,
+                        title = if (measuredMs > 0) stringResource(R.string.hint_bluetooth_measured, measuredMs) else stringResource(R.string.hint_bluetooth_title),
+                        message = stringResource(R.string.hint_bluetooth_body),
+                        actionLabel = if (stable) null else stringResource(R.string.hint_use_stable),
+                        onAction = { SoundPush.updateSettings { it.copy(stream = it.stream.copy(latency = "stable")) } },
+                        icon = SpIcons.Bluetooth,
+                        dismissLabel = dismiss,
+                        onDismiss = { dismissTip(TIP_BLUETOOTH) },
+                    ),
+                )
+            }
+            if (network.sharesMobileData && TIP_TETHER_DATA !in tips) {
+                add(
+                    BannerModel(
+                        key = TIP_TETHER_DATA,
+                        title = stringResource(R.string.hint_tether_data_title),
+                        message = stringResource(R.string.hint_tether_data_body),
+                        actionLabel = stringResource(R.string.common_open_settings),
+                        onAction = {
+                            openSettings(
+                                Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.TetherSettings")),
+                                Intent(AndroidSettings.ACTION_WIRELESS_SETTINGS),
+                            )
+                        },
+                        icon = SpIcons.Usb,
+                        warning = true,
+                        dismissLabel = dismiss,
+                        onDismiss = { dismissTip(TIP_TETHER_DATA) },
+                    ),
+                )
+            }
+            if (state.routes.isNotEmpty() && network.mobileDataOnly && TIP_MOBILE_DATA !in tips) {
+                add(
+                    BannerModel(
+                        key = TIP_MOBILE_DATA,
+                        title = stringResource(R.string.hint_mobile_data_title),
+                        message = stringResource(R.string.hint_mobile_data_body),
+                        icon = SpIcons.Wifi,
+                        warning = true,
+                        dismissLabel = dismiss,
+                        onDismiss = { dismissTip(TIP_MOBILE_DATA) },
+                    ),
+                )
+            }
+        }
     }
 
     private fun NavHostController.navigateToTab(destination: String) {
@@ -324,6 +581,7 @@ class MainActivity : ComponentActivity() {
                             fontSize = 36.sp,
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 4.sp,
+                            textAlign = TextAlign.Center,
                             modifier = Modifier.padding(top = Tokens.Space.md),
                         )
                     }
@@ -385,5 +643,11 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val KEY_PENDING = "pending"
+        const val PREFS = "soundpush_local"
+        const val KEY_NOTIFICATIONS_ASKED = "notificationsAsked"
+        const val ONBOARDING_TIP = "onboarding"
+        const val TIP_BLUETOOTH = "bluetoothLatency"
+        const val TIP_TETHER_DATA = "usbTetherData"
+        const val TIP_MOBILE_DATA = "mobileData"
     }
 }

@@ -34,7 +34,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -43,6 +48,7 @@ import net.soundpush.engine.PeerView
 import net.soundpush.engine.RouteView
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
+import net.soundpush.ui.components.BannerModel
 import net.soundpush.ui.components.EmptyState
 import net.soundpush.ui.components.IconTile
 import net.soundpush.ui.components.Labels
@@ -103,6 +109,10 @@ fun HomeScreen(
     onPair: () -> Unit,
     onOpenDevices: () -> Unit,
     onShowMessage: (String) -> Unit,
+    /** Contextual problems and tips (Bluetooth delay, mobile data, notifications off). */
+    banners: List<BannerModel> = emptyList(),
+    /** Extra link label for a device, e.g. "USB" when it is reached over USB tethering. */
+    peerLabel: (PeerView) -> String? = { null },
 ) {
     // The open device picker survives rotation; tasks are identified by their title resource.
     var pickingRes by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -155,6 +165,8 @@ fun HomeScreen(
             }
         }
 
+        items(banners, key = { "banner-${it.key}" }) { banner -> StatusBanner(banner) }
+
         if (state.routes.isNotEmpty()) {
             item(key = "active-title") { SectionTitle(stringResource(R.string.home_active)) }
             items(state.routes, key = { it.routeId }) { route ->
@@ -199,7 +211,7 @@ fun HomeScreen(
         }
 
         item(key = "peers-title") { SectionTitle(stringResource(R.string.devices_paired)) }
-        items(state.trustedPeers, key = { "peer-${it.deviceId}" }) { peer -> PeerRow(peer, onOpenDevices) }
+        items(state.trustedPeers, key = { "peer-${it.deviceId}" }) { peer -> PeerRow(peer, peerLabel(peer), onOpenDevices) }
     }
 
     // The list follows live state: devices that disconnect disappear, the dialog closes when none are left.
@@ -245,7 +257,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun PeerRow(peer: PeerView, onOpen: () -> Unit) {
+private fun PeerRow(peer: PeerView, label: String?, onOpen: () -> Unit) {
     Surface(
         onClick = onOpen,
         shape = MaterialTheme.shapes.medium,
@@ -257,8 +269,9 @@ private fun PeerRow(peer: PeerView, onOpen: () -> Unit) {
             Spacer(Modifier.width(Tokens.Space.md))
             Column(Modifier.weight(1f)) {
                 Text(peer.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val status = stringResource(Labels.status(peer.connection))
                 Text(
-                    stringResource(Labels.status(peer.connection)),
+                    if (label != null) stringResource(R.string.status_with_link, status, label) else status,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -267,6 +280,21 @@ private fun PeerRow(peer: PeerView, onOpen: () -> Unit) {
             Spacer(Modifier.width(4.dp))
             Icon(SpIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
         }
+    }
+}
+
+/** Mute (shows the action it performs; the icon tile shows the current state) and Stop. */
+@Composable
+private fun RouteControls(route: RouteView) {
+    IconButton(onClick = { SoundPush.command { setRouteMuted(route.routeId, !route.muted) } }) {
+        Icon(
+            if (route.muted) SpIcons.Speaker else SpIcons.Mute,
+            stringResource(if (route.muted) R.string.route_unmute else R.string.route_mute),
+            tint = if (route.muted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    FilledTonalButton(onClick = { SoundPush.command { stopRoute(route.routeId) } }) {
+        Text(stringResource(R.string.route_stop))
     }
 }
 
@@ -283,22 +311,25 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
         else -> SpIcons.Speaker
     }
 
+    val toggleLabel = stringResource(if (expanded) R.string.a11y_hide_details else R.string.a11y_show_details)
+    val largeText = LocalDensity.current.fontScale >= 1.5f
     Surface(
         onClick = { expanded = !expanded },
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().semantics { onClick(label = toggleLabel) { expanded = !expanded; true } },
     ) {
         Column(Modifier.padding(Tokens.Space.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconTile(icon, route.status == "active")
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
+                // Route state changes ("Reconnecting…", "Starting…") are announced as they happen.
+                Column(Modifier.weight(1f).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
                     Text(
                         stringResource(Labels.routeTitle(route.kind), route.peerName),
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
@@ -313,16 +344,12 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
                         else -> Text(stringResource(R.string.route_waiting, route.peerName), style = MaterialTheme.typography.bodySmall, color = secondary)
                     }
                 }
-                IconButton(onClick = { SoundPush.command { setRouteMuted(route.routeId, !route.muted) } }) {
-                    Icon(
-                        // The button shows the action it performs; the tile on the left shows the current state.
-                        if (route.muted) SpIcons.Speaker else SpIcons.Mute,
-                        stringResource(if (route.muted) R.string.route_unmute else R.string.route_mute),
-                        tint = if (route.muted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledTonalButton(onClick = { SoundPush.command { stopRoute(route.routeId) } }) {
-                    Text(stringResource(R.string.route_stop))
+                if (!largeText) RouteControls(route)
+            }
+            // At large font sizes the buttons get their own row so the title and status keep the full width.
+            if (largeText) {
+                Row(Modifier.align(Alignment.End).padding(top = Tokens.Space.sm), verticalAlignment = Alignment.CenterVertically) {
+                    RouteControls(route)
                 }
             }
 

@@ -13,8 +13,13 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
+import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
+import androidx.annotation.RequiresApi
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
@@ -29,11 +34,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.MicSettings
 import net.soundpush.engine.PlatformDelegate
 import net.soundpush.engine.SoundPush
+import net.soundpush.ui.R
+import net.soundpush.ui.components.Labels
+import net.soundpush.service.R as ServiceR
 
 /**
  * Keeps the process alive while streaming, or while "Stay available" is on. Its
@@ -58,7 +70,14 @@ class StreamingService : Service() {
     private var mic: MicCapture? = null
     private var micSettingsInUse: MicSettings? = null
     private var stopJob: Job? = null
+    private var listenJob: Job? = null
     private var consentAskedFor: String? = null
+    private var playback: PlatformPlayback? = null
+    private var playbackLegacy = false
+    private var session: MediaSessionCompat? = null
+    private var sessionKey: Any? = null
+    private var modeListener: Any? = null
+    private var mutedByCall = false
 
     private val streaming get() = types.playback || types.microphone || types.appAudio
 
@@ -67,6 +86,7 @@ class StreamingService : Service() {
     override fun onCreate() {
         super.onCreate()
         Notifications.ensureChannels(this)
+        DeviceStatus.start(this)
         ContextCompat.registerReceiver(
             this,
             noisyReceiver,
@@ -77,9 +97,12 @@ class StreamingService : Service() {
         scope.launch {
             SoundPush.state.collectLatest { state ->
                 if (state == null) return@collectLatest
+                updateMediaSession(state)
                 updateNotification()
                 restartMicIfSettingsChanged(state.settings.mic)
                 if (types.playback) updateAudioFocus()
+                updateCallWatch()
+                syncPlatformPlayback(state)
                 syncAppAudioCapture(state)
             }
         }
@@ -87,9 +110,7 @@ class StreamingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            Notifications.ACTION_STOP_ALL -> SoundPush.state.value?.routes?.forEach { r ->
-                SoundPush.command { stopRoute(r.routeId) }
-            }
+            Notifications.ACTION_STOP_ALL -> stopAll()
             Notifications.ACTION_TOGGLE_MUTE -> {
                 // Follow the routes' own mute state, the same one the app's Mute button uses, so the
                 // notification never fights a mute set from the app or from the computer.
@@ -97,6 +118,11 @@ class StreamingService : Service() {
                 val muted = micRoutes.isNotEmpty() && micRoutes.all { it.muted }
                 micRoutes.forEach { r -> SoundPush.command { setRouteMuted(r.routeId, !muted) } }
             }
+            Notifications.ACTION_TOGGLE_PLAYBACK_MUTE -> {
+                val receiving = receivingRoutes(SoundPush.state.value)
+                setPlaybackMuted(!(receiving.isNotEmpty() && receiving.all { it.muted }))
+            }
+            ACTION_TOGGLE_LISTEN -> toggleListen()
             ACTION_UPDATE -> {
                 types = KeepAliveTypes(
                     playback = intent.getBooleanExtra(EXTRA_PLAYBACK, false),
@@ -105,6 +131,7 @@ class StreamingService : Service() {
                     // truth here, not the engine's wish: without a recorder there is nothing to keep alive.
                     appAudio = capture != null,
                     stayAvailable = intent.getBooleanExtra(EXTRA_STAY, false),
+                    listenStarting = types.listenStarting,
                 )
             }
             ACTION_START_APP_AUDIO -> {
@@ -121,6 +148,45 @@ class StreamingService : Service() {
         }
         enterForeground()
         return START_NOT_STICKY
+    }
+
+    private fun receivingRoutes(state: EngineState?) = state?.routes?.filter { !it.isSending && it.status != "stopped" }.orEmpty()
+
+    private fun stopAll() {
+        SoundPush.state.value?.routes?.forEach { r -> SoundPush.command { stopRoute(r.routeId) } }
+    }
+
+    private fun setPlaybackMuted(muted: Boolean) {
+        receivingRoutes(SoundPush.state.value).forEach { r -> SoundPush.command { setRouteMuted(r.routeId, muted) } }
+    }
+
+    /**
+     * Home-screen widget: stop listening, or start listening to the first connected computer. The
+     * widget tap started this service in the foreground, so it can wait for the engine (which may
+     * be starting from a cold process) and for a computer to connect, then start the route.
+     */
+    private fun toggleListen() {
+        val listening = SoundPush.state.value?.routes?.filter { it.kind == LISTEN_KIND }.orEmpty()
+        if (listening.isNotEmpty()) {
+            listening.forEach { r -> SoundPush.command { stopRoute(r.routeId) } }
+            return
+        }
+        if (listenJob?.isActive == true) return
+        types = types.copy(listenStarting = true)
+        SoundPush.ensureStarted(this)
+        listenJob = scope.launch {
+            val state = withTimeoutOrNull(LISTEN_WAIT_MS) {
+                SoundPush.state.mapNotNull { s -> s?.takeIf { it.connectedPeers.any { p -> p.canSendSystemAudio } } }.first()
+            }
+            val peer = state?.connectedPeers?.firstOrNull { it.canSendSystemAudio }
+            when {
+                peer == null -> Notifications.listenUnavailable(this@StreamingService)
+                state.routes.none { it.kind == LISTEN_KIND } -> SoundPush.command { startRoute(peer.deviceId, LISTEN_KIND) }
+            }
+            // The engine's keep-alive takes over once the route opens; the stop grace period covers the gap.
+            types = types.copy(listenStarting = false)
+            enterForeground()
+        }
     }
 
     /**
@@ -147,20 +213,41 @@ class StreamingService : Service() {
         }
     }
 
+    /**
+     * Run the AudioTrack player exactly while a stream plays through the platform path
+     * (compatibility output, output audio effects, or the automatic fallback). The native side
+     * knows which streams are there; reopen when the user switches between the two player kinds.
+     */
+    private fun syncPlatformPlayback(state: EngineState?) {
+        val wanted = types.playback && SoundPush.direct { platformOutputActive() } == true
+        val legacy = state?.settings?.output?.compatibilityOutput == true
+        if (wanted && (playback == null || playbackLegacy != legacy)) {
+            playback?.stop()
+            playback = PlatformPlayback.start(this, legacy)
+            playbackLegacy = legacy
+        } else if (!wanted && playback != null) {
+            playback?.stop()
+            playback = null
+        }
+    }
+
     private fun appVisible() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
     private fun enterForeground() {
-        if (!streaming && !types.stayAvailable) {
+        if (!streaming && !types.stayAvailable && !types.listenStarting) {
             updateMicCapture()
             releaseLocks()
             abandonFocus()
+            updateCallWatch()
+            syncPlatformPlayback(SoundPush.state.value)
+            updateMediaSession(SoundPush.state.value)
             scheduleStop()
             return
         }
         stopJob?.cancel()
         var serviceTypes = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (types.playback) serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            if (types.playback || types.listenStarting) serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             if (types.appAudio) serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
             if (types.microphone && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
@@ -173,13 +260,9 @@ class StreamingService : Service() {
                 }
             }
         }
+        updateMediaSession(SoundPush.state.value)
         try {
-            ServiceCompat.startForeground(
-                this,
-                Notifications.ID_STREAMING,
-                Notifications.streaming(this, SoundPush.state.value, types.microphone),
-                serviceTypes,
-            )
+            ServiceCompat.startForeground(this, Notifications.ID_STREAMING, buildNotification(), serviceTypes)
         } catch (e: Exception) {
             // Background start restrictions (Android 12+ / while-in-use mic): ask the user to open the
             // app. ServiceDelegate re-sends the request when the app comes to the front.
@@ -192,8 +275,13 @@ class StreamingService : Service() {
         // Wake and Wi-Fi locks cost battery: hold them only while audio is actually flowing.
         if (streaming) acquireLocks() else releaseLocks()
         updateAudioFocus()
+        updateCallWatch()
         updateMicCapture()
+        syncPlatformPlayback(SoundPush.state.value)
     }
+
+    private fun buildNotification() =
+        Notifications.streaming(this, SoundPush.state.value, types.microphone, session?.sessionToken, types.listenStarting)
 
     /** Run the microphone recorder exactly while the engine needs mic input. */
     private fun updateMicCapture() {
@@ -219,10 +307,70 @@ class StreamingService : Service() {
     }
 
     private fun updateNotification() {
-        if (!streaming && !types.stayAvailable) return
+        if (!streaming && !types.stayAvailable && !types.listenStarting) return
         val nm = getSystemService(android.app.NotificationManager::class.java)
-        runCatching {
-            nm.notify(Notifications.ID_STREAMING, Notifications.streaming(this, SoundPush.state.value, types.microphone))
+        runCatching { nm.notify(Notifications.ID_STREAMING, buildNotification()) }
+    }
+
+    // ------------------------------------------------------------------ media session
+
+    /**
+     * While this phone plays audio, a media session gives the notification media controls, lets
+     * headset buttons pause (mute) and resume, and shows the system output switcher (Android 11+).
+     * Updated only when what it shows changes, not on every stats tick.
+     */
+    private fun updateMediaSession(state: EngineState?) {
+        val receiving = receivingRoutes(state)
+        if (!types.playback || receiving.isEmpty()) {
+            session?.run {
+                isActive = false
+                release()
+            }
+            session = null
+            sessionKey = null
+            return
+        }
+        val first = receiving.first()
+        val title = getString(Labels.routeTitle(first.kind), first.peerName)
+        val muted = receiving.all { it.muted }
+        val key = title to muted
+        val s = session ?: MediaSessionCompat(this, "SoundPush").also {
+            it.setCallback(sessionCallback)
+            it.setSessionActivity(Notifications.openAppIntent(this))
+            session = it
+        }
+        if (key == sessionKey) return
+        sessionKey = key
+        s.setMetadata(
+            MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, getString(R.string.app_name))
+                .build(),
+        )
+        s.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_STOP,
+                )
+                // Android 13+ media controls show custom actions, not the notification's own buttons.
+                .addCustomAction(CUSTOM_ACTION_STOP, getString(R.string.route_stop), ServiceR.drawable.ic_action_stop)
+                .setState(
+                    if (muted) PlaybackStateCompat.STATE_PAUSED else PlaybackStateCompat.STATE_PLAYING,
+                    PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
+                    1f,
+                )
+                .build(),
+        )
+        s.isActive = true
+    }
+
+    private val sessionCallback = object : MediaSessionCompat.Callback() {
+        override fun onPlay() = setPlaybackMuted(false)
+        override fun onPause() = setPlaybackMuted(true)
+        override fun onStop() = stopAll()
+        override fun onCustomAction(action: String?, extras: Bundle?) {
+            if (action == CUSTOM_ACTION_STOP) stopAll()
         }
     }
 
@@ -326,6 +474,52 @@ class StreamingService : Service() {
         focusMode = null
     }
 
+    // ------------------------------------------------------------------ calls in "Keep playing" mode
+
+    /**
+     * "Keep playing" mixes with other apps but still goes quiet during phone and VoIP calls
+     * ("Keep playing, even during calls" doesn't). Without audio focus the call is noticed through
+     * the audio mode, which Android reports to listeners from 12 on; older versions keep playing.
+     */
+    private fun updateCallWatch() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val wanted = types.playback && SoundPush.state.value?.settings?.output?.audioFocus == "mix"
+        if (wanted && modeListener == null) {
+            modeListener = addModeListener()
+        } else if (!wanted && modeListener != null) {
+            removeModeListener(modeListener)
+            modeListener = null
+            if (mutedByCall) setPlaybackMuted(false)
+            mutedByCall = false
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun addModeListener(): Any? {
+        val am = getSystemService(AudioManager::class.java) ?: return null
+        val listener = AudioManager.OnModeChangedListener { mode ->
+            val inCall = mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION ||
+                mode == AudioManager.MODE_RINGTONE || mode == AudioManager.MODE_CALL_SCREENING
+            scope.launch {
+                if (inCall && !mutedByCall) {
+                    mutedByCall = true
+                    setPlaybackMuted(true)
+                } else if (!inCall && mutedByCall) {
+                    mutedByCall = false
+                    setPlaybackMuted(false)
+                }
+            }
+        }
+        am.addOnModeChangedListener(mainExecutor, listener)
+        return listener
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun removeModeListener(listener: Any?) {
+        val l = listener as? AudioManager.OnModeChangedListener ?: return
+        getSystemService(AudioManager::class.java)?.removeOnModeChangedListener(l)
+    }
+
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (SoundPush.state.value?.settings?.output?.pauseOnHeadsetDisconnect != false) {
@@ -348,6 +542,12 @@ class StreamingService : Service() {
         capture?.stop()
         capture = null
         mic?.stop()
+        playback?.stop()
+        playback = null
+        session?.release()
+        session = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) removeModeListener(modeListener)
+        modeListener = null
         abandonFocus()
         releaseLocks()
         scope.cancel()
@@ -359,17 +559,23 @@ class StreamingService : Service() {
         val microphone: Boolean = false,
         val appAudio: Boolean = false,
         val stayAvailable: Boolean = false,
+        /** The widget asked to listen; stay in the foreground while the engine connects. */
+        val listenStarting: Boolean = false,
     )
 
     companion object {
         const val ACTION_UPDATE = "net.soundpush.UPDATE"
         const val ACTION_START_APP_AUDIO = "net.soundpush.START_APP_AUDIO"
+        const val ACTION_TOGGLE_LISTEN = "net.soundpush.TOGGLE_LISTEN"
         const val EXTRA_PLAYBACK = "playback"
         const val EXTRA_MIC = "mic"
         const val EXTRA_APP_AUDIO = "appAudio"
         const val EXTRA_STAY = "stayAvailable"
         const val EXTRA_PROJECTION_CODE = "projectionCode"
         const val EXTRA_PROJECTION_DATA = "projectionData"
+        private const val CUSTOM_ACTION_STOP = "net.soundpush.session.STOP"
+        private const val LISTEN_KIND = "receiveSystemAudio"
+        private const val LISTEN_WAIT_MS = 20_000L
 
         private val _capturing = MutableStateFlow(false)
 

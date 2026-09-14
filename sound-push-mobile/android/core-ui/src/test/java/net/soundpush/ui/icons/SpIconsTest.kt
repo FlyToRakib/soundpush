@@ -17,7 +17,15 @@ class SpIconsTest {
         "Apps" to SpIcons.Apps, "Plus" to SpIcons.Plus, "Close" to SpIcons.Close,
         "Stop" to SpIcons.Stop, "Mute" to SpIcons.Mute, "Qr" to SpIcons.Qr,
         "Chevron" to SpIcons.Chevron, "Alert" to SpIcons.Alert, "Back" to SpIcons.Back, "Wifi" to SpIcons.Wifi,
+        "Check" to SpIcons.Check, "Info" to SpIcons.Info, "Bluetooth" to SpIcons.Bluetooth, "Usb" to SpIcons.Usb,
     )
+
+    @Test
+    fun directionalIconsMirrorInRtl() {
+        assertTrue(SpIcons.Back.autoMirror)
+        assertTrue(SpIcons.Chevron.autoMirror)
+        assertTrue(!SpIcons.Speaker.autoMirror)
+    }
 
     @Test
     fun everyIconHasDrawablePaths() {

@@ -19,4 +19,7 @@ dependencies {
     implementation(project(":core-ui"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.process)
+    // MediaSessionCompat + MediaStyle notification (media controls with the system output switcher).
+    implementation(libs.androidx.media)
+    testImplementation(libs.junit)
 }

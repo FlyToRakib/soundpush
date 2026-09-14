@@ -159,8 +159,6 @@
     <string name="settings_get_desktop">Get SoundPush for computer</string>
     <string name="settings_about">About</string>
     <string name="settings_version">Version %1$s · Free and open source (GPL-3.0)</string>
-    <string name="trouble_no_devices">Can\'t find your computer? Both devices must be on the same Wi-Fi. Guest networks often block this; use USB tethering or your hotspot instead.</string>
-    <string name="trouble_crackles">Audio cuts out? Choose Stable latency or move closer to the router.</string>
 
     <string name="notif_channel_streaming">Streaming</string>
     <string name="notif_channel_attention">Requests</string>
@@ -213,7 +211,6 @@
 
     <string name="request_remember">Remember for this device</string>
     <string name="notif_available">Available to paired devices</string>
-    <string name="settings_battery_miui">Allow autostart and set battery saver to “No restrictions”.</string>
     <string name="notice_pairing_success">Paired with %1$s</string>
     <string name="notice_peer_forgot_us">%1$s no longer recognises this phone. Pair again to reconnect.</string>
     <string name="notice_identity_reset">This phone\'s identity was reset because its stored key was damaged. Pair your devices again.</string>
@@ -227,4 +224,158 @@
     <string name="common_cancel">Cancel</string>
     <string name="common_close">Close</string>
     <string name="common_save">Save</string>
+    <string name="common_dismiss">Dismiss</string>
+    <string name="common_not_now">Not now</string>
+    <string name="common_open_settings">Open settings</string>
+
+    <!-- Media notification, widget toggle -->
+    <string name="notif_listen_connecting">Connecting to your computer…</string>
+    <string name="notif_listen_unavailable">No computer connected</string>
+    <string name="notif_listen_unavailable_body">Open SoundPush on your computer and on this phone, then try again.</string>
+    <string name="route_mute_mic">Mute microphone</string>
+    <string name="route_unmute_mic">Unmute microphone</string>
+
+    <!-- Home-screen widget -->
+    <string name="widget_description">Start or stop listening to your computer</string>
+    <string name="widget_listening">Listening to %1$s</string>
+    <string name="widget_tap_listen">Tap to listen to %1$s</string>
+    <string name="widget_tap_connect">Tap to connect</string>
+    <string name="widget_action_listen">Listen to computer</string>
+    <string name="widget_action_stop">Stop listening</string>
+
+    <!-- Onboarding (first run) -->
+    <string name="onboarding_step">Step %1$d of %2$d</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_welcome_title">Welcome to SoundPush</string>
+    <string name="onboarding_welcome_body">Play your computer\'s sound on this phone, use this phone as a microphone, or send its audio to another device. Audio stays on your own network.</string>
+    <string name="onboarding_permissions_note">SoundPush asks for the microphone and camera only when you first use them.</string>
+    <string name="onboarding_notif_title">Stream controls in your notifications</string>
+    <string name="onboarding_notif_body">SoundPush shows what\'s streaming in a notification, with Stop and Mute. It works without notifications, but you won\'t see those controls.</string>
+    <string name="onboarding_notif_allow">Allow notifications</string>
+    <string name="onboarding_battery_title">Keep SoundPush running</string>
+    <string name="onboarding_battery_body">%1$s phones may stop apps in the background, which cuts audio when the screen turns off. A quick setting prevents this.</string>
+    <string name="onboarding_battery_open">Show me how</string>
+    <string name="onboarding_pair_title">Pair with your computer</string>
+    <string name="onboarding_pair_body">Install SoundPush on your computer, open it, choose “Pair a device” and scan the code it shows.</string>
+    <string name="onboarding_pair_nearby">Computers nearby</string>
+
+    <!-- Notification permission rationale -->
+    <string name="notif_rationale_title">Allow notifications?</string>
+    <string name="notif_rationale_body">Streams keep running in the background. A notification lets you see what\'s playing and stop or mute it without opening the app.</string>
+    <string name="notif_rationale_allow">Allow</string>
+    <string name="home_banner_notifications">Notifications are off</string>
+    <string name="home_banner_notifications_body">You won\'t see stream controls outside the app.</string>
+
+    <!-- Bluetooth latency, USB tethering and mobile data hints -->
+    <string name="hint_bluetooth_title">Bluetooth adds delay</string>
+    <string name="hint_bluetooth_measured">Bluetooth adds delay (about %1$d ms)</string>
+    <string name="hint_bluetooth_body">Bluetooth headphones and speakers add about 100–300 ms. Stable latency gives steadier sound; for video, use the phone speaker or wired headphones.</string>
+    <string name="hint_use_stable">Use Stable</string>
+    <string name="audio_bluetooth_note">Playing on Bluetooth: expect extra delay. Stable latency is recommended.</string>
+    <string name="hint_tether_data_title">Your computer may use mobile data</string>
+    <string name="hint_tether_data_body">USB tethering and hotspot share this phone\'s mobile data with the computer. Turn off mobile data if you only want to stream.</string>
+    <string name="hint_mobile_data_title">You\'re on mobile data</string>
+    <string name="hint_mobile_data_body">Connect both devices to the same Wi-Fi, or use USB tethering.</string>
+    <string name="peer_via_usb">USB</string>
+    <string name="status_with_link">%1$s · %2$s</string>
+    <string name="settings_usb">USB</string>
+    <string name="settings_usb_on">USB tethering is on</string>
+    <string name="settings_usb_off">USB tethering is off</string>
+    <string name="settings_usb_desc">Connect a USB cable and turn on USB tethering for the lowest delay. The computer may use this phone\'s mobile data.</string>
+    <string name="settings_usb_open">Tethering settings</string>
+
+    <!-- Advanced output -->
+    <string name="audio_output_advanced">Advanced output</string>
+    <string name="audio_compat_output">Compatibility output</string>
+    <string name="audio_compat_output_desc">Uses Android\'s standard player. Try this if audio stutters or there\'s no sound. Adds delay.</string>
+
+    <!-- Settings: help, diagnostics, crash reports, audio cues -->
+    <string name="settings_audio_cues">Sound on connect and disconnect</string>
+    <string name="settings_audio_cues_desc">Plays a short tone when a stream starts or stops.</string>
+    <string name="settings_troubleshoot">Troubleshoot a problem</string>
+    <string name="settings_troubleshoot_desc">Step-by-step checks for common problems</string>
+    <string name="settings_diagnostics">Export diagnostics</string>
+    <string name="settings_diagnostics_desc">Creates a report to attach to a bug report. Nothing is sent automatically.</string>
+    <string name="diagnostics_preparing">Preparing diagnostics…</string>
+    <string name="diagnostics_failed">Couldn\'t create the diagnostics report.</string>
+    <string name="crash_title">SoundPush closed unexpectedly</string>
+    <string name="crash_body">A crash report was saved on this phone. It\'s included when you export diagnostics, so you can attach it to a bug report. Nothing is sent automatically.</string>
+
+    <!-- Guided troubleshooter -->
+    <string name="trouble_title">Troubleshoot</string>
+    <string name="trouble_pick">What\'s wrong?</string>
+    <string name="trouble_find">Can\'t find my computer</string>
+    <string name="trouble_no_audio">No sound</string>
+    <string name="trouble_mic">Microphone isn\'t working</string>
+    <string name="trouble_disconnects">Stops when the screen is off</string>
+    <string name="trouble_checks">Checks</string>
+    <string name="trouble_still_stuck">Still not working? Export diagnostics and attach the file to a bug report.</string>
+    <string name="trouble_state_ok">OK</string>
+    <string name="trouble_state_problem">Needs attention</string>
+    <string name="trouble_state_info">Tip</string>
+    <string name="trouble_wifi_ok">This phone is on Wi-Fi</string>
+    <string name="trouble_wifi_usb">This phone shares its connection over USB tethering</string>
+    <string name="trouble_wifi_off">This phone isn\'t on Wi-Fi. Connect to the same Wi-Fi as your computer, or use USB tethering.</string>
+    <string name="trouble_wifi_settings">Wi-Fi settings</string>
+    <string name="trouble_vpn">A VPN is on. It can block devices on your network: turn it off or allow local network access in the VPN app.</string>
+    <string name="trouble_hidden">“Who can find this phone” is set to Nobody, so new devices can\'t find it.</string>
+    <string name="trouble_nearby_found">SoundPush sees other devices on this network</string>
+    <string name="trouble_nearby_none">No SoundPush devices found on this network. Make sure SoundPush is open on the computer. Guest and public Wi-Fi often block devices from seeing each other: use USB tethering or your phone\'s hotspot.</string>
+    <string name="trouble_firewall">On the computer, allow SoundPush through the firewall for private networks.</string>
+    <string name="trouble_add_address">Enter address</string>
+    <string name="trouble_volume_zero">Media volume is at 0.</string>
+    <string name="trouble_volume_ok">Media volume is on</string>
+    <string name="trouble_volume_up">Turn up</string>
+    <string name="trouble_route_muted">A stream is muted in SoundPush.</string>
+    <string name="trouble_unmute">Unmute</string>
+    <string name="trouble_not_streaming">Nothing is playing on this phone. Start “Listen to computer” on the Home screen.</string>
+    <string name="trouble_streaming_ok">Playing audio from %1$s</string>
+    <string name="trouble_open_home">Go to Home</string>
+    <string name="trouble_bluetooth_out">Sound plays on Bluetooth. Check the headphones are on and connected to this phone.</string>
+    <string name="trouble_compat_suggest">Some phones play nothing on the low-latency path. Try compatibility output.</string>
+    <string name="trouble_turn_on">Turn on</string>
+    <string name="trouble_pc_side">On the computer, check that sound is playing and the right audio device is selected in SoundPush.</string>
+    <string name="trouble_mic_permission_off">Microphone access is off for SoundPush.</string>
+    <string name="trouble_mic_permission_ok">Microphone access is allowed</string>
+    <string name="trouble_app_settings">App settings</string>
+    <string name="trouble_virtual_mic_missing">%1$s has no virtual microphone. Open SoundPush on the computer and set it up on the Audio page.</string>
+    <string name="trouble_virtual_mic_ok">%1$s has a virtual microphone</string>
+    <string name="trouble_mic_muted">The microphone is muted in SoundPush.</string>
+    <string name="trouble_mic_silenced">Another app is using the microphone, so Android gives SoundPush silence. Close the other app.</string>
+    <string name="trouble_mic_app_tip">In the app on your computer (Discord, Zoom…), choose the SoundPush Microphone (or CABLE Output) as the microphone.</string>
+    <string name="trouble_battery_restricted">Battery optimisation can stop SoundPush in the background.</string>
+    <string name="trouble_battery_ok">SoundPush can run in the background</string>
+    <string name="trouble_battery_allow">Allow</string>
+    <string name="trouble_background_restricted">Background use is restricted for SoundPush.</string>
+    <string name="trouble_notifications_off">Notifications are off, so you can\'t see or stop streams outside the app.</string>
+    <string name="trouble_notifications_ok">Notifications are on</string>
+    <string name="trouble_oem_guide">%1$s phones need an extra setting to keep apps running.</string>
+    <string name="trouble_stay_available">To let your computer start streams while SoundPush is closed, turn on “Stay available to paired devices”.</string>
+
+    <!-- Battery optimisation guides per phone maker -->
+    <string name="battery_intro">Android and some phone makers stop apps in the background to save battery. Make these changes so streams keep playing with the screen off.</string>
+    <string name="battery_steps">Steps</string>
+    <string name="battery_open_battery">Battery settings</string>
+    <string name="battery_open_app">App settings</string>
+    <string name="battery_open_autostart">Autostart settings</string>
+    <string name="battery_learn_more">More tips for your phone (dontkillmyapp.com)</string>
+    <string name="battery_xiaomi_1">Turn on Autostart for SoundPush.</string>
+    <string name="battery_xiaomi_2">In Battery saver, choose “No restrictions”.</string>
+    <string name="battery_xiaomi_3">Open recent apps, long-press SoundPush and tap the lock.</string>
+    <string name="battery_samsung_1">Settings → Battery → Background usage limits: add SoundPush to “Never sleeping apps”.</string>
+    <string name="battery_samsung_2">In SoundPush\'s app info, set Battery to “Unrestricted”.</string>
+    <string name="battery_huawei_1">Settings → Battery → App launch: turn off “Manage automatically” for SoundPush and allow all three options.</string>
+    <string name="battery_huawei_2">Open recent apps and lock SoundPush.</string>
+    <string name="battery_oppo_1">Allow Auto launch for SoundPush.</string>
+    <string name="battery_oppo_2">In SoundPush\'s battery usage, allow background activity.</string>
+    <string name="battery_oneplus_1">Settings → Battery → Battery optimisation: set SoundPush to “Don\'t optimise”.</string>
+    <string name="battery_oneplus_2">Open recent apps and lock SoundPush.</string>
+    <string name="battery_generic_1">In SoundPush\'s app info, set Battery to “Unrestricted” (or “Don\'t optimise”).</string>
+
+    <!-- Accessibility state descriptions -->
+    <string name="a11y_active">Active</string>
+    <string name="a11y_unavailable">Unavailable</string>
+    <string name="a11y_show_details">Show details</string>
+    <string name="a11y_hide_details">Hide details</string>
 </resources>
