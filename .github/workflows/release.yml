@@ -80,7 +80,7 @@ jobs:
       - name: Release notes from CHANGELOG.md
         run: node tools/release/release-notes.mjs "${{ steps.version.outputs.version }}" > release-notes.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: release-notes.md
@@ -256,7 +256,7 @@ jobs:
           ls -l dist
           [ -n "$(ls dist)" ] || { echo "::error title=Packages::No packages found under $out"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.name }}
           path: dist/*
@@ -323,7 +323,7 @@ jobs:
           fi
           "$apksigner" verify --print-certs "$out" | head -5
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: dist/*
@@ -355,7 +355,7 @@ jobs:
           npm --prefix sound-push-desktop/ui sbom --sbom-format cyclonedx --omit dev --package-lock-only \
             > "dist/SoundPush_${VERSION}_sbom-desktop-ui.cdx.json"
           ls -l dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: dist/*
@@ -407,7 +407,7 @@ jobs:
         if: needs.prepare.outputs.channel == 'stable'
         run: node tools/release/fill-manifests.mjs --version "$VERSION" --sums dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --out store-manifests
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: needs.prepare.outputs.channel == 'stable'
         with:
           name: store-manifests
