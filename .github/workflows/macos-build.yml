@@ -1,8 +1,9 @@
 name: macOS build
 
 # Builds the SoundPush desktop app for macOS (Apple Silicon + Intel, universal) and uploads the
-# .dmg as an artifact. The app is ad-hoc signed only: on first launch, right-click → Open (or
-# System Settings → Privacy & Security → Open Anyway). Notarised builds need an Apple Developer ID.
+# .dmg as an artifact. The app is ad-hoc signed only: on first launch macOS says it can't verify
+# it; use System Settings → Privacy & Security → Open Anyway. Notarised builds need an Apple
+# Developer ID.
 on:
   workflow_dispatch:
   push:
@@ -35,19 +36,10 @@ jobs:
         working-directory: sound-push-desktop
         run: |
           set -o pipefail
-          ./ui/node_modules/.bin/tauri build --target universal-apple-darwin --bundles dmg 2>&1 | tee ../build.log || {
+          ./ui/node_modules/.bin/tauri build --target universal-apple-darwin --bundles app,dmg 2>&1 | tee ../build.log || {
             grep -E "^error|error\[| --> " ../build.log | head -40 | sed 's/^/::error title=Build::/'
             exit 1
           }
-
-      # macOS remembers "Allow microphone" only for a validly signed app with the audio-input
-      # entitlement; an unsigned bundle asks again and again. Fail the build if that regresses.
-      - name: Verify signature and entitlements
-        run: |
-          app=target/universal-apple-darwin/release/bundle/macos/SoundPush.app
-          codesign --verify --deep --strict --verbose=2 "$app"
-          codesign -d --entitlements - "$app" 2>/dev/null | tee entitlements.txt
-          grep -q "com.apple.security.device.audio-input" entitlements.txt
 
       - name: Upload disk image
         uses: actions/upload-artifact@v4
@@ -55,3 +47,26 @@ jobs:
           name: SoundPush-macOS
           path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+      # macOS remembers "Allow microphone" only for a validly signed app with the audio-input
+      # entitlement; an unsigned bundle asks again and again. Results are written as annotations
+      # (readable on the run page without signing in), and the step fails if either is missing.
+      - name: Verify signature and entitlements
+        run: |
+          bundle=target/universal-apple-darwin/release/bundle
+          app=$(find "$bundle" -maxdepth 2 -name 'SoundPush.app' -type d | head -1)
+          note() { printf '%s\n' "$2" | head -20 | while IFS= read -r line; do echo "::$1 title=Signature::$line"; done; }
+          if [ -z "$app" ]; then
+            note error "No SoundPush.app under $bundle: $(ls -R "$bundle" | head -20 | tr '\n' ' ')"
+            exit 1
+          fi
+          status=0
+          verify=$(codesign --verify --deep --strict --verbose=2 "$app" 2>&1) || status=1
+          note notice "$(codesign -dv "$app" 2>&1 | grep -E 'Signature|flags|Identifier|TeamIdentifier')"
+          ents=$(codesign -d --entitlements - --xml "$app" 2>/dev/null || true)
+          if [ "$status" -ne 0 ]; then note error "codesign --verify: $verify"; fi
+          if ! printf '%s' "$ents" | grep -q 'com.apple.security.device.audio-input'; then
+            note error "audio-input entitlement missing. Entitlements: ${ents:-<none>}"
+            status=1
+          fi
+          exit $status
