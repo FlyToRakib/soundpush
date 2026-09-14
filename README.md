@@ -45,6 +45,8 @@ just mobile-build   # build the Android app (debug)
 
 Requirements: Rust (see `rust-toolchain.toml`), Node 22 + npm, JDK 17, Android SDK + NDK, `cargo-ndk`.
 
+Desktop UI checks (run in `sound-push-desktop/ui`): `npm run check` (svelte-check), `npm test` (Vitest unit tests) and `npm run test:e2e` (Playwright: the built UI against the in-browser mock engine in light and dark themes, with axe WCAG 2.1 AA checks on every page and dialog; install the browser once with `npx playwright install chromium`).
+
 ### Windows desktop app (build on Windows)
 
 The same steps run in GitHub Actions (`.github/workflows/windows-build.yml`).

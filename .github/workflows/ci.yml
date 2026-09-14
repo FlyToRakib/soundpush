@@ -62,6 +62,11 @@ jobs:
       - run: npm --prefix sound-push-desktop/ui run check
       - run: npm --prefix sound-push-desktop/ui test
       - run: npm --prefix sound-push-desktop/ui run build
+      - name: End-to-end UI tests (Playwright + axe, mock engine)
+        working-directory: sound-push-desktop/ui
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
       - name: npm audit (high and critical advisories)
         run: npm --prefix sound-push-desktop/ui audit --audit-level=high --omit=dev
 
