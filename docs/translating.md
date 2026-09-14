@@ -74,10 +74,18 @@ Standard Android resources. Placeholders are `%1$s`, `%2$d`; plurals use `<plura
 Escape apostrophes as `\'`. Android mirrors layouts for right-to-left languages automatically
 (`android:supportsRtl="true"`).
 
+The language list in Settings → General → Language (and Android 13+'s per-app language screen in system settings)
+is generated from the `values-<lang>` folders at build time (`generateLocaleConfig` in `app/build.gradle.kts`), so a
+new folder is all it takes. Android stores the choice as the app's per-app language; the app mirrors it to the
+engine's `language` setting. Numbers and units (`%1$d ms`, `%1$d kb/s`) are strings too, so they can be reordered.
+
 ## Adding a language
 
 1. Copy `en.json` to `<tag>.json` (BCP-47 tag: `de`, `es`, `pt-BR`, `zh-Hans`) and translate the values.
-2. For Android, create `values-<lang>/strings.xml` with the translated strings (only the ones you translated).
+2. For Android, create `values-<lang>/strings.xml` with the translated strings (only the ones you translated). Use
+   Android's resource qualifiers: `values-de`, `values-pt-rBR`, `values-b+zh+Hans`. Build with
+   `./gradlew assembleDebug testDebugUnitTest` (in `sound-push-mobile/android`); the screenshot tests render Home and
+   Settings right to left, and the images land in `app/build/outputs/roborazzi/`.
 3. Check your work:
    ```bash
    npm --prefix sound-push-desktop/ui test   # fails on unknown keys or changed placeholders
@@ -98,6 +106,9 @@ Two pseudo-locales are generated from English at runtime (they are never shipped
 In a development build (`npm run dev` or `tauri dev`) both appear under Settings → General → Language. In a release
 build, set `"language": "en-XA"` (or `"ar-XB"`) in `settings.json` in the SoundPush data folder while the app is
 closed; the language list then shows it too.
+
+On Android, debug builds generate the same two pseudo-locales from `strings.xml` (`isPseudoLocalesEnabled`) and list
+them under Settings → General → Language.
 
 ## Right-to-left languages
 

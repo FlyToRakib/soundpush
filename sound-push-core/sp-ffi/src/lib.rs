@@ -386,6 +386,12 @@ impl SoundPushEngine {
         self.backend.pull_playback_pcm16(frames as usize)
     }
 
+    /// Lower all playback to `gain` (0–1) while another app has transient audio focus, and 1 to
+    /// restore. Separate from route volumes, so the user's volume is never overwritten.
+    pub fn set_output_duck(&self, gain: f32) {
+        self.backend.set_output_duck(gain);
+    }
+
     // ------------------------------------------------------------ settings & lifecycle
 
     pub fn update_settings(&self, settings_json: String) -> Result<String, FfiError> {

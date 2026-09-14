@@ -102,6 +102,9 @@ Microsoft signed it.
 - **Detection:** "SoundPush Microphone Feed" is the playback side, "SoundPush Microphone" the
   recording side (`VIRTUAL_CABLES`). SoundPush hides the feed from its own speaker lists, but
   desktop sound settings show it as an output; don't choose it as your speakers.
+- **Other SoundPush devices.** Sending one app's sound adds a temporary "SoundPush App Capture"
+  output, and muting the speakers on PulseAudio a "SoundPush Speakers" output. They are not
+  microphones: SoundPush hides them and removes them when it is done (or on its next start).
 - **In use:** `virtual_mic::virtual_mic_in_use()` tells whether an app is recording from the
   source (pavucontrol's and GNOME Settings' level meters don't count). It is not wired into the
   engine yet.

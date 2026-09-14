@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Window background matches the token background so there is no flash before Compose draws. -->
-    <style name="Theme.SoundPush" parent="android:Theme.Material.Light.NoActionBar">
+    <!-- Window background matches the token background so there is no flash before Compose draws.
+         AppCompat parent: the activity is an AppCompatActivity for per-app languages on Android 8–12. -->
+    <style name="Theme.SoundPush" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowBackground">@color/sp_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

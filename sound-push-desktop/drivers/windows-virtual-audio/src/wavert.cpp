@@ -127,6 +127,8 @@ const PCFILTER_DESCRIPTOR kCaptureFilter = {
 
 // ------------------------------------------------------------------ format validation
 
+#pragma code_seg("PAGE")
+
 // Validates a KS data format from a client and reduces it to SP_PCM_FORMAT.
 // Returns STATUS_NO_MATCH for anything the driver does not support.
 _IRQL_requires_(PASSIVE_LEVEL)
@@ -196,6 +198,8 @@ NTSTATUS SpParseFormat(_In_ PKSDATAFORMAT DataFormat, _Out_ SP_PCM_FORMAT* Forma
     Format->BlockAlign = blockAlign;
     return STATUS_SUCCESS;
 }
+
+#pragma code_seg()
 
 // Frames elapsed in Ticks performance-counter ticks, without overflow for any
 // realistic uptime (Frequency * SP_SAMPLE_RATE stays far below 2^63).

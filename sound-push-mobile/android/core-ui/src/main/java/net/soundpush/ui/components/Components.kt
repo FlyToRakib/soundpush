@@ -421,7 +421,7 @@ fun QualityBadge(quality: String, label: String, latencyMs: Double = 0.0) {
     ) {
         Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(color))
         Spacer(Modifier.width(6.dp))
-        val text = if (latencyMs > 0) "$label · ${latencyMs.toInt()} ms" else label
+        val text = if (latencyMs > 0) stringResource(R.string.quality_with_latency, label, latencyMs.toInt()) else label
         Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

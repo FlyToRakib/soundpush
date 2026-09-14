@@ -14,7 +14,7 @@
 //! Kotlin learns when to run each recorder from `mic_capture_active` /
 //! `app_audio_active` (and the engine's keep-alive callback).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use sp_audio_io::cpal_backend::CpalBackend;
@@ -66,6 +66,18 @@ const PLATFORM_LATENCY_MS: u32 = 40;
 /// Upper bound for one pull (1 s), so a bad argument cannot allocate without limit.
 const MAX_PULL_FRAMES: usize = 48_000;
 
+/// Output gain while another app holds transient audio focus ("Lower volume"), stored as `f32`
+/// bits so the audio thread reads it without a lock. Kept apart from route volumes, so ducking
+/// never changes the volume the user set.
+type DuckGain = Arc<AtomicU32>;
+
+fn apply_duck(duck: &AtomicU32, out: &mut [f32]) {
+    let gain = f32::from_bits(duck.load(Ordering::Relaxed));
+    if gain < 1.0 {
+        out.iter_mut().for_each(|s| *s *= gain);
+    }
+}
+
 /// One open render stream. The callback is shared so the stream can move between paths.
 struct RenderEntry {
     id: u64,
@@ -106,14 +118,19 @@ fn open_fast(
     channels: u16,
     callback: &Arc<Mutex<RenderCallback>>,
     on_error: &Arc<Mutex<ErrorCallback>>,
+    duck: &DuckGain,
 ) -> Result<Box<dyn AudioStream>, AudioError> {
     let cb = callback.clone();
     let err = on_error.clone();
+    let duck = duck.clone();
     inner.open_render(
         target,
         channels,
         Box::new(move |out: &mut [f32]| match cb.try_lock() {
-            Ok(mut f) => (f)(out),
+            Ok(mut f) => {
+                (f)(out);
+                apply_duck(&duck, out);
+            }
             Err(_) => out.fill(0.0),
         }),
         Box::new(move |e| {
@@ -129,6 +146,7 @@ pub struct MobileAudioBackend {
     app_audio: Slot,
     mic: Slot,
     renders: RenderSlot,
+    duck: DuckGain,
 }
 
 impl MobileAudioBackend {
@@ -138,7 +156,19 @@ impl MobileAudioBackend {
             app_audio: Slot::default(),
             mic: Slot::default(),
             renders: RenderSlot::default(),
+            duck: Arc::new(AtomicU32::new(1.0f32.to_bits())),
         }
+    }
+
+    /// Scale all playback, on both paths, by `gain` (0–1): lower while another app ducks us, 1 to
+    /// restore. Invalid values restore full level.
+    pub fn set_output_duck(&self, gain: f32) {
+        let gain = if gain.is_finite() {
+            gain.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.duck.store(gain.to_bits(), Ordering::Relaxed);
     }
 
     /// Choose the playback path for new and running streams: `true` hands playback to the
@@ -163,6 +193,7 @@ impl MobileAudioBackend {
                     entry.channels,
                     &entry.callback,
                     &entry.on_error,
+                    &self.duck,
                 ) {
                     Ok(stream) => {
                         entry.info = stream.info();
@@ -212,6 +243,7 @@ impl MobileAudioBackend {
                 mix[frame * 2 + 1] += r;
             }
         }
+        apply_duck(&self.duck, mix);
         for (bytes, sample) in out.chunks_exact_mut(2).zip(mix.iter()) {
             bytes.copy_from_slice(&((sample.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
         }
@@ -348,7 +380,14 @@ impl AudioBackend for MobileAudioBackend {
         let fast = if guard.platform {
             None
         } else {
-            match open_fast(&self.inner, target, channels, &callback, &on_error) {
+            match open_fast(
+                &self.inner,
+                target,
+                channels,
+                &callback,
+                &on_error,
+                &self.duck,
+            ) {
                 Ok(stream) => Some(stream),
                 // Broken low-latency paths exist on some phones: fall back to AudioTrack.
                 Err(e) if cfg!(target_os = "android") => {
@@ -510,6 +549,37 @@ mod tests {
         drop(stereo);
         assert!(!backend.platform_output_active());
         assert!(backend.pull_playback_pcm16(10).iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn duck_gain_scales_output_and_restores() {
+        let backend = MobileAudioBackend::new();
+        backend.set_platform_output(true);
+        let _stream = backend
+            .open_render(
+                &RenderTarget::DefaultOutput,
+                2,
+                constant(0.5),
+                Box::new(|_| {}),
+            )
+            .unwrap();
+        let full = (0.5f32 * 32767.0) as i16;
+        backend.set_output_duck(0.5);
+        assert_eq!(
+            sample(&backend.pull_playback_pcm16(4), 0),
+            (0.25f32 * 32767.0) as i16
+        );
+        // Out-of-range and invalid gains never amplify or silence by accident.
+        backend.set_output_duck(3.0);
+        assert_eq!(sample(&backend.pull_playback_pcm16(4), 0), full);
+        backend.set_output_duck(f32::NAN);
+        assert_eq!(sample(&backend.pull_playback_pcm16(4), 0), full);
+
+        // The fast path applies the same gain inside its callback.
+        let duck: DuckGain = Arc::new(AtomicU32::new(0.25f32.to_bits()));
+        let mut buf = [1.0f32; 4];
+        apply_duck(&duck, &mut buf);
+        assert!(buf.iter().all(|s| (*s - 0.25).abs() < f32::EPSILON));
     }
 
     #[test]

@@ -29,8 +29,8 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | `sp-audio-io` (trait, cpal backend, null backend, converters) | 🟡 | unit-tested; device paths need hardware |
 | `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | unit tests plus two-engine tests: pairing → audio → prompt → stop → forget, restart-reconnect, resume without a second prompt, shared encoder, live codec switch, USB (TCP) + network test, resume after restart. Audio devices open off the actor |
 | Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, 9 UI tests |
-| Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`); speakers are not muted while sending on PulseAudio (its monitors follow the sink mute) |
-| Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test |
+| Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`). "Mute PC speakers": PipeWire mutes the default sink; PulseAudio (whose monitors follow the sink mute) moves playback to a temporary "SoundPush Speakers" null sink and restores the previous default on unmute or the next start. Real-server tests in `sp-audio-io/tests/pulse_server.rs` (PulseAudio 16 in a container: captured peak 0.5 while the speakers' monitor is silent) |
+| Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test. Notification Stop / Mute / Output (system output switcher per Android version), widget Mute, denied/blocked permission states with Open settings, process-level network watcher, per-app language picker (generated locale list, pseudo-locales in debug), custom latency, output device choice (platform player), connection details, OSS licences (AboutLibraries), share app, tablet/foldable layouts (rail, list-detail Devices, two-column Home). Robolectric flow tests with ATF accessibility checks and Light/Dark/RTL/en-XA/tablet screenshots |
 
 ## Phase 2 — Microphone & headset
 
@@ -40,7 +40,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Android mic presets (7 modes) + platform AEC/NS/AGC with availability | 🟡 | Kotlin `MicCapture` |
 | Gain 0–20 dB, soft limiter, RNNoise, level meter, mic monitor | ✅ | |
 | "Ask" permission prompt for microphone | ✅ | tested end-to-end |
-| Headset mode (both routes in one action) | 🟡 | desktop + Android home task |
+| Headset mode (both routes in one action) | 🟡 | desktop + Android home task; on Android the recorder uses the voice-call preset with echo cancellation while the headset task runs and returns to the user's preset afterwards. RNNoise "on the computer instead" needs receiver-side denoising in the engine (not yet) |
 | Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
 | Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | 🟡 | `sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT: "SoundPush Microphone Feed" → "SoundPush Microphone"); x64 builds locally with `/W4 /WX /analyze`, infverif, inf2cat and ApiValidator clean; CI builds x64 + ARM64 and test-signs (`windows-driver.yml`). Not yet installed on a test-signing PC. Not used by the app: VB-CABLE stays active until attestation signing |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
@@ -67,13 +67,13 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Network self-test (RTT, jitter, loss, achievable bitrate, recommendation) | ✅ / 🟡 | probes over the media path, ~10 s, cancellable; "Use recommended settings" applies a device profile |
 | Local crash reports for Rust panics | ✅ | redacted report in the data folder, notice once on next start, included in the desktop diagnostics export; nothing uploaded |
 | Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
-| PipeWire app capture | ⏳ | ADR-0002. On Linux it means moving the app's stream to a private null sink and recording its monitor; `CaptureSource::Application` exists (Windows) but has no Linux implementation yet |
-| Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
+| Linux app capture (PipeWire/PulseAudio) | 🟡 | `sp-audio-io/src/pulse.rs` (`AppRouting`): the app's streams (or every other app's) move to a private null sink recorded from its monitor; a loopback keeps them audible on the speakers (~30 ms later); streams opened while capturing follow; streams go back on stop, and after a crash on the next start. App picker on the Audio page (`application.process.binary`). Tested against PulseAudio 16 in a container (only / everything except / late streams / crash cleanup); PipeWire needs a desktop session |
+| Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service; "Lower volume" uses a separate output duck gain (`set_output_duck`), route volumes are never overwritten |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
 | Media Feature Pack detection (Windows N) | 🟡 | `src-tauri/src/system.rs` (missing `mfplat.dll`), Home banner → Optional features |
 | Windows Firewall / Public network fix | 🟡 | `src-tauri/src/network.rs`: firewall policy + network category read as a normal user; "Allow SoundPush" runs `netsh` through UAC (UDP, this exe, private/domain; public only if chosen); the uninstaller removes the rule with one UAC prompt (`windows/hooks.nsh`) |
-| Audio device changes (follow default, device lost) | 🟡 | `src-tauri/src/device_watch.rs` (`IMMNotificationClient`, Core Audio listeners) → `EngineHandle::audio_devices_changed`; routes on the default device reopen, pinned devices report lost |
+| Audio device changes (follow default, device lost) | 🟡 | `src-tauri/src/device_watch.rs` (`IMMNotificationClient`, Core Audio listeners, sound server events on Linux via `pulse::watch_devices`, reconnecting when the server restarts) → `EngineHandle::audio_devices_changed`; routes on the default device reopen, pinned devices report lost |
 | Audio cues | 🟡 | `src-tauri/src/cues.rs`, generated tones, `settings.audioCues` |
 | Diagnostics export, guided troubleshooter, logs | ✅ (desktop) / 🟡 (Android tips only) | desktop troubleshooter runs checks (firewall, network profile, driver, devices, permissions, Bluetooth) with fix buttons |
 | macOS permissions (microphone, System Audio Recording) | 🟡 | `src-tauri/src/macos.rs`: status without prompting, deep links to System Settings. Not yet compiled on macOS |
@@ -87,7 +87,9 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Item | Status | Notes |
 |---|---|---|
 | Desktop app runs on macOS (speaker, mic, pairing) | 🟡 | runs on this Mac; phone paired and played audio through the Mac speakers |
-| System-audio capture via process taps | 🟡 | `sp-audio-io/src/macos_tap.rs`: tap + aggregate device open and deliver frames; real audio needs the System Audio Recording permission, which macOS grants only to the bundled `SoundPush.app` (unbundled dev binaries receive silence). Minimum macOS raised to 14.2. |
+| System-audio capture via process taps | 🟡 | `sp-audio-io/src/macos_tap.rs`: tap + aggregate device open and deliver frames; real audio needs the System Audio Recording permission, which macOS grants only to the bundled `SoundPush.app` (unbundled dev binaries receive silence). |
+| macOS 13 system audio via ScreenCaptureKit | 🟡 | `sp-audio-io/src/macos_sck.rs`, used before 14.2 (Screen Recording permission; CoreAudio weakly linked in `build.rs` so the tap functions may be missing). Minimum macOS 13. Type-checked and linted for aarch64-apple-darwin only; not yet run on a Mac |
+| Login item via `SMAppService` (macOS 13+) | 🟡 | `src-tauri/src/macos.rs`: registers the main app; the old LaunchAgent is removed on the next start; a launch within 2 min of console login counts as autostart; "requires approval" shows the Settings warning. Windows/Linux keep `tauri-plugin-autostart`. Type-checked only |
 | AudioServerPlugIn "SoundPush Microphone" | 🟡 | own C driver in `sound-push-desktop/drivers/macos-virtual-mic`, embedded in the app and installed from the Audio page; needs a real install test. Public distribution needs Apple Developer ID notarization |
 
 ## Phase 5 — Hardening & release

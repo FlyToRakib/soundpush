@@ -1,6 +1,7 @@
 package net.soundpush.ui.components
 
 import androidx.annotation.StringRes
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.ui.R
 
 /**
@@ -8,6 +9,16 @@ import net.soundpush.ui.R
  * fragile: resource shrinking in release builds can remove "unused" strings.)
  */
 object Labels {
+    /** Where media plays now (notification output action, connection details). */
+    @StringRes
+    fun output(output: DeviceStatus.Output): Int = when (output) {
+        DeviceStatus.Output.Speaker -> R.string.output_speaker
+        DeviceStatus.Output.Wired -> R.string.output_wired
+        DeviceStatus.Output.Bluetooth -> R.string.output_bluetooth
+        DeviceStatus.Output.Usb -> R.string.output_usb
+        DeviceStatus.Output.Other -> R.string.output_other
+    }
+
     @StringRes
     fun status(connection: String): Int = when (connection) {
         "connected" -> R.string.status_connected
