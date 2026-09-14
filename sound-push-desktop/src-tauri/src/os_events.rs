@@ -29,7 +29,8 @@ const MAX_BURST: Duration = Duration::from_secs(10);
 /// Event the UI listens to, to check the firewall and USB tethering again.
 pub const NETWORK_EVENT: &str = "platform://network-changed";
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+// Only Windows reports the session ending.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum Event {
     Network,
     Suspend,
