@@ -6,9 +6,9 @@
   import SettingRow from "../lib/components/SettingRow.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
   import { engine } from "../lib/engine/client";
-  import type { Theme, Visibility } from "../lib/engine/types";
+  import type { Theme, UpdateChannel, Visibility } from "../lib/engine/types";
   import { PSEUDO_LONG, PSEUDO_RTL, availableLanguages, languageName, t } from "../lib/i18n";
-  import { LINKS } from "../lib/links";
+  import { LINKS, docsUrl, type DocsPage } from "../lib/links";
   import { store } from "../lib/stores/engine.svelte";
   import { updateSettings } from "../lib/stores/settings";
   import { run, toasts } from "../lib/stores/toast.svelte";
@@ -57,6 +57,8 @@
   }
 
   const open = (url: string) => run(engine.openUrl(url));
+  /** Help pages open on the documentation site, or on GitHub when the site can't be reached. */
+  const openDocs = (page: DocsPage) => run(docsUrl(page).then((url) => engine.openUrl(url)));
 </script>
 
 <div class="page stack">
@@ -148,7 +150,7 @@
     <div class="row wrap">
       <Button onclick={exportDiagnostics}>{t("settings.export")}</Button>
       <Button variant="ghost" onclick={() => run(engine.openLogsFolder())}>{t("settings.openLogs")}</Button>
-      <Button variant="ghost" onclick={() => open(LINKS.userGuide)}>{t("settings.userGuide")}</Button>
+      <Button variant="ghost" onclick={() => openDocs("userGuide")}>{t("settings.userGuide")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.reportBug)}>{t("settings.reportBug")}</Button>
     </div>
     <p class="caption">{t("settings.shortcuts", isMac ? "⌘" : "Ctrl")}</p>
@@ -164,6 +166,17 @@
       <Toggle checked={s.checkForUpdates} label={t("update.auto")}
         onchange={(v) => updateSettings((x) => (x.checkForUpdates = v))} />
     </SettingRow>
+    <SettingRow label={t("update.channel")} description={t("update.channel.desc")} id="update-channel">
+      <Select
+        id="update-channel"
+        value={s.updateChannel}
+        label={t("update.channel")}
+        options={[
+          { value: "stable", label: t("update.channel.stable") },
+          { value: "beta", label: t("update.channel.beta") },
+        ]}
+        onchange={(v) => updateSettings((x) => (x.updateChannel = v as UpdateChannel))} />
+    </SettingRow>
     <div class="row wrap">
       <p class="caption grow" role="status">{updateText}</p>
       {#if updater.status === "available"}
@@ -176,7 +189,7 @@
     </div>
 
     <div class="row wrap">
-      <Button variant="ghost" onclick={() => open(LINKS.privacy)}>{t("settings.privacyPolicy")}</Button>
+      <Button variant="ghost" onclick={() => openDocs("privacy")}>{t("settings.privacyPolicy")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.license)}>{t("settings.viewLicense")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.source)}>{t("settings.source")}</Button>
     </div>

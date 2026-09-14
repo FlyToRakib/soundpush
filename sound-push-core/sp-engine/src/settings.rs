@@ -358,11 +358,26 @@ pub struct Settings {
     pub device_profiles: std::collections::BTreeMap<String, DeviceProfile>,
     /// Look for a new SoundPush release in the background (GitHub Releases). Never installs by itself.
     pub check_for_updates: bool,
+    /// Which releases the desktop updater offers (docs/soundpush-final.md §32).
+    pub update_channel: UpdateChannel,
     /// Write debug-level logs for troubleshooting (plan §28.1). Switches itself off after
     /// [`DEBUG_LOGGING_SECS`].
     pub debug_logging: bool,
     /// When debug logging switches itself off (unix seconds; 0 while off). Set by the engine.
     pub debug_logging_until_unix: u64,
+}
+
+/// Desktop update channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateChannel {
+    /// Pre-releases (`x.y.z-beta.n`) as soon as they are published, and every stable release.
+    Beta,
+    /// Published releases, reaching installs in stages. Also used for unknown values from newer versions
+    /// (`#[serde(other)]` must stay on the last variant).
+    #[default]
+    #[serde(other)]
+    Stable,
 }
 
 /// Debug logging switches itself off after this long.
@@ -389,6 +404,7 @@ impl Default for Settings {
             audio_cues: false,
             device_profiles: std::collections::BTreeMap::new(),
             check_for_updates: true,
+            update_channel: UpdateChannel::Stable,
             debug_logging: false,
             debug_logging_until_unix: 0,
         }
@@ -634,6 +650,31 @@ mod tests {
         let (s, recovered) = SettingsStore::new(dir.path()).load();
         assert!(recovered);
         assert_eq!(s, Settings::default());
+    }
+
+    #[test]
+    fn update_channel_defaults_and_unknown_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(dir.path());
+        assert_eq!(Settings::default().update_channel, UpdateChannel::Stable);
+
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"updateChannel":"beta"}"#,
+        )
+        .unwrap();
+        assert_eq!(store.load().0.update_channel, UpdateChannel::Beta);
+
+        // A channel written by a newer version must not reset every other setting.
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"deviceName":"Desk","updateChannel":"nightly"}"#,
+        )
+        .unwrap();
+        let (loaded, recovered) = store.load();
+        assert!(!recovered);
+        assert_eq!(loaded.device_name, "Desk");
+        assert_eq!(loaded.update_channel, UpdateChannel::Stable);
     }
 
     #[test]

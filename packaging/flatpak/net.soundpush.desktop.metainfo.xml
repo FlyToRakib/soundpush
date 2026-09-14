@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Template: tools/release/fill-manifests.mjs fills in the placeholders. See packaging/README.md. -->
+<component type="desktop-application">
+  <id>net.soundpush.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>SoundPush</name>
+  <summary>Use your phone as a speaker, microphone or headset</summary>
+  <developer id="net.soundpush">
+    <name>SoundPush contributors</name>
+  </developer>
+  <description>
+    <p>
+      SoundPush streams audio between your computer and your Android phone over Wi-Fi or USB.
+    </p>
+    <ul>
+      <li>Listen to your computer on your phone</li>
+      <li>Use your phone as a microphone in any app, through a virtual microphone SoundPush creates in PipeWire or PulseAudio</li>
+      <li>Use your phone as a headset for calls</li>
+      <li>Play your phone's audio on the computer</li>
+    </ul>
+    <p>
+      Pairing is by QR code or a short code, and audio is encrypted end to end between your own devices.
+      There are no accounts, ads or tracking.
+    </p>
+  </description>
+  <launchable type="desktop-id">net.soundpush.desktop.desktop</launchable>
+  <url type="homepage">@DOCS_URL@/</url>
+  <url type="bugtracker">@REPO_URL@/issues</url>
+  <url type="help">@DOCS_URL@/user-guide/</url>
+  <url type="vcs-browser">@REPO_URL@</url>
+  <url type="translate">@DOCS_URL@/translating/</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>microphone</keyword>
+    <keyword>speaker</keyword>
+    <keyword>headset</keyword>
+    <keyword>android</keyword>
+    <keyword>stream</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <provides>
+    <binary>soundpush</binary>
+  </provides>
+  <releases>
+    <release version="@VERSION@" date="@RELEASE_DATE@">
+      <url type="details">@REPO_URL@/releases/tag/v@VERSION@</url>
+    </release>
+  </releases>
+</component>

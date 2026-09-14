@@ -1,0 +1,22 @@
+SoundPush streams audio between your phone and your computer (Windows, macOS or Linux) over Wi-Fi or USB.
+
+What you can do:
+• Listen to your computer on your phone: play music, videos or games from the computer through your headphones.
+• Use your phone as a microphone: the computer sees it as a microphone in Zoom, Discord, Meet, OBS and any other app.
+• Use your phone as a headset: both directions at once, for calls.
+• Play your phone's audio on the computer: app audio on Android 10 and newer.
+
+Built for everyday use:
+• Pair once by scanning a QR code or typing a short code. Paired devices reconnect by themselves.
+• Low latency with an adaptive buffer, or a more stable setting for weak Wi-Fi.
+• Opus or lossless audio, noise suppression, microphone modes and gain.
+• Stream to several devices at once.
+• Controls in the notification and a Quick Settings tile.
+• Works over USB when Wi-Fi is not available.
+
+Private by design:
+• Audio goes directly between your own devices and is encrypted end to end. There are no SoundPush servers.
+• No account, no ads, no analytics, no tracking.
+• Free and open source (GPL-3.0-or-later). Every feature is free for everyone.
+
+You need the free SoundPush desktop app on your computer: https://github.com/FlyToRakib/soundpush/releases

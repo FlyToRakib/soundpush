@@ -1,0 +1,70 @@
+# Documentation site (docs/soundpush-final.md §32, §36.3): https://flytorakib.github.io/soundpush/
+# Built from the user-facing pages in docs/ by .github/workflows/docs.yml. Preview locally:
+#   pip install -r tools/docs/requirements.txt && mkdocs serve
+site_name: SoundPush
+site_description: Use your phone as a speaker, microphone or headset for your computer
+site_url: https://flytorakib.github.io/soundpush/
+repo_url: https://github.com/FlyToRakib/soundpush
+repo_name: FlyToRakib/soundpush
+edit_uri: edit/HEAD/docs/
+copyright: SoundPush contributors · GPL-3.0-or-later
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.highlight
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# Plans, ADRs and specifications stay on GitHub; the site is for people using or translating SoundPush.
+exclude_docs: |
+  /soundpush-draft.md
+  /soundpush-final.md
+  /implementation-status.md
+  /testing-guide.md
+  /adr/
+  /protocol/
+  /security/
+
+nav:
+  - Home: index.md
+  - User guide: user-guide.md
+  - Troubleshooting: troubleshooting.md
+  - Virtual microphone: virtual-microphone.md
+  - Privacy: privacy.md
+  - Contributing:
+      - Translating: translating.md
+      - Release signing and updates: release-signing.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  # Pages that live outside docs/ (PRIVACY.md) or in a section of another page (troubleshooting).
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true

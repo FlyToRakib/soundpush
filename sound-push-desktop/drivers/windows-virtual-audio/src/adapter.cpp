@@ -67,10 +67,11 @@ public:
     CAdapter(const CAdapter&) = delete;
     CAdapter& operator=(const CAdapter&) = delete;
 
+    // Inline members cannot be placed in the PAGE segment, so this wrapper has no PAGED_CODE
+    // check (code analysis C28172); CCable::Initialize, which is paged, asserts the IRQL.
     _IRQL_requires_(PASSIVE_LEVEL)
     NTSTATUS Initialize()
     {
-        PAGED_CODE();
         return m_Cable.Initialize();
     }
 

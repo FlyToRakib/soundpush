@@ -26,6 +26,9 @@ const GUID kMicPinName = {0xd4ecc74d, 0xa006, 0x46df, {0x81, 0x96, 0x27, 0xd0, 0
 
 NTSTATUS NTAPI PropertyHandlerJack(_In_ PPCPROPERTY_REQUEST Request);
 
+// Property handlers run at PASSIVE_LEVEL, so they live in the pageable segment.
+#pragma code_seg("PAGE")
+
 // Fills a KSPROPERTY_DESCRIPTION for a basic-support query on a get-only property.
 _IRQL_requires_(PASSIVE_LEVEL)
 NTSTATUS BasicSupportGetOnly(_In_ PPCPROPERTY_REQUEST Request)
@@ -137,6 +140,8 @@ NTSTATUS NTAPI PropertyHandlerJack(PPCPROPERTY_REQUEST Request)
     Request->ValueSize = required;
     return STATUS_SUCCESS;
 }
+
+#pragma code_seg()
 
 const PCPROPERTY_ITEM kJackProperties[] = {
     {&KSPROPSETID_Jack, KSPROPERTY_JACK_DESCRIPTION,

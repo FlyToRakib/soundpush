@@ -1,0 +1,87 @@
+name: Update channels
+
+# Publishes the desktop updater manifests for each channel to the rolling "updates" pre-release:
+#   https://github.com/<repo>/releases/download/updates/stable.json   newest stable release, staged rollout
+#   https://github.com/<repo>/releases/download/updates/beta.json     newest release of any kind (x.y.z-beta.n included)
+# Runs when a release is published, and every 6 hours to advance the stable rollout
+# (10 % → 50 % after 24 h → 100 % after 72 h, tools/release/channels.mjs). See docs/release-signing.md.
+#
+# "Run workflow" controls the stable rollout by hand: a number 0–100 pins it (0 halts the update),
+# "hold" stops it where it is, "resume" returns to the schedule. Roll back by publishing a new patch release.
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      rollout:
+        description: "Stable rollout: empty = schedule, 0-100 = pin, hold, resume"
+        type: string
+        default: ""
+
+concurrency:
+  group: update-channels
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  channels:
+    name: Publish channel manifests
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ROLLOUT: ${{ inputs.rollout }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Published releases
+        run: gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/releases.json"
+
+      - name: Pick the release for each channel
+        id: pick
+        run: |
+          node tools/release/channels.mjs pick "$RUNNER_TEMP/releases.json" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Write stable.json and beta.json
+        if: steps.pick.outputs.beta != ''
+        env:
+          STABLE: ${{ steps.pick.outputs.stable }}
+          BETA: ${{ steps.pick.outputs.beta }}
+        run: |
+          in="$RUNNER_TEMP/in"
+          mkdir -p "$in" channels
+          args=(--releases "$RUNNER_TEMP/releases.json" --out channels --rollout "$ROLLOUT")
+          if [ -n "$STABLE" ]; then
+            gh release download "$STABLE" --pattern latest.json --output "$in/stable-latest.json"
+            args+=(--stable-manifest "$in/stable-latest.json")
+          fi
+          gh release download "$BETA" --pattern latest.json --output "$in/beta-latest.json"
+          args+=(--beta-manifest "$in/beta-latest.json")
+          if gh release download updates --pattern stable.json --output "$in/current-stable.json" 2>/dev/null; then
+            args+=(--current-stable "$in/current-stable.json")
+          fi
+          node tools/release/channels.mjs write "${args[@]}"
+          for f in channels/*.json; do
+            echo "::group::$f"; cat "$f"; echo "::endgroup::"
+          done
+
+      - name: Upload to the "updates" release
+        if: steps.pick.outputs.beta != ''
+        run: |
+          if ! gh release view updates >/dev/null 2>&1; then
+            gh release create updates --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Update channels" \
+              --notes "Updater manifests for the SoundPush desktop app (stable.json, beta.json). Not a release: download SoundPush from the latest release instead."
+          fi
+          gh release upload updates channels/*.json --clobber
+
+      - name: Nothing published yet
+        if: steps.pick.outputs.beta == ''
+        run: echo "::notice title=Update channels::No published release has a latest.json yet."

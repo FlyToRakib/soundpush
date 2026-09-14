@@ -244,7 +244,7 @@ impl AudioBackend for CpalBackend {
     }
 
     fn supports_loopback(&self) -> bool {
-        // Windows: WASAPI loopback. macOS: Core Audio process taps (14.2+).
+        // Windows: WASAPI loopback. macOS: Core Audio process taps (14.2+), ScreenCaptureKit (13).
         // Linux: output monitors, when PipeWire or PulseAudio runs.
         #[cfg(all(target_os = "linux", feature = "pulse"))]
         if crate::pulse::available() {
@@ -266,6 +266,13 @@ impl AudioBackend for CpalBackend {
         }
         if matches!(source, CaptureSource::SystemLoopback(_)) && !self.supports_loopback() {
             return Err(AudioError::LoopbackUnsupported);
+        }
+        // macOS 13 to 14.1 has no process taps: ScreenCaptureKit records system audio instead.
+        #[cfg(target_os = "macos")]
+        if matches!(source, CaptureSource::SystemLoopback(_))
+            && !crate::macos_sck::process_taps_supported()
+        {
+            return crate::macos_sck::open(channels, on_audio, on_error);
         }
         if let CaptureSource::Application { process, exclude } = source {
             // Per-app capture bypasses cpal: it needs WASAPI process loopback.

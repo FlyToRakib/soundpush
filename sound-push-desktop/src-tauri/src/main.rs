@@ -125,6 +125,9 @@ fn main() {
 
             // Show the window right away; the UI displays "Starting…" until the engine is ready.
             let autostarted = std::env::args().any(|a| a == "--autostart");
+            // A macOS login item (SMAppService) starts without arguments.
+            #[cfg(target_os = "macos")]
+            let autostarted = autostarted || macos::launched_at_login();
             if !autostarted {
                 show_main_window(&handle);
             }
@@ -203,6 +206,7 @@ fn main() {
             commands::clear_audit_log,
             commands::open_logs_folder,
             commands::open_url,
+            commands::check_update,
             commands::virtual_mic_status,
             commands::install_virtual_mic,
             commands::uninstall_virtual_mic,
@@ -354,6 +358,21 @@ fn watch_network(hooks: Arc<hooks::DesktopHooks>) {
 
 fn sync_autostart(app: &AppHandle, enabled: bool) {
     let launcher = app.autolaunch();
+    // macOS 13+: an SMAppService login item. The LaunchAgent that earlier versions wrote through
+    // the autostart plugin (~/Library/LaunchAgents/SoundPush.plist) is removed, so SoundPush
+    // starts once; the plugin remains for Windows, Linux and older macOS.
+    #[cfg(target_os = "macos")]
+    if macos::login_items_supported() {
+        if launcher.is_enabled().unwrap_or(false)
+            && let Err(e) = launcher.disable()
+        {
+            warn!(error = %e, "could not remove the old launch agent");
+        }
+        if let Err(e) = macos::set_login_item(enabled) {
+            warn!(error = %e, "could not update launch at login");
+        }
+        return;
+    }
     let current = launcher.is_enabled().unwrap_or(false);
     let result = match (enabled, current) {
         (true, false) => launcher.enable(),

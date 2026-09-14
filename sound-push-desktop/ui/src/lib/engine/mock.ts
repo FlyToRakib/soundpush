@@ -56,6 +56,7 @@ const settings: Settings = {
   audioCues: false,
   deviceProfiles: {},
   checkForUpdates: true,
+  updateChannel: "stable",
   debugLogging: false,
   debugLoggingUntilUnix: 0,
 };

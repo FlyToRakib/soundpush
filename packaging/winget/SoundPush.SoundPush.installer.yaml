@@ -1,0 +1,23 @@
+# Template: tools/release/fill-manifests.mjs fills in the placeholders. See packaging/README.md.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+PackageIdentifier: SoundPush.SoundPush
+PackageVersion: "@VERSION@"
+# Per-user NSIS installer (no administrator rights); winget knows the NSIS silent switches.
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+MinimumOSVersion: 10.0.19041.0
+ReleaseDate: "@RELEASE_DATE@"
+Installers:
+  - Architecture: x64
+    InstallerUrl: "@DOWNLOAD_BASE@/SoundPush_@VERSION@_x64-setup.exe"
+    InstallerSha256: "@SHA256_WINDOWS_X64@"
+  - Architecture: arm64
+    InstallerUrl: "@DOWNLOAD_BASE@/SoundPush_@VERSION@_arm64-setup.exe"
+    InstallerSha256: "@SHA256_WINDOWS_ARM64@"
+ManifestType: installer
+ManifestVersion: 1.9.0

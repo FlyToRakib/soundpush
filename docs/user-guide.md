@@ -30,7 +30,7 @@ Download from **[GitHub Releases](https://github.com/FlyToRakib/soundpush/releas
 3. If Windows Firewall asks, allow SoundPush on **private networks**.
 4. SoundPush starts in the tray (notification area). It opens with Windows unless you turn that off.
 
-### macOS 14.2 or newer (Apple Silicon and Intel)
+### macOS 13 or newer (Apple Silicon and Intel)
 
 1. Open `SoundPush_<version>_universal.dmg` and drag SoundPush to **Applications**.
 2. Until builds are notarised, macOS says it can't verify SoundPush the first time. Click **Done**, then
@@ -188,11 +188,18 @@ Choose **Later** to hide the banner; the update stays available in Settings → 
 immediately and tells you if you're up to date or if the check failed (for example when offline). Automatic checks
 never show errors. If installing fails, download the new version from the releases page.
 
+**Update channel** (Settings → About) chooses which versions you get. **Stable** (the default) gets tested releases;
+they reach everyone within about three days, so an update can appear for someone else before it appears for you, and
+**Check for updates** gets it right away. **Beta** gets new versions as soon as they are published, before stable;
+they may have more bugs. Switching back to Stable keeps the version you have until a newer stable release arrives.
+Installs from Flathub are updated by Flatpak instead of the app.
+
 **Android.** Settings → About shows when a newer version is on GitHub, with a link to download it. Turn off
 **Check for updates automatically** there if you install updates another way (for example from F-Droid or Google Play).
 
 ## 9. Troubleshooting
 
+<!-- --8<-- [start:troubleshooting] -->
 The desktop app also has short tips under **Settings → Help & diagnostics**.
 
 ### The devices can't find each other
@@ -215,7 +222,7 @@ The desktop app also has short tips under **Settings → Help & diagnostics**.
 
 ### The microphone doesn't show up in Zoom/Discord/Meet
 
-- Set up the [virtual microphone](#4-virtual-microphone) and restart Windows after installing VB-CABLE.
+- Set up the [virtual microphone](user-guide.md#4-virtual-microphone) and restart Windows after installing VB-CABLE.
 - In the app, select **CABLE Output** (Windows) or **SoundPush Microphone** (macOS) — restart the app after installing.
 - Start **Use phone as microphone** and allow the microphone on the phone.
 
@@ -248,7 +255,8 @@ install it over the current one; your paired devices and settings are kept.
 2. Settings → Help & diagnostics → **Report a problem** opens GitHub. Describe what you did and attach the report.
    On Android, phone logs can be collected with `adb logcat -s SoundPush`.
 
-Security problems: please report privately (see [SECURITY.md](../SECURITY.md)).
+Security problems: please report privately (see [SECURITY.md](https://github.com/FlyToRakib/soundpush/blob/HEAD/SECURITY.md)).
+<!-- --8<-- [end:troubleshooting] -->
 
 ## 10. Uninstall and your data
 
@@ -260,4 +268,4 @@ Security problems: please report privately (see [SECURITY.md](../SECURITY.md)).
   Data: `~/.local/share/SoundPush`.
 - **Android:** uninstall the app; its data is removed with it.
 
-What SoundPush stores and why: [PRIVACY.md](../PRIVACY.md).
+What SoundPush stores and why: [privacy policy](privacy.md).

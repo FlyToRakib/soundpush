@@ -1,0 +1,52 @@
+# Flathub manifest template: tools/release/fill-manifests.mjs fills in the placeholders. See packaging/README.md.
+# Repackages the release .deb (built reproducibly by .github/workflows/release.yml) into the GNOME runtime,
+# which already provides WebKitGTK 4.1, GTK 3, libpulse and PipeWire client libraries.
+app-id: net.soundpush.desktop
+runtime: org.gnome.Platform
+runtime-version: "48"
+sdk: org.gnome.Sdk
+command: soundpush
+finish-args:
+  # Window (Wayland with X11 fallback) and GPU-accelerated webview.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Pairing, mDNS discovery, audio streaming and the update notice.
+  - --share=network
+  # Playback, system-audio capture and the virtual microphone (null sink + remap source) through
+  # PulseAudio or pipewire-pulse.
+  - --socket=pulseaudio
+  - --filesystem=xdg-run/pipewire-0
+  # Tray icon (StatusNotifierItem through libayatana-appindicator).
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Device identity key in the Secret Service keyring (GNOME Keyring, KWallet).
+  - --talk-name=org.freedesktop.secrets
+modules:
+  # Git submodule of https://github.com/flathub/shared-modules in the Flathub repository.
+  - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
+
+  - name: soundpush
+    buildsystem: simple
+    sources:
+      - type: file
+        url: "@DOWNLOAD_BASE@/SoundPush_@VERSION@_amd64.deb"
+        sha256: "@SHA256_LINUX_DEB@"
+        dest-filename: soundpush.deb
+        only-arches:
+          - x86_64
+      - type: file
+        path: net.soundpush.desktop.metainfo.xml
+    build-commands:
+      - ar -x soundpush.deb
+      - tar -xf data.tar.*
+      # The package contains exactly one executable; install fails loudly if that ever changes.
+      - install -Dm755 usr/bin/* "${FLATPAK_DEST}/bin/soundpush"
+      - install -Dm644 usr/share/applications/*.desktop "${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop"
+      - desktop-file-edit --set-key=Exec --set-value=soundpush --set-icon="${FLATPAK_ID}" "${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop"
+      - |
+        for dir in usr/share/icons/hicolor/*/apps; do
+          size=$(basename "$(dirname "$dir")")
+          install -Dm644 "$dir"/*.png "${FLATPAK_DEST}/share/icons/hicolor/${size}/apps/${FLATPAK_ID}.png"
+        done
+      - install -Dm644 net.soundpush.desktop.metainfo.xml "${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml"

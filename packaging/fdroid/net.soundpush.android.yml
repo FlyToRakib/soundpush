@@ -1,0 +1,53 @@
+# fdroiddata metadata template (metadata/net.soundpush.android.yml): tools/release/fill-manifests.mjs fills in
+# the placeholders. Store texts and the icon come from sound-push-mobile/android/fastlane/metadata/android.
+# See packaging/README.md.
+Categories:
+  - Connectivity
+  - Multimedia
+License: GPL-3.0-or-later
+AuthorName: SoundPush contributors
+WebSite: "@DOCS_URL@/"
+SourceCode: "@REPO_URL@"
+IssueTracker: "@REPO_URL@/issues"
+Translation: "@DOCS_URL@/translating/"
+Changelog: "@REPO_URL@/blob/HEAD/CHANGELOG.md"
+
+AutoName: SoundPush
+
+RepoType: git
+Repo: "@REPO_URL@.git"
+
+Builds:
+  - versionName: "@VERSION@"
+    versionCode: "@VERSION_CODE@"
+    commit: "@COMMIT@"
+    subdir: sound-push-mobile/android/app
+    sudo:
+      - apt-get update
+      # sp-ffi's host build (Kotlin binding generation) links cpal's ALSA backend.
+      - apt-get install -y libasound2-dev pkg-config
+    srclibs:
+      - rustup@1.28.2
+    prebuild:
+      # F-Droid signs the APK itself: release builds must not use the debug signing config.
+      - sed -i -e '/signingConfig = signingConfigs.getByName("debug")/d' build.gradle.kts
+    build:
+      - $$rustup$$/rustup-init.sh -y --profile minimal --default-toolchain stable --target
+        aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - . "$HOME/.cargo/env"
+      - cargo install cargo-ndk --locked --version 3.5.4
+      - cd ../../..
+      - cargo build -p sp-ffi
+      - cargo run -q -p sp-ffi --bin uniffi-bindgen -- generate --library target/debug/libsoundpush_ffi.so
+        --language kotlin --out-dir sound-push-mobile/android/core-engine/src/main/java --no-format
+      - ANDROID_NDK_HOME=$$NDK$$ cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 26 -o
+        sound-push-mobile/android/core-engine/src/main/jniLibs build -p sp-ffi --release
+    output: build/outputs/apk/release/app-release-unsigned.apk
+    ndk: 27.2.12479018
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+CurrentVersion: "@VERSION@"
+CurrentVersionCode: "@VERSION_CODE@"

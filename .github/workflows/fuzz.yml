@@ -1,0 +1,90 @@
+name: Fuzz
+
+# Nightly fuzzing of every cargo-fuzz target in fuzz/ (docs/soundpush-final.md §29.1: 30 min per target).
+# The corpus grows across runs through the Actions cache; seed files committed under fuzz/corpus/<target>
+# are used as well. A crash fails the job and uploads the crashing input as an artifact:
+#   cargo +nightly fuzz run <target> <downloaded-file>   reproduces it locally.
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        type: number
+        default: 1800
+      target:
+        description: One target name, or empty for all
+        type: string
+        default: ""
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  targets:
+    name: List targets
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        env:
+          ONLY: ${{ inputs.target }}
+        run: |
+          targets=$(ls fuzz/fuzz_targets/*.rs | xargs -n1 basename | sed 's/\.rs$//')
+          if [ -n "$ONLY" ]; then
+            echo "$targets" | grep -qx "$ONLY" || { echo "::error title=Fuzz::Unknown target $ONLY (have: $(echo $targets))"; exit 1; }
+            targets="$ONLY"
+          fi
+          echo "targets=$(echo "$targets" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    needs: targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      SECONDS_PER_TARGET: ${{ inputs.seconds || 1800 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+          key: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz
+        run: |
+          mkdir -p "fuzz/corpus/$TARGET"
+          cargo +nightly fuzz run "$TARGET" "fuzz/corpus/$TARGET" -- \
+            -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=4096 -timeout=10
+      - name: Shrink the corpus
+        if: success()
+        run: cargo +nightly fuzz cmin "$TARGET" "fuzz/corpus/$TARGET"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore

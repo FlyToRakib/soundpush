@@ -14,7 +14,9 @@ microphone needs an AudioServerPlugIn, and public distribution needs Developer I
 
 - macOS is a 1.0 platform with the same parity matrix as Windows (Phase 4).
 - System audio uses a Core Audio process tap excluding SoundPush itself, wrapped in a temporary aggregate device
-  (ADR-0002). Minimum macOS for the current build: 14.2.
+  (ADR-0002). Minimum macOS: 13. Before 14.2 (no process taps) system audio comes from ScreenCaptureKit
+  (`sp-audio-io/src/macos_sck.rs`), which needs the Screen Recording permission.
+- Launch at login is an `SMAppService` login item (macOS 13+), replacing the earlier LaunchAgent.
 - The virtual microphone is SoundPush's own AudioServerPlugIn, embedded in the app and installed from the Audio page
   with an administrator prompt (ADR-0003).
 - Builds are universal (Apple Silicon + Intel). Until the project has a Developer ID, builds are ad-hoc signed with
@@ -25,4 +27,4 @@ microphone needs an AudioServerPlugIn, and public distribution needs Developer I
 - CI builds macOS on every push (`macos-build.yml`) and in the release workflow.
 - macOS permission flows (Microphone, Screen & System Audio Recording) need testing on each macOS release.
 - Notarisation is required before recommending macOS builds widely (docs/release-signing.md §3).
-- macOS 13 support via ScreenCaptureKit remains a planned fallback.
+- The ScreenCaptureKit path and the login item still need testing on a Mac (macOS 13 and 14.2+).

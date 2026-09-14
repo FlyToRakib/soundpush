@@ -50,8 +50,10 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-# macOS permission checks (AVFoundation, TCC) and Core Audio device notifications.
+# macOS permission checks (AVFoundation, TCC), Core Audio device notifications, and the login
+# item (ServiceManagement; libc reads the login time).
 [target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString"] }
 
