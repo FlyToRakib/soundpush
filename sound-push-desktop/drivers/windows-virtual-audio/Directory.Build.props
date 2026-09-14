@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Points MSBuild at the Windows SDK and WDK restored from NuGet (packages.config), so no
+  WDK installer is needed. Keep SpKitVersion equal to the versions in packages.config.
+  Import order follows microsoft/Windows-driver-samples: WDK first, then the SDK.
+-->
+<Project>
+  <PropertyGroup>
+    <SpKitVersion>10.0.28000.2526</SpKitVersion>
+    <SpPackages>$(MSBuildThisFileDirectory)packages\</SpPackages>
+  </PropertyGroup>
+
+  <ImportGroup Condition="Exists('$(SpPackages)Microsoft.Windows.WDK.x64.$(SpKitVersion)')">
+    <Import Condition="'$(Platform)' == 'x64'" Project="$(SpPackages)Microsoft.Windows.WDK.x64.$(SpKitVersion)\build\native\Microsoft.Windows.WDK.x64.props" />
+    <Import Condition="'$(Platform)' == 'ARM64'" Project="$(SpPackages)Microsoft.Windows.WDK.arm64.$(SpKitVersion)\build\native\Microsoft.Windows.WDK.arm64.props" />
+    <Import Condition="'$(Platform)' == 'x64'" Project="$(SpPackages)Microsoft.Windows.SDK.CPP.x64.$(SpKitVersion)\build\native\Microsoft.Windows.SDK.cpp.x64.props" />
+    <Import Condition="'$(Platform)' == 'ARM64'" Project="$(SpPackages)Microsoft.Windows.SDK.CPP.arm64.$(SpKitVersion)\build\native\Microsoft.Windows.SDK.cpp.arm64.props" />
+    <Import Project="$(SpPackages)Microsoft.Windows.SDK.CPP.$(SpKitVersion)\build\native\Microsoft.Windows.SDK.cpp.props" />
+  </ImportGroup>
+</Project>

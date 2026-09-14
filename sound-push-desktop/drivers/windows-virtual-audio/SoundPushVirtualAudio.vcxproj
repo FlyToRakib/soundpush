@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SoundPush Virtual Audio (kernel-mode WDM/PortCls driver).
+
+  Build (Visual Studio 2022 with the C++ tools, the Spectre-mitigated libraries and the
+  "Windows Driver Kit" component; the WDK/SDK themselves come from NuGet):
+    nuget restore packages.config -PackagesDirectory packages
+    msbuild SoundPushVirtualAudio.vcxproj /p:Configuration=Release /p:Platform=x64
+    msbuild SoundPushVirtualAudio.vcxproj /p:Configuration=Release /p:Platform=ARM64
+  Output: build\<Platform>\<Configuration>\SoundPushVirtualAudio.sys and the stamped .inf.
+  See README.md for signing and packaging.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C8EDA3A4-B4C1-4108-B2F8-A905C9570836}</ProjectGuid>
+    <RootNamespace>SoundPushVirtualAudio</RootNamespace>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <WindowsTargetPlatformVersion>10.0.28000.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Label="Configuration">
+    <TargetName>SoundPushVirtualAudio</TargetName>
+    <ConfigurationType>Driver</ConfigurationType>
+    <DriverType>WDM</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <TargetVersion>Windows10</TargetVersion>
+    <!-- Windows 10 version 2004 (NTDDI_WIN10_VB): ExAllocatePool2 and EX_TIMER are available. -->
+    <_NT_TARGET_VERSION>0xA000008</_NT_TARGET_VERSION>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Release'">false</UseDebugLibraries>
+    <!-- Signing happens after the build (test certificate in CI, attestation later). -->
+    <SignMode>Off</SignMode>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <PropertyGroup>
+    <OutDir>$(MSBuildThisFileDirectory)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)build\obj\$(Platform)\$(Configuration)\</IntDir>
+    <!-- The catalog is created after stamping, together with signing (see README.md). -->
+    <EnableInf2cat>false</EnableInf2cat>
+    <!-- Checks that only DDIs available to Windows drivers are used. -->
+    <ApiValidator_Enable>true</ApiValidator_Enable>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>true</SDLCheck>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(DDK_LIB_PATH)portcls.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+    </Link>
+    <Inf>
+      <TimeStamp>1.0.0.0</TimeStamp>
+    </Inf>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClInclude Include="src\common.h" />
+    <ClInclude Include="src\cable.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\adapter.cpp" />
+    <ClCompile Include="src\cable.cpp" />
+    <ClCompile Include="src\topology.cpp" />
+    <ClCompile Include="src\wavert.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Inf Include="SoundPushVirtualAudio.inf" />
+  </ItemGroup>
+  <ItemGroup>
+    <FilesToPackage Include="$(TargetPath)" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -113,11 +113,16 @@ Options we checked:
    script `sound-push-desktop/drivers/vbcable/fetch.sh` (SHA-256 pinned) is ready; the
    installer step is added only after the agreement arrives.
 2. **Stage 2: our own driver (in parallel, switched on after signing).**
-   - Write the SoundPush Windows driver in this repo at
-     `sound-push-desktop/drivers/windows-virtual-audio/`: a WaveRT/PortCls driver
-     exposing one capture endpoint "SoundPush Microphone", fed by the engine.
-   - Build and test-sign it in GitHub Actions. Developers can test it with
-     `bcdedit /set testsigning on`.
+   - **Built (not switched on):** `sound-push-desktop/drivers/windows-virtual-audio/` is a
+     WaveRT/PortCls driver. It has a playback endpoint, "SoundPush Microphone Feed", that the
+     engine plays into, and a capture endpoint, "SoundPush Microphone", that apps record from.
+     A lock-free ring buffer on a shared clock joins them. Architecture, build and test
+     install are in its `README.md`.
+   - **Built and test-signed in GitHub Actions** (`.github/workflows/windows-driver.yml`,
+     artifact `SoundPush-Windows-Driver-TestSigned`, x64 + ARM64). Developers can test it with
+     `bcdedit /set testsigning on`. It has not yet been installed on a test PC.
+   - **VB-CABLE stays the active driver** until attestation signing (postponed together with
+     code signing). The app has no install UI for this driver.
    - When the project has an EV certificate and a Microsoft Partner Center account,
      submit the driver for attestation signing.
    - From then on the installer installs "SoundPush Microphone" instead of VB-CABLE.
@@ -147,5 +152,6 @@ before the signed driver exists, and SoundPush Microphone after.
 | Engine capability (`virtualMic`, `virtualMicDevice`, `virtualMicInput`) | `sound-push-core/sp-engine/src/actor.rs` → `local_capabilities` |
 | Capabilities re-announced to the phone when they change | `actor.rs` → `tick` (mid-session `Hello`) |
 | macOS driver | `sound-push-desktop/drivers/macos-virtual-mic/` |
+| Windows driver (test-signed, not used yet) | `sound-push-desktop/drivers/windows-virtual-audio/`, `.github/workflows/windows-driver.yml` |
 | Install / remove / status commands | `sound-push-desktop/src-tauri/src/virtual_mic.rs`, `commands.rs` |
 | Audio page UI | `sound-push-desktop/ui/src/features/Audio.svelte` |

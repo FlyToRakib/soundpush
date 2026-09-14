@@ -16,6 +16,10 @@ use crate::power::SleepInhibitor;
 /// Virtual cables in preference order: (part of the playback device name, recording-side
 /// name that apps select as a microphone). `None` when both sides share the device name.
 const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
+    // SoundPush's own Windows driver (drivers/windows-virtual-audio, test-signed only for now).
+    // Windows names endpoints "<endpoint> (<device>)"; keep in sync with its INF strings.
+    ("SoundPush Microphone Feed", Some("SoundPush Microphone (SoundPush Virtual Audio)")),
+    // macOS driver: one device name for both directions.
     ("SoundPush Microphone", None),
     ("CABLE Input", Some("CABLE Output (VB-Audio Virtual Cable)")),
     ("Hi-Fi Cable Input", Some("Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)")),
@@ -92,11 +96,15 @@ impl DesktopHooks {
     }
 
     fn detect_virtual_mic(&self) -> Option<String> {
-        let outputs = self.output_names();
-        VIRTUAL_CABLES
-            .iter()
-            .find_map(|(playback, _)| outputs.iter().find(|o| o.contains(playback)).cloned())
+        preferred_virtual_cable(&self.output_names())
     }
+}
+
+/// The playback device of the most preferred virtual cable among `outputs`.
+fn preferred_virtual_cable(outputs: &[String]) -> Option<String> {
+    VIRTUAL_CABLES
+        .iter()
+        .find_map(|(playback, _)| outputs.iter().find(|o| o.contains(playback)).cloned())
 }
 
 impl PlatformHooks for DesktopHooks {
@@ -256,7 +264,33 @@ fn random_key() -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use super::cable_input_name;
+    use super::{cable_input_name, preferred_virtual_cable};
+
+    /// Endpoint names of drivers/windows-virtual-audio ("<endpoint> (<device>)", from its INF).
+    const WINDOWS_FEED: &str = "SoundPush Microphone Feed (SoundPush Virtual Audio)";
+    const WINDOWS_MIC: &str = "SoundPush Microphone (SoundPush Virtual Audio)";
+
+    #[test]
+    fn windows_soundpush_driver_feeds_its_capture_endpoint() {
+        assert_eq!(cable_input_name(WINDOWS_FEED).as_deref(), Some(WINDOWS_MIC));
+        // The macOS device keeps one name for both sides.
+        assert_eq!(cable_input_name("SoundPush Microphone").as_deref(), Some("SoundPush Microphone"));
+    }
+
+    #[test]
+    fn soundpush_driver_is_preferred_over_vb_cable() {
+        let outputs = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let vb_cable = "CABLE Input (VB-Audio Virtual Cable)";
+        let speakers = "Speakers (Realtek(R) Audio)";
+
+        assert_eq!(
+            preferred_virtual_cable(&outputs(&[speakers, vb_cable, WINDOWS_FEED])).as_deref(),
+            Some(WINDOWS_FEED)
+        );
+        // Without the SoundPush driver, VB-CABLE is used exactly as before.
+        assert_eq!(preferred_virtual_cable(&outputs(&[speakers, vb_cable])).as_deref(), Some(vb_cable));
+        assert_eq!(preferred_virtual_cable(&outputs(&[speakers])), None);
+    }
 
     #[test]
     fn only_virtual_cables_feed_the_virtual_microphone() {

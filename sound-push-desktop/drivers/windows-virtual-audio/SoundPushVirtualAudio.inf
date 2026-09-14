@@ -1,0 +1,156 @@
+;
+; SoundPushVirtualAudio.inf
+;
+; SoundPush Virtual Audio: a virtual audio cable with two endpoints.
+;   "SoundPush Microphone Feed"  render endpoint that the SoundPush engine plays the phone's microphone into
+;   "SoundPush Microphone"       capture endpoint that Meet, Zoom, Discord and recorders record from
+;
+; Hardware IDs: SWD\SoundPushVirtualAudio (software device created by scripts\Install-SoundPushDriver.ps1)
+; and Root\SoundPushVirtualAudio (for devcon-style root enumeration). Nothing loads until one exists.
+;
+; DriverVer and $ARCH$ are filled in by stampinf at build time.
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = MEDIA
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider    = %ProviderName%
+CatalogFile = SoundPushVirtualAudio.cat
+DriverVer   = 01/01/2026,1.0.0.0
+PnpLockdown = 1
+
+[Manufacturer]
+%ManufacturerName% = SoundPush, NT$ARCH$.10.0...19041
+
+[SoundPush.NT$ARCH$.10.0...19041]
+%SoundPush.DeviceDesc% = SoundPush_Device, SWD\SoundPushVirtualAudio, Root\SoundPushVirtualAudio
+
+[SourceDisksNames]
+1 = %DiskName%
+
+[SourceDisksFiles]
+SoundPushVirtualAudio.sys = 1
+
+[DestinationDirs]
+SoundPush_Device.CopyFiles = 13
+
+;
+; Device install
+;
+
+[SoundPush_Device.NT]
+Include   = ks.inf, wdmaudio.inf
+Needs     = KS.Registration, WDMAUDIO.Registration
+CopyFiles = SoundPush_Device.CopyFiles
+AddReg    = SoundPush_Device.AddReg
+
+[SoundPush_Device.CopyFiles]
+SoundPushVirtualAudio.sys
+
+[SoundPush_Device.AddReg]
+HKR,,AssociatedFilters,,"wdmaud"
+HKR,,Driver,,SoundPushVirtualAudio.sys
+HKR,Drivers,SubClasses,,"wave,mixer"
+HKR,Drivers\wave\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\mixer\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\wave\wdmaud.drv,Description,,%SoundPush.DeviceDesc%
+HKR,Drivers\mixer\wdmaud.drv,Description,,%SoundPush.DeviceDesc%
+; Endpoint names. PortCls reads a pin's name from MediaCategories\{pin name GUID}\Name under
+; the device's driver key (HKR, as required for DCH-compliant drivers).
+; The GUIDs must match kFeedPinName / kMicPinName in src\topology.cpp.
+HKR,%MediaCategories%\%SoundPush.FeedNameGuid%,Name,,%SoundPush.FeedName%
+HKR,%MediaCategories%\%SoundPush.MicNameGuid%,Name,,%SoundPush.MicName%
+
+;
+; KS filter interfaces. Reference strings are the subdevice names in src\common.h.
+;
+
+[SoundPush_Device.NT.Interfaces]
+AddInterface = %KSCATEGORY_AUDIO%,    %KSNAME_WaveRender%,      SoundPush.I.WaveRender
+AddInterface = %KSCATEGORY_RENDER%,   %KSNAME_WaveRender%,      SoundPush.I.WaveRender
+AddInterface = %KSCATEGORY_REALTIME%, %KSNAME_WaveRender%,      SoundPush.I.WaveRender
+AddInterface = %KSCATEGORY_AUDIO%,    %KSNAME_TopologyRender%,  SoundPush.I.TopologyRender
+AddInterface = %KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyRender%,  SoundPush.I.TopologyRender
+AddInterface = %KSCATEGORY_AUDIO%,    %KSNAME_WaveCapture%,     SoundPush.I.WaveCapture
+AddInterface = %KSCATEGORY_CAPTURE%,  %KSNAME_WaveCapture%,     SoundPush.I.WaveCapture
+AddInterface = %KSCATEGORY_REALTIME%, %KSNAME_WaveCapture%,     SoundPush.I.WaveCapture
+AddInterface = %KSCATEGORY_AUDIO%,    %KSNAME_TopologyCapture%, SoundPush.I.TopologyCapture
+AddInterface = %KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyCapture%, SoundPush.I.TopologyCapture
+
+[SoundPush.I.WaveRender]
+AddReg = SoundPush.I.WaveRender.AddReg
+
+[SoundPush.I.WaveRender.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SoundPush.WaveRender.Name%
+
+[SoundPush.I.TopologyRender]
+AddReg = SoundPush.I.TopologyRender.AddReg
+
+[SoundPush.I.TopologyRender.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SoundPush.TopologyRender.Name%
+
+[SoundPush.I.WaveCapture]
+AddReg = SoundPush.I.WaveCapture.AddReg
+
+[SoundPush.I.WaveCapture.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SoundPush.WaveCapture.Name%
+
+[SoundPush.I.TopologyCapture]
+AddReg = SoundPush.I.TopologyCapture.AddReg
+
+[SoundPush.I.TopologyCapture.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SoundPush.TopologyCapture.Name%
+
+;
+; Service
+;
+
+[SoundPush_Device.NT.Services]
+AddService = SoundPushVirtualAudio, 0x00000002, SoundPush_Service_Install
+
+[SoundPush_Service_Install]
+DisplayName   = %SoundPush.ServiceDesc%
+ServiceType   = 1               ; SERVICE_KERNEL_DRIVER
+StartType     = 3               ; SERVICE_DEMAND_START
+ErrorControl  = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary = %13%\SoundPushVirtualAudio.sys
+
+;
+; Strings
+;
+
+[Strings]
+; Not localizable
+MediaCategories         = "MediaCategories"
+Proxy.CLSID             = "{17CCA71B-ECD7-11D0-B908-00A0C9223196}"
+KSCATEGORY_AUDIO        = "{6994AD04-93EF-11D0-A3CC-00A0C9223196}"
+KSCATEGORY_RENDER       = "{65E8773E-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_CAPTURE      = "{65E8773D-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_REALTIME     = "{EB115FFC-10C8-4964-831D-6DCB02E6F23F}"
+KSCATEGORY_TOPOLOGY     = "{DDA54A40-1E4C-11D1-A050-405705C10000}"
+KSNAME_WaveRender       = "WaveRender"
+KSNAME_TopologyRender   = "TopologyRender"
+KSNAME_WaveCapture      = "WaveCapture"
+KSNAME_TopologyCapture  = "TopologyCapture"
+SoundPush.FeedNameGuid  = "{7AA30571-02ED-476D-B5AE-18F304A960E0}"
+SoundPush.MicNameGuid   = "{D4ECC74D-A006-46DF-8196-27D088592DE6}"
+
+; Localizable
+ProviderName                   = "SoundPush"
+ManufacturerName               = "SoundPush"
+DiskName                       = "SoundPush Virtual Audio Installation Disk"
+; Windows shows endpoints as "<endpoint name> (<device description>)". The SoundPush app
+; (src-tauri/src/hooks.rs, VIRTUAL_CABLES) depends on these two names.
+SoundPush.DeviceDesc           = "SoundPush Virtual Audio"
+SoundPush.FeedName             = "SoundPush Microphone Feed"
+SoundPush.MicName              = "SoundPush Microphone"
+SoundPush.ServiceDesc          = "SoundPush Virtual Audio"
+SoundPush.WaveRender.Name      = "SoundPush Microphone Feed Wave"
+SoundPush.TopologyRender.Name  = "SoundPush Microphone Feed Topology"
+SoundPush.WaveCapture.Name     = "SoundPush Microphone Wave"
+SoundPush.TopologyCapture.Name = "SoundPush Microphone Topology"

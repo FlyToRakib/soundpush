@@ -39,7 +39,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | "Ask" permission prompt for microphone | ✅ | tested end-to-end |
 | Headset mode (both routes in one action) | 🟡 | desktop + Android home task |
 | Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
-| Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | ⏳ | replaces VB-CABLE once Microsoft-signed |
+| Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | 🟡 | `sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT: "SoundPush Microphone Feed" → "SoundPush Microphone"); x64 builds locally with `/W4 /WX /analyze`, infverif, inf2cat and ApiValidator clean; CI builds x64 + ARM64 and test-signs (`windows-driver.yml`). Not yet installed on a test-signing PC. Not used by the app: VB-CABLE stays active until attestation signing |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
 | Linux PipeWire virtual source created by the app | ⏳ | |
 | Push-to-talk / mute global hotkey | ⏳ | setting exists; tray mute works |
