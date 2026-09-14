@@ -106,6 +106,35 @@ describe("UpdaterStore", () => {
     expect(checker).toHaveBeenCalledTimes(2);
   });
 
+  it("does not retry a failed background check until the interval has passed", async () => {
+    let now = 1_000_000_000_000;
+    const checker = vi.fn(() => Promise.reject(new Error("no update feed yet")));
+    const store = new UpdaterStore(checker, async () => {}, () => now);
+    await store.checkIfDue();
+    await store.checkIfDue();
+    await store.checkIfDue();
+    expect(checker).toHaveBeenCalledTimes(1);
+    now += CHECK_INTERVAL_MS;
+    await store.checkIfDue();
+    expect(checker).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts the automatic check on the next tick, not inside the caller", async () => {
+    vi.useFakeTimers();
+    try {
+      const checker = vi.fn(() => Promise.resolve(null));
+      const store = new UpdaterStore(checker);
+      store.setAutomatic(true);
+      // Nothing may run synchronously: the caller is a component effect that must not track it.
+      expect(checker).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checker).toHaveBeenCalledTimes(1);
+      store.setAutomatic(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("brings the banner back when a newer version appears", async () => {
     let version = "1.0.0";
     const store = new UpdaterStore(() => Promise.resolve(fakeUpdate({ version })));
