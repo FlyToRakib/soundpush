@@ -213,6 +213,7 @@ impl Actor {
                 route.subscription = Some(sender.subscribe(Subscriber {
                     route: route.id,
                     sink: Arc::new(session.conn.clone()),
+                    dtx: Capabilities(session.hello.capabilities).has(Capabilities::FEATURE_DTX),
                     controls,
                 }));
                 Ok(true)
@@ -315,11 +316,16 @@ impl Actor {
                     else {
                         continue;
                     };
-                    r.subscription = Some(sender.subscribe(Subscriber {
-                        route: id,
-                        sink: Arc::new(session.conn.clone()),
-                        controls,
-                    }));
+                    r.subscription =
+                        Some(
+                            sender.subscribe(Subscriber {
+                                route: id,
+                                sink: Arc::new(session.conn.clone()),
+                                dtx: Capabilities(session.hello.capabilities)
+                                    .has(Capabilities::FEATURE_DTX),
+                                controls,
+                            }),
+                        );
                     ready.push((peer, id));
                 }
                 self.encoders.insert(key, EncoderSlot::Running(sender));

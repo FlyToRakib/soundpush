@@ -12,7 +12,9 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use sp_audio_io::{AudioBackend, AudioStream, CaptureSource, ErrorCallback};
 use sp_media::codec::{Encoder, OpusApplication, encoder_for};
-use sp_media::dsp::{Gain, HighPass, LevelMeter, NoiseSuppressor, SoftLimiter, db_to_gain};
+use sp_media::dsp::{
+    Gain, HighPass, LevelMeter, NoiseSuppressor, SoftLimiter, db_to_gain, is_silent,
+};
 use sp_media::samples_per_frame;
 use sp_protocol::control::StreamProfile;
 use sp_protocol::{Codec, MediaFlags, MediaHeader, MediaPacket};
@@ -20,6 +22,14 @@ use tracing::{debug, warn};
 
 use super::controls::SenderControls;
 use crate::EngineError;
+
+/// Silence (every sample below −60 dBFS) lasting this long starts DTX. The hangover keeps word
+/// endings and short pauses as real audio.
+const DTX_HANGOVER_MS: u64 = 200;
+/// DTX packets go out for this many frames when silence starts and then once per keep-alive
+/// interval, so a receiver that lost the first ones still learns the sender is silent.
+const DTX_SIGNAL_FRAMES: u64 = 2;
+const DTX_KEEPALIVE_MS: u64 = 400;
 
 /// A datagram could not be handed to the transport (closed, congested or malformed).
 /// Media is best effort: callers count these and move on.
@@ -48,6 +58,8 @@ pub struct SenderConfig {
 pub struct Subscriber {
     pub route: u8,
     pub sink: Arc<dyn DatagramSink>,
+    /// The receiver understands DTX packets (`FEATURE_DTX`); others always get encoded audio.
+    pub dtx: bool,
     /// Per-route controls and statistics: `muted`, `bitrate`, `expected_loss_pct`,
     /// `redundancy`, `frames_sent`, `bytes_sent`, `send_errors`; `level_db` mirrors the group.
     pub controls: Arc<SenderControls>,
@@ -195,6 +207,7 @@ struct Target {
     id: u64,
     route: u8,
     sink: Arc<dyn DatagramSink>,
+    dtx: bool,
     controls: Arc<SenderControls>,
     /// Next packet starts (or restarts) the stream for this receiver.
     restart: bool,
@@ -215,6 +228,7 @@ fn refresh_targets(fanout: &Fanout, targets: &mut Vec<Target>) {
             id: e.id,
             route: e.subscriber.route,
             sink: e.subscriber.sink.clone(),
+            dtx: e.subscriber.dtx,
             controls: e.subscriber.controls.clone(),
             restart,
             first,
@@ -249,6 +263,9 @@ fn encode_loop(
     let mut seq: u32 = 0;
     let mut targets: Vec<Target> = Vec::new();
     let mut generation = u64::MAX;
+    let dtx_hangover = DTX_HANGOVER_MS * 48 / frame.max(1) as u64;
+    let dtx_keepalive = (DTX_KEEPALIVE_MS * 48 / frame.max(1) as u64).max(1);
+    let mut silent_frames: u64 = 0;
 
     while running.load(Ordering::Relaxed) {
         if input.slots() < buf.len() {
@@ -320,12 +337,26 @@ fn encode_loop(
         let this_seq = seq;
         timestamp += frame as u64;
         seq = seq.wrapping_add(1);
+        // Silence detection / DTX (plan §15.2), Opus only: lossless PCM sends every frame.
+        // After the hangover, receivers that understand DTX get header-only DTX packets instead
+        // of encoded silence.
+        silent_frames = if is_silent(&buf) {
+            silent_frames.saturating_add(1)
+        } else {
+            0
+        };
+        let dtx = codec == Codec::Opus && silent_frames > dtx_hangover;
+        let dtx_signal = dtx && {
+            let n = silent_frames - dtx_hangover - 1;
+            n < DTX_SIGNAL_FRAMES || n % dtx_keepalive == 0
+        };
         if targets.is_empty() {
             previous.clear();
             continue;
         }
 
-        if let Err(e) = encoder.encode(&buf, &mut packet) {
+        let needs_audio = !dtx || targets.iter().any(|t| !t.dtx);
+        if needs_audio && let Err(e) = encoder.encode(&buf, &mut packet) {
             warn!(error = %e, "encode failed");
             continue;
         }
@@ -334,7 +365,9 @@ fn encode_loop(
         // receiver with its route id and flags patched in.
         let mut plain: Option<Bytes> = None;
         let mut redundant: Option<Bytes> = None;
+        let mut silence: Option<Bytes> = None;
         let can_add_redundancy = codec == Codec::Opus
+            && needs_audio
             && !previous.is_empty()
             && 2 + packet.len() + previous.len() <= sp_protocol::media::MAX_MEDIA_PAYLOAD;
         for t in &mut targets {
@@ -344,9 +377,16 @@ fn encode_loop(
                 t.restart = true;
                 continue;
             }
-            let with_redundancy =
-                can_add_redundancy && t.controls.redundancy.load(Ordering::Relaxed);
-            let slot = if with_redundancy {
+            let silent_target = dtx && t.dtx;
+            if silent_target && !dtx_signal {
+                continue;
+            }
+            let with_redundancy = !silent_target
+                && can_add_redundancy
+                && t.controls.redundancy.load(Ordering::Relaxed);
+            let slot = if silent_target {
+                &mut silence
+            } else if with_redundancy {
                 &mut redundant
             } else {
                 &mut plain
@@ -354,7 +394,10 @@ fn encode_loop(
             if slot.is_none() {
                 payload.clear();
                 let mut flags = MediaFlags::empty();
-                if with_redundancy {
+                if silent_target {
+                    // DTX: the header alone says "silent from this timestamp"; no payload.
+                    flags = flags.with(MediaFlags::DTX);
+                } else if with_redundancy {
                     // Redundancy (Opus only): [u16 primary length][primary][previous frame].
                     flags = flags.with(MediaFlags::REDUNDANT);
                     payload.extend_from_slice(&(packet.len() as u16).to_be_bytes());
@@ -401,7 +444,9 @@ fn encode_loop(
             }
         }
         previous.clear();
-        previous.extend_from_slice(&packet);
+        if needs_audio {
+            previous.extend_from_slice(&packet);
+        }
     }
 }
 
@@ -496,11 +541,13 @@ mod tests {
         let sub_a = group.subscribe(Subscriber {
             route: 2,
             sink: a.clone(),
+            dtx: true,
             controls: a_controls.clone(),
         });
         let sub_b = group.subscribe(Subscriber {
             route: 7,
             sink: b.clone(),
+            dtx: false,
             controls: b_controls.clone(),
         });
         std::thread::sleep(Duration::from_millis(400));
@@ -546,5 +593,52 @@ mod tests {
         drop(sub_a);
         assert_eq!(group.subscribers(), 0);
         drop(group);
+    }
+
+    #[test]
+    fn silence_becomes_dtx_only_for_receivers_that_understand_it() {
+        let backend = NullBackend {
+            recorded: None,
+            capture_frequency: 0.0,
+        };
+        let profile = build_profile(LatencyProfile::Balanced, Quality::Auto, 1, false);
+        let controls = || Arc::new(SenderControls::new(0.0, false, profile.bitrate));
+        let group = Sender::start(
+            &backend,
+            SenderConfig {
+                profile: profile.clone(),
+                application: OpusApplication::Voip,
+                source: CaptureSource::DefaultInput,
+            },
+            controls(),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        let (dtx, legacy) = (Arc::new(Collect::default()), Arc::new(Collect::default()));
+        let _a = group.subscribe(Subscriber {
+            route: 1,
+            sink: dtx.clone(),
+            dtx: true,
+            controls: controls(),
+        });
+        let _b = group.subscribe(Subscriber {
+            route: 2,
+            sink: legacy.clone(),
+            dtx: false,
+            controls: controls(),
+        });
+        std::thread::sleep(Duration::from_millis(1500));
+
+        let (pd, pl) = (packets(&dtx), packets(&legacy));
+        assert!(pl.len() > 100, "no DTX: every frame ({})", pl.len());
+        assert!(pl.iter().all(|p| !p.header.flags.contains(MediaFlags::DTX)));
+        // 200 ms of hangover audio, two DTX packets, then a keep-alive every 400 ms.
+        assert!(pd.len() < 40, "silence costs a few packets ({})", pd.len());
+        let silent: Vec<_> = pd
+            .iter()
+            .filter(|p| p.header.flags.contains(MediaFlags::DTX))
+            .collect();
+        assert!(silent.len() >= 3, "DTX packets: {}", silent.len());
+        assert!(silent.iter().all(|p| p.payload.is_empty()));
     }
 }

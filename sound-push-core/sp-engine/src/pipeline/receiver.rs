@@ -24,6 +24,8 @@ pub struct InboundPacket {
     pub codec: Codec,
     pub discontinuity: bool,
     pub redundant: bool,
+    /// DTX: the sender is silent from `timestamp` until its next audio packet (no payload).
+    pub dtx: bool,
     pub payload: Bytes,
 }
 
@@ -46,6 +48,7 @@ impl PacketSink {
             codec: packet.header.codec,
             discontinuity: packet.header.flags.contains(MediaFlags::DISCONTINUITY),
             redundant: packet.header.flags.contains(MediaFlags::REDUNDANT),
+            dtx: packet.header.flags.contains(MediaFlags::DTX),
             payload: packet.payload,
         };
         // A full queue means the audio thread stalled; dropping is correct.
@@ -184,6 +187,8 @@ impl Playout {
                     self.frame_buf.fill(0.0);
                     1.0
                 }
+                // Comfort silence while the sender is in DTX; the drift estimate holds.
+                PopStatus::Silence => self.drift.ratio(),
             };
             self.resampler
                 .process(&self.frame_buf, ratio, &mut self.acc);
@@ -229,6 +234,11 @@ impl Playout {
             if packet.discontinuity {
                 self.jitter.reset();
                 self.drift.reset();
+            }
+            if packet.dtx {
+                self.jitter
+                    .push_silence(packet.timestamp, packet.arrival_samples);
+                continue;
             }
             let bytes = &packet.payload[..];
             let (primary, redundant) = match bytes {
@@ -337,6 +347,7 @@ mod tests {
         let subscription = sender.subscribe(Subscriber {
             route: 1,
             sink,
+            dtx: true,
             controls,
         });
         (sender, subscription)
@@ -443,5 +454,44 @@ mod tests {
         let peak = tail.iter().fold(0f32, |m, s| m.max(s.abs()));
         assert!(peak > 0.1, "received audio peak {peak}");
         assert!(rx_controls.underruns.load(Ordering::Relaxed) <= 2);
+    }
+
+    #[test]
+    fn dtx_silence_is_cheap_and_does_not_underrun() {
+        let backend = NullBackend {
+            recorded: None,
+            capture_frequency: 0.0,
+        };
+        let profile = build_profile(LatencyProfile::Balanced, Quality::Auto, 1, false);
+        let rx_controls = Arc::new(ReceiverControls::new(
+            1.0,
+            profile.jitter_min_ms,
+            profile.jitter_max_ms,
+        ));
+        let (_receiver, sink) = Receiver::start(
+            &backend,
+            ReceiverConfig {
+                profile: profile.clone(),
+                target: RenderTarget::DefaultOutput,
+            },
+            rx_controls.clone(),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        let loopback = Arc::new(Loopback(
+            Mutex::new(Some(sink)),
+            0,
+            std::sync::atomic::AtomicU64::new(0),
+        ));
+        let tx_controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
+        let _sender = start_sender(&backend, profile, tx_controls, loopback.clone());
+
+        std::thread::sleep(Duration::from_millis(2000));
+        let sent = loopback.2.load(Ordering::Relaxed);
+        assert!(sent < 50, "datagrams during 2 s of silence: {sent}");
+        // Without DTX handling every silent stretch would conceal, underrun and rebuffer.
+        let underruns = rx_controls.underruns.load(Ordering::Relaxed);
+        assert!(underruns <= 1, "underruns during silence: {underruns}");
+        assert_eq!(rx_controls.decode_errors.load(Ordering::Relaxed), 0);
     }
 }
