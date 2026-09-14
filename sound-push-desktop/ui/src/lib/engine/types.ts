@@ -180,7 +180,11 @@ export interface Settings {
   /** Keyed by device id. */
   deviceProfiles: Record<string, DeviceProfile>;
   checkForUpdates: boolean;
+  updateChannel: UpdateChannel;
 }
+
+/** Desktop update channel (docs/release-signing.md). */
+export type UpdateChannel = "stable" | "beta";
 
 export interface LocalDevice {
   deviceId: string;

@@ -2,7 +2,10 @@
 //
 // Background checks run at most once a day while enabled and stay silent when offline or failing.
 // Checks the user starts show their result ("up to date", or what went wrong).
-import { checkForUpdate, relaunch, type AvailableUpdate } from "../engine/updater";
+// The update channel (stable/beta) comes from the settings through `configure`.
+import { untrack } from "svelte";
+import { checkForUpdate, relaunch, type AvailableUpdate, type CheckOptions } from "../engine/updater";
+import type { UpdateChannel } from "../engine/types";
 
 export type UpdateStatus = "idle" | "checking" | "upToDate" | "available" | "downloading" | "ready" | "error";
 
@@ -40,15 +43,39 @@ export class UpdaterStore {
 
   private update: AvailableUpdate | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  // Plain fields (not $state): reading them inside an effect must not subscribe it.
+  private channel: UpdateChannel = "stable";
+  private installId = "";
+  private configured = false;
 
   constructor(
-    private readonly checker: () => Promise<AvailableUpdate | null> = checkForUpdate,
+    private readonly checker: (options: CheckOptions) => Promise<AvailableUpdate | null> = checkForUpdate,
     private readonly restartApp: () => Promise<void> = relaunch,
     private readonly now: () => number = Date.now,
   ) {}
 
   get busy(): boolean {
     return this.status === "checking" || this.status === "downloading";
+  }
+
+  /**
+   * Update channel and install id from the settings. Switching channel forgets an offered update and,
+   * while automatic checks are on, checks that channel once on the next tick; afterwards the daily gate applies.
+   */
+  configure(channel: UpdateChannel, installId: string): void {
+    untrack(() => {
+      this.installId = installId;
+      const switched = this.configured && channel !== this.channel;
+      this.channel = channel;
+      this.configured = true;
+      if (!switched || this.busy || this.status === "ready") return;
+      this.update = null;
+      this.version = null;
+      this.notes = "";
+      this.status = "idle";
+      this.dismissed = false;
+      if (this.timer) setTimeout(() => void this.check(false), 0);
+    });
   }
 
   /** Start or stop daily background checks (Settings → "Check for updates automatically"). */
@@ -71,7 +98,7 @@ export class UpdaterStore {
     this.status = "checking";
     if (manual) this.errorKey = null;
     try {
-      const update = await this.checker();
+      const update = await this.checker({ channel: this.channel, installId: this.installId, manual });
       writeLastCheck(this.now());
       if (update) {
         const isNew = update.version !== this.version;

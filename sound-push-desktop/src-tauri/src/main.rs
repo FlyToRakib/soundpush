@@ -213,6 +213,7 @@ fn main() {
             commands::export_diagnostics,
             commands::open_logs_folder,
             commands::open_url,
+            commands::check_update,
             commands::virtual_mic_status,
             commands::install_virtual_mic,
             commands::uninstall_virtual_mic,

@@ -49,6 +49,7 @@ const settings: Settings = {
   audioCues: false,
   deviceProfiles: {},
   checkForUpdates: true,
+  updateChannel: "stable",
 };
 
 let state: EngineState = {

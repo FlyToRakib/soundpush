@@ -188,6 +188,12 @@ Choose **Later** to hide the banner; the update stays available in Settings → 
 immediately and tells you if you're up to date or if the check failed (for example when offline). Automatic checks
 never show errors. If installing fails, download the new version from the releases page.
 
+**Update channel** (Settings → About) chooses which versions you get. **Stable** (the default) gets tested releases;
+they reach everyone within about three days, so an update can appear for someone else before it appears for you, and
+**Check for updates** gets it right away. **Beta** gets new versions as soon as they are published, before stable;
+they may have more bugs. Switching back to Stable keeps the version you have until a newer stable release arrives.
+Installs from Flathub are updated by Flatpak instead of the app.
+
 **Android.** Settings → About shows when a newer version is on GitHub, with a link to download it. Turn off
 **Check for updates automatically** there if you install updates another way (for example from F-Droid or Google Play).
 

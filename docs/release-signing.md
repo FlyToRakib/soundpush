@@ -157,7 +157,32 @@ Secure Boot PCs only when Microsoft signs them.
 3. Commit, then tag and push: `git tag -s vX.Y.Z -m "SoundPush X.Y.Z" && git push origin vX.Y.Z`.
 4. Wait for **Release** in GitHub Actions. It creates a **draft** release with all files.
 5. Download and smoke-test the installers on each platform; check `SHA256SUMS`.
-6. Publish the draft. Only a published release is visible to the updater (`releases/latest/download/latest.json`).
-7. To roll back, publish a new patch release with the previous code (the updater never downgrades on its own).
+6. Publish the draft. Only a published release reaches the updater: **Update channels** runs on publish and writes
+   the channel manifests (below). For a stable release, also submit the `store-manifests` artifact
+   (packaging/README.md).
+7. To roll back, halt the rollout (below), then publish a new patch release with the previous code (the updater never
+   downgrades on its own).
 
-Staged rollouts (10 % → 50 % → 100 %, §32) are not implemented yet; every published release reaches all users.
+## Update channels and staged rollout
+
+The desktop app has two update channels (Settings → About → **Update channel**, docs/soundpush-final.md §32):
+
+| Channel | Gets | Manifest the app reads |
+|---|---|---|
+| Stable (default) | Releases tagged `vX.Y.Z`, in stages | `releases/download/updates/stable.json`, falling back to `releases/latest/download/latest.json` |
+| Beta | Pre-releases tagged `vX.Y.Z-beta.N` right away, and every stable release | `releases/download/updates/beta.json`, falling back to the stable manifests |
+
+- **Beta release:** set the versions to `X.Y.Z-beta.N` and tag `vX.Y.Z-beta.N`. The release workflow marks the draft as
+  a GitHub pre-release, so it never becomes "latest", and skips the store manifests.
+- **Where the manifests live:** `.github/workflows/update-channels.yml` keeps `stable.json` and `beta.json` on a
+  rolling pre-release tagged `updates` (created on first use). It runs when a release is published and every 6 hours;
+  the logic is in `tools/release/channels.mjs`. Each release still carries its own `latest.json`, which 0.1 installs
+  read.
+- **Staged rollout (stable only):** `stable.json` carries `"rollout"`, the share of installs offered the update by
+  automatic checks: **10 %** when published, **50 %** after 24 hours, **100 %** after 72 hours. Every install has a
+  fixed bucket per version (from its device id), so a rising share only adds installs. **Check for updates** in the
+  app offers the update regardless of the share.
+- **Controlling a rollout:** Actions → **Update channels** → **Run workflow** with *rollout*:
+  a number `0`–`100` pins the share (`0` halts the update for everyone, including manual checks), `hold` stops it at
+  the current share, `resume` returns to the schedule. A pinned or held rollout stays until `resume` or the next
+  stable release.

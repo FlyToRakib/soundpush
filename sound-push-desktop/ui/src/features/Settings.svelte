@@ -6,7 +6,7 @@
   import SettingRow from "../lib/components/SettingRow.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
   import { engine } from "../lib/engine/client";
-  import type { Theme, Visibility } from "../lib/engine/types";
+  import type { Theme, UpdateChannel, Visibility } from "../lib/engine/types";
   import { PSEUDO_LONG, PSEUDO_RTL, availableLanguages, languageName, t } from "../lib/i18n";
   import { LINKS } from "../lib/links";
   import { store } from "../lib/stores/engine.svelte";
@@ -150,6 +150,17 @@
     <SettingRow label={t("update.auto")} description={t("update.auto.desc")}>
       <Toggle checked={s.checkForUpdates} label={t("update.auto")}
         onchange={(v) => updateSettings((x) => (x.checkForUpdates = v))} />
+    </SettingRow>
+    <SettingRow label={t("update.channel")} description={t("update.channel.desc")} id="update-channel">
+      <Select
+        id="update-channel"
+        value={s.updateChannel}
+        label={t("update.channel")}
+        options={[
+          { value: "stable", label: t("update.channel.stable") },
+          { value: "beta", label: t("update.channel.beta") },
+        ]}
+        onchange={(v) => updateSettings((x) => (x.updateChannel = v as UpdateChannel))} />
     </SettingRow>
     <div class="row wrap">
       <p class="caption grow" role="status">{updateText}</p>

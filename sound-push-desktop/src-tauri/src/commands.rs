@@ -559,3 +559,105 @@ pub fn open_url(app: AppHandle, url: String) -> CmdResult<()> {
         .open_url(url, None::<&str>)
         .map_err(|e| EngineError::Internal(e.to_string()).into())
 }
+
+/// Rolling GitHub release holding one updater manifest per channel (`.github/workflows/update-channels.yml`).
+const UPDATE_CHANNELS: &str = "https://github.com/FlyToRakib/soundpush/releases/download/updates";
+/// Manifest attached to the newest published stable release; read by 0.1 installs and used as a fallback.
+const LATEST_STABLE: &str =
+    "https://github.com/FlyToRakib/soundpush/releases/latest/download/latest.json";
+
+/// Manifest URLs for a channel, tried in order until one answers.
+fn update_endpoints(channel: sp_engine::settings::UpdateChannel) -> Vec<String> {
+    use sp_engine::settings::UpdateChannel;
+    match channel {
+        UpdateChannel::Stable => vec![
+            format!("{UPDATE_CHANNELS}/stable.json"),
+            LATEST_STABLE.to_string(),
+        ],
+        UpdateChannel::Beta => vec![
+            format!("{UPDATE_CHANNELS}/beta.json"),
+            format!("{UPDATE_CHANNELS}/stable.json"),
+            LATEST_STABLE.to_string(),
+        ],
+    }
+}
+
+/// Same shape as the updater plugin's own `check` result, so the UI wraps it in the plugin's `Update`
+/// class and downloads/installs through the plugin (which verifies the minisign signature).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMetadata {
+    rid: tauri::ResourceId,
+    current_version: String,
+    version: String,
+    date: Option<String>,
+    body: Option<String>,
+    raw_json: serde_json::Value,
+}
+
+/// Looks for an update on `channel`. Staged rollout is applied by the UI from `rawJson.rollout`.
+#[tauri::command]
+pub async fn check_update(
+    webview: tauri::Webview,
+    channel: sp_engine::settings::UpdateChannel,
+    timeout_ms: Option<u64>,
+) -> CmdResult<Option<UpdateMetadata>> {
+    use tauri::Manager;
+    use tauri_plugin_updater::UpdaterExt;
+
+    // Flatpak installs are updated by Flatpak/Flathub, never by the app itself.
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        return Ok(None);
+    }
+
+    let failed =
+        |e: &dyn std::fmt::Display| CommandError::keyed("update.checkFailed", e.to_string());
+    let endpoints = update_endpoints(channel)
+        .iter()
+        .map(|u| tauri::Url::parse(u))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| failed(&e))?;
+    let mut builder = webview
+        .updater_builder()
+        .endpoints(endpoints)
+        .map_err(|e| failed(&e))?;
+    if let Some(ms) = timeout_ms {
+        builder = builder.timeout(std::time::Duration::from_millis(ms));
+    }
+    let update = builder
+        .build()
+        .map_err(|e| failed(&e))?
+        .check()
+        .await
+        .map_err(|e| failed(&e))?;
+    Ok(update.map(|update| UpdateMetadata {
+        current_version: update.current_version.clone(),
+        version: update.version.clone(),
+        date: update
+            .raw_json
+            .get("pub_date")
+            .and_then(|d| d.as_str())
+            .map(str::to_string),
+        body: update.body.clone(),
+        raw_json: update.raw_json.clone(),
+        rid: webview.resources_table().add(update),
+    }))
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use sp_engine::settings::UpdateChannel;
+
+    #[test]
+    fn beta_falls_back_to_stable_manifests() {
+        let stable = update_endpoints(UpdateChannel::Stable);
+        let beta = update_endpoints(UpdateChannel::Beta);
+        assert!(stable[0].ends_with("/stable.json"));
+        assert!(beta[0].ends_with("/beta.json"));
+        assert_eq!(&beta[1..], &stable[..]);
+        for url in stable.iter().chain(&beta) {
+            assert!(tauri::Url::parse(url).is_ok(), "{url}");
+        }
+    }
+}

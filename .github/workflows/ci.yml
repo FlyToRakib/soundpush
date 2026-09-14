@@ -141,6 +141,16 @@ jobs:
             sound-push-desktop/ui/test-results
           if-no-files-found: ignore
 
+  release-tools:
+    name: Release tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test tools/release/*.test.mjs
+
   desktop-ui:
     name: Desktop UI
     runs-on: ubuntu-latest
