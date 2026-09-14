@@ -1,0 +1,39 @@
+SoundPush Virtual Audio - TEST-SIGNED driver (developers only)
+===============================================================
+
+This package is for testing SoundPush's own Windows virtual microphone on a TEST computer.
+The SoundPush app still uses VB-CABLE; this driver is not used by the app until it is
+Microsoft attestation-signed.
+
+It is signed with a throwaway certificate created by the CI run that built it
+(SoundPushTestSigning.cer). Windows loads it only in test-signing mode, which lowers the
+computer's protection against unsigned kernel code. Use a virtual machine or a spare PC.
+
+Contents
+  x64\   and  ARM64\          SoundPushVirtualAudio.sys / .inf / .cat / .pdb
+  SoundPushTestSigning.cer    public part of the test certificate (no private key)
+  Install-SoundPushDriver.ps1 install / uninstall helper
+
+Install (elevated PowerShell, on the test computer)
+  1. bcdedit /set testsigning on        then restart
+     (Secure Boot must be off for test signing to take effect.)
+  2. Trust the test certificate:
+       certutil -addstore Root SoundPushTestSigning.cer
+       certutil -addstore TrustedPublisher SoundPushTestSigning.cer
+  3. .\Install-SoundPushDriver.ps1 -PackagePath .\x64      (or .\ARM64)
+  4. Settings > System > Sound should list
+       Output: "SoundPush Microphone Feed (SoundPush Virtual Audio)"
+       Input:  "SoundPush Microphone (SoundPush Virtual Audio)"
+
+Test
+  - Play audio into "SoundPush Microphone Feed" and record from "SoundPush Microphone"
+    (for example with Sound Recorder); nothing fed = silence.
+  - SoundPush detects the feed automatically and prefers it over VB-CABLE.
+
+Uninstall
+  .\Install-SoundPushDriver.ps1 -Uninstall
+  certutil -delstore Root "SoundPush Test Driver Signing"
+  certutil -delstore TrustedPublisher "SoundPush Test Driver Signing"
+  bcdedit /set testsigning off           then restart
+
+Full documentation: sound-push-desktop/drivers/windows-virtual-audio/README.md
