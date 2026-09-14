@@ -242,6 +242,15 @@ impl EngineHandle {
         self.send(Command::RefreshAudioDevices)
     }
 
+    /// The OS reported an audio device change. The device list is refreshed, and running routes
+    /// that use the system default device of a changed direction reopen on the new default.
+    pub fn audio_devices_changed(&self, default_input_changed: bool, default_output_changed: bool) -> Result<(), EngineError> {
+        self.send(Command::AudioDevicesChanged {
+            default_input: default_input_changed,
+            default_output: default_output_changed,
+        })
+    }
+
     // ---------------------------------------------------------------- settings & misc
 
     pub async fn update_settings(&self, settings: Settings) -> Result<Settings, EngineError> {

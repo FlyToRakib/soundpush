@@ -38,6 +38,8 @@ use crate::settings::{MicMode, SavedRoute, Settings, SettingsStore, Visibility};
 use crate::state::*;
 use crate::{EngineConfig, EngineError};
 
+mod local_audio;
+
 type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
 
 pub(crate) enum Command {
@@ -64,6 +66,7 @@ pub(crate) enum Command {
     SetMicMuted { muted: bool },
     SetMicMonitor { enabled: bool },
     RefreshAudioDevices,
+    AudioDevicesChanged { default_input: bool, default_output: bool },
     UpdateSettings { settings: Settings, reply: Reply<Settings> },
     DismissNotice { id: u64 },
     NetworkChanged,
@@ -222,6 +225,7 @@ pub(crate) struct Actor {
     peer_speakers_muted: HashMap<DeviceId, bool>,
     /// Capability bits last announced to peers; a change is re-announced mid-session.
     announced_caps: u64,
+    local_audio: local_audio::LocalAudio,
 }
 
 pub(crate) async fn spawn(
@@ -291,6 +295,7 @@ pub(crate) async fn spawn(
         foreground: true,
         peer_speakers_muted: HashMap::new(),
         announced_caps: 0,
+        local_audio: local_audio::LocalAudio::default(),
     };
     if identity_reset {
         actor.notice("notice.identityReset", vec![], Severity::Warning, None);
@@ -521,6 +526,11 @@ impl Actor {
     }
 
     fn error_notice(&mut self, error: &EngineError, args: Vec<String>) {
+        // When the firewall blocks incoming connections, that is the fix to offer.
+        if matches!(error, EngineError::Unreachable | EngineError::NetworkBlocked) && self.hooks.inbound_blocked() {
+            let error = EngineError::FirewallBlocked;
+            return self.notice(error.key(), args, error.severity(), Some(&error));
+        }
         self.notice(error.key(), args, error.severity(), Some(error));
     }
 
@@ -680,13 +690,16 @@ impl Actor {
                 }
             }
             Command::SetRouteMuted { route_id, muted } => {
+                let mic_muted = self.mic_muted;
                 if let Some(r) = self.routes.iter_mut().find(|r| r.key() == route_id) {
                     r.muted = muted;
+                    // The microphone mute keeps microphone routes silent whatever the route says.
+                    let silent = muted || (r.kind.is_mic() && mic_muted);
                     if let Some(c) = &r.receiver_controls {
-                        c.muted.store(muted, Ordering::Relaxed);
+                        c.muted.store(silent, Ordering::Relaxed);
                     }
                     if let Some(c) = &r.sender_controls {
-                        c.muted.store(muted, Ordering::Relaxed);
+                        c.muted.store(silent, Ordering::Relaxed);
                     }
                     if r.receiver_controls.is_none() {
                         if let Some(s) = self.sessions.get(&r.peer) {
@@ -730,18 +743,13 @@ impl Actor {
                 accept,
                 remember,
             } => self.respond_request(request_id, accept, remember),
-            Command::SetMicMuted { muted } => {
-                self.mic_muted = muted;
-                for r in &self.routes {
-                    if r.kind.is_mic() {
-                        if let Some(c) = &r.sender_controls {
-                            c.muted.store(muted, Ordering::Relaxed);
-                        }
-                    }
-                }
-            }
+            Command::SetMicMuted { muted } => self.set_mic_muted(muted),
             Command::SetMicMonitor { enabled } => self.set_monitor(enabled),
             Command::RefreshAudioDevices => self.refresh_audio_devices(),
+            Command::AudioDevicesChanged {
+                default_input,
+                default_output,
+            } => self.on_audio_devices_changed(default_input, default_output),
             Command::UpdateSettings { mut settings, reply } => {
                 settings.sanitize();
                 if settings.device_name.is_empty() {
@@ -1007,6 +1015,9 @@ impl Actor {
                 self.discovered.remove(&id);
             }
             Internal::AudioFailed { peer, route, error } => {
+                if self.reopen_on_default_device(peer, route) {
+                    return;
+                }
                 let key = route_key(&peer, route);
                 let name = self.peer_name(&peer);
                 self.error_notice(&error, vec![name]);
@@ -1597,7 +1608,7 @@ impl Actor {
 
         if route.kind.local_is_source() {
             let source = match route.kind.endpoints().0 {
-                "system" => CaptureSource::SystemLoopback(self.settings.capture.system_device.clone()),
+                "system" => self.system_audio_source(),
                 "apps" => self.hooks.app_audio_source().ok_or(EngineError::LoopbackUnsupported)?,
                 _ => self.mic_source(),
             };
@@ -1607,7 +1618,7 @@ impl Actor {
                 is_mic && self.settings.mic.noise_suppression,
                 profile.bitrate,
             ));
-            controls.muted.store(is_mic && self.mic_muted, Ordering::Relaxed);
+            controls.muted.store(route.muted || (is_mic && self.mic_muted), Ordering::Relaxed);
             controls.redundancy.store(profile.redundancy, Ordering::Relaxed);
             let sink: Arc<dyn DatagramSink> = Arc::new(session.conn.clone());
             let sender = Sender::start(
@@ -1640,6 +1651,9 @@ impl Actor {
                 profile.jitter_min_ms,
                 profile.jitter_max_ms,
             ));
+            controls
+                .muted
+                .store(route.muted || (route.kind.is_mic() && self.mic_muted), Ordering::Relaxed);
             if !route.kind.is_mic() {
                 controls.balance.set(self.settings.output.balance);
                 controls.mono.store(self.settings.output.mono, Ordering::Relaxed);
@@ -1922,6 +1936,8 @@ impl Actor {
             self.update_discovery();
         }
 
+        self.check_virtual_mic_use();
+
         // Pending prompts expire.
         let expired_requests: Vec<u64> = self.requests.iter().filter(|(_, r)| now > r.expires).map(|(k, _)| *k).collect();
         for id in expired_requests {
@@ -2137,6 +2153,7 @@ impl Actor {
             capabilities: self.local_capabilities(),
             audio_devices: self.audio_devices.clone(),
             mic_level_db,
+            mic_muted: self.mic_muted,
         };
         let _ = self.state_tx.send(Arc::new(state));
     }
