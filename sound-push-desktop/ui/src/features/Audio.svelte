@@ -46,10 +46,13 @@
     ...(chosenVm && !chosenIsCable ? [{ value: chosenVm, label: t("audio.virtualMic.notCableOption", chosenVm) }] : []),
   ]);
 
-  /** Virtual microphone driver: our own on macOS, VB-CABLE on Windows. */
+  /** Virtual microphone: our own on macOS (driver) and Linux (PipeWire/PulseAudio device), VB-CABLE on Windows. */
   let driver = $state<VirtualMicStatus | null>(null);
+  const isLinux = $derived(app.local.platform === "linux");
   /** i18n key prefix for the driver's texts. */
-  const driverKey = $derived(driver?.provider === "vbcable" ? "audio.virtualMic.vb" : "audio.virtualMic.sp");
+  const driverKey = $derived(
+    driver?.provider === "vbcable" ? "audio.virtualMic.vb" : isLinux ? "audio.virtualMic.linux" : "audio.virtualMic.sp",
+  );
   let installing = $state(false);
   let confirmRestart = $state(false);
 
@@ -155,10 +158,11 @@
       {/if}
     {:else if driver?.supported}
       <div class="vm-setup">
-        <!-- Installed but not detected: Windows needs a restart; macOS usually just a re-check. -->
+        <!-- Installed but not detected: Windows needs a restart; macOS usually just a re-check;
+             Linux loses the device when the sound server restarts, and installing again brings it back. -->
         <p class="muted">{t(`${driverKey}.${driver.installed ? "pending" : "hint"}`)}</p>
         <div class="row">
-          {#if !driver.installed}
+          {#if !driver.installed || isLinux}
             <Button variant="primary" onclick={() => changeDriver(true)}>
               {t(installing ? "audio.virtualMic.installing" : `${driverKey}.install`)}
             </Button>

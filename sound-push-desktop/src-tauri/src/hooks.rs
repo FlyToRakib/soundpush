@@ -16,6 +16,8 @@ use crate::power::SleepInhibitor;
 /// Virtual cables in preference order: (part of the playback device name, recording-side
 /// name that apps select as a microphone). `None` when both sides share the device name.
 const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
+    // Linux: a null sink feeds a separate source. Before the next entry, whose name it contains.
+    ("SoundPush Microphone Feed", Some("SoundPush Microphone")),
     ("SoundPush Microphone", None),
     ("CABLE Input", Some("CABLE Output (VB-Audio Virtual Cable)")),
     ("Hi-Fi Cable Input", Some("Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)")),
@@ -265,6 +267,12 @@ mod tests {
             Some("CABLE Output (VB-Audio Virtual Cable)")
         );
         assert_eq!(cable_input_name("BlackHole 2ch").as_deref(), Some("BlackHole 2ch"));
+        assert_eq!(cable_input_name("SoundPush Microphone").as_deref(), Some("SoundPush Microphone"));
+        assert_eq!(
+            cable_input_name("SoundPush Microphone Feed").as_deref(),
+            Some("SoundPush Microphone")
+        );
+        assert_eq!(cable_input_name("Built-in Audio Analog Stereo"), None);
         assert_eq!(cable_input_name("MacBook Air Speakers"), None);
         assert_eq!(cable_input_name("BenQ EW3270U (NVIDIA High Definition Audio)"), None);
     }
