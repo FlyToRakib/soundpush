@@ -9,6 +9,9 @@ rust-version.workspace = true
 [features]
 default = ["cpal-backend"]
 cpal-backend = ["dep:cpal"]
+# Linux: devices, system-audio capture and module loading through PulseAudio or pipewire-pulse.
+# Needs libpulse-dev to build. Off by default so Android binding builds on Linux hosts skip it.
+pulse = ["dep:libpulse-binding", "dep:libpulse-simple-binding"]
 
 [dependencies]
 sp-media = { path = "../sp-media" }
@@ -23,6 +26,11 @@ objc2 = "0.6"
 objc2-core-audio = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFDictionary"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSString", "NSUUID", "NSValue"] }
+
+# Linux system-audio capture from sink monitors (works on PipeWire through pipewire-pulse).
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = { version = "2.30", optional = true }
+libpulse-simple-binding = { version = "2.29", optional = true }
 
 [lints]
 workspace = true

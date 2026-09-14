@@ -3,8 +3,9 @@
 //! cpal streams are not `Send` on every platform, so each stream is created and
 //! owned by a dedicated thread; the returned handle stops it on drop.
 //! System-audio loopback is available on Windows (WASAPI loopback on an output
-//! device). Other platforms report [`AudioBackend::supports_loopback`] = false
-//! until their native capture backends (process taps, PipeWire monitors) land.
+//! device) and macOS (process taps). On Linux with the `pulse` feature, devices and
+//! streams go through PipeWire/PulseAudio ([`crate::pulse`]), which also records an
+//! output's monitor; without a sound server it falls back to ALSA without loopback.
 
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -153,6 +154,10 @@ impl CpalBackend {
     /// microphone access, so a periodic check must not touch inputs or the permission prompt
     /// appears again and again.
     pub fn output_device_names(&self) -> Vec<String> {
+        #[cfg(all(target_os = "linux", feature = "pulse"))]
+        if let Ok(names) = crate::pulse::output_names() {
+            return names;
+        }
         host()
             .output_devices()
             .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
@@ -166,6 +171,10 @@ impl AudioBackend for CpalBackend {
     }
 
     fn list_devices(&self) -> Result<Vec<DeviceInfo>, AudioError> {
+        #[cfg(all(target_os = "linux", feature = "pulse"))]
+        if let Ok(devices) = crate::pulse::list_devices() {
+            return Ok(devices);
+        }
         let host = host();
         let default_in = host.default_input_device().and_then(|d| d.name().ok());
         let default_out = host.default_output_device().and_then(|d| d.name().ok());
@@ -211,6 +220,11 @@ impl AudioBackend for CpalBackend {
 
     fn supports_loopback(&self) -> bool {
         // Windows: WASAPI loopback. macOS: Core Audio process taps (14.2+).
+        // Linux: output monitors, when PipeWire or PulseAudio runs.
+        #[cfg(all(target_os = "linux", feature = "pulse"))]
+        if crate::pulse::available() {
+            return true;
+        }
         cfg!(any(target_os = "windows", target_os = "macos"))
     }
 
@@ -221,6 +235,10 @@ impl AudioBackend for CpalBackend {
         mut on_audio: CaptureCallback,
         mut on_error: ErrorCallback,
     ) -> Result<Box<dyn AudioStream>, AudioError> {
+        #[cfg(all(target_os = "linux", feature = "pulse"))]
+        if crate::pulse::available() {
+            return crate::pulse::open_capture(source, channels, on_audio, on_error);
+        }
         if matches!(source, CaptureSource::SystemLoopback(_)) && !self.supports_loopback() {
             return Err(AudioError::LoopbackUnsupported);
         }
@@ -328,6 +346,10 @@ impl AudioBackend for CpalBackend {
         mut on_audio: RenderCallback,
         mut on_error: ErrorCallback,
     ) -> Result<Box<dyn AudioStream>, AudioError> {
+        #[cfg(all(target_os = "linux", feature = "pulse"))]
+        if crate::pulse::available() {
+            return crate::pulse::open_render(target, channels, on_audio, on_error);
+        }
         let target = target.clone();
         spawn_stream(move || {
             let host = host();

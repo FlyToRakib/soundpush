@@ -13,6 +13,8 @@ mod convert;
 #[cfg(all(target_os = "macos", feature = "cpal-backend"))]
 pub mod macos_tap;
 pub mod null;
+#[cfg(all(target_os = "linux", feature = "pulse"))]
+pub mod pulse;
 
 pub use convert::{CaptureConverter, RenderConverter};
 

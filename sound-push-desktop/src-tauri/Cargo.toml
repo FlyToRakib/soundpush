@@ -11,7 +11,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 sp-engine = { path = "../../sound-push-core/sp-engine" }
-sp-audio-io = { path = "../../sound-push-core/sp-audio-io", features = ["cpal-backend"] }
+sp-audio-io = { path = "../../sound-push-core/sp-audio-io", features = ["cpal-backend", "pulse"] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
