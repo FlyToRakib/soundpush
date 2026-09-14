@@ -10,12 +10,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -87,13 +87,15 @@ import net.soundpush.settings.TroubleshootTopicScreen
 import net.soundpush.settings.TroubleshooterScreen
 import net.soundpush.ui.R
 import net.soundpush.ui.components.BannerModel
+import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.Labels
 import net.soundpush.ui.components.ScreenHeader
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.SoundPushTheme
 import net.soundpush.ui.theme.Tokens
 
-class MainActivity : ComponentActivity() {
+/** AppCompatActivity (not only ComponentActivity) so the per-app language also works on Android 8–12. */
+class MainActivity : AppCompatActivity() {
 
     /** What to finish once a permission dialog or the screen-capture consent returns. Survives recreation. */
     private sealed interface Pending : Serializable {
@@ -342,6 +344,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Settings → General → Language. The engine setting is written first; Android then recreates the screen. */
+    private fun setLanguage(tag: String) {
+        SoundPush.updateSettings { it.copy(language = tag) }
+        AppLanguages.apply(tag)
+    }
+
     private fun dismissTip(key: String) {
         SoundPush.updateSettings { if (key in it.dismissedTips) it else it.copy(dismissedTips = it.dismissedTips + key) }
     }
@@ -360,6 +368,16 @@ class MainActivity : ComponentActivity() {
         val startDestination = remember { if (ONBOARDING_TIP !in state.settings.dismissedTips && state.trustedPeers.isEmpty()) "onboarding" else "home" }
         LaunchedEffect(Unit) {
             if (ONBOARDING_TIP !in state.settings.dismissedTips && state.trustedPeers.isNotEmpty()) dismissTip(ONBOARDING_TIP)
+        }
+        // Android owns the per-app language (it can also change in system settings); the engine mirrors it.
+        LaunchedEffect(state.settings.language) {
+            val inUse = AppLanguages.current()
+            if (state.settings.language != inUse) SoundPush.updateSettings { it.copy(language = inUse) }
+        }
+        val systemLanguage = stringResource(R.string.language_system)
+        val languageChoices = remember(systemLanguage) {
+            listOf(Choice(AppLanguages.SYSTEM, systemLanguage)) +
+                AppLanguages.available(context).map { Choice(it, AppLanguages.displayName(it)) }
         }
         val finishOnboarding: (String) -> Unit = { destination ->
             dismissTip(ONBOARDING_TIP)
@@ -480,6 +498,9 @@ class MainActivity : ComponentActivity() {
                         onOpenBatteryGuide = { nav.navigate("battery") },
                         onExportDiagnostics = exportDiagnostics,
                         permissions = permissionRows(),
+                        languages = languageChoices,
+                        language = AppLanguages.current(),
+                        onLanguageChange = ::setLanguage,
                     )
                 }
                 composable("audio") { AudioScreen(state) }

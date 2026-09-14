@@ -445,4 +445,13 @@
     <string name="perm_camera_blocked_body">SoundPush uses the camera only to scan pairing codes. Open app settings, tap Permissions and allow Camera, or pair by entering the computer\'s address instead.</string>
     <string name="perm_capture_refused_title">Sharing this phone\'s audio wasn\'t allowed</string>
     <string name="perm_capture_refused_body">Android asks every time SoundPush starts sending this phone\'s audio. Try again and allow it to start.</string>
+
+    <!-- Language and units (units are strings so translations can reorder them) -->
+    <string name="settings_language">Language</string>
+    <string name="language_system">System language</string>
+    <string name="unit_ms">%1$d ms</string>
+    <string name="unit_kbps">%1$d kb/s</string>
+    <string name="unit_percent">%1$d%%</string>
+    <string name="unit_db_gain">+%1$d dB</string>
+    <string name="quality_with_latency">%1$s · %2$d ms</string>
 </resources>

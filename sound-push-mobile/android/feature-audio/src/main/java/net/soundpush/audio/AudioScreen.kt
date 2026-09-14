@@ -26,6 +26,7 @@ import net.soundpush.ui.components.SettingChoice
 import net.soundpush.ui.components.SettingSlider
 import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
+import net.soundpush.ui.components.rememberFormat
 import net.soundpush.ui.theme.Tokens
 
 @Composable
@@ -33,6 +34,9 @@ fun AudioScreen(state: EngineState) {
     val s = state.settings
     val unavailable = stringResource(R.string.effect_unavailable)
     val output by DeviceStatus.output.collectAsState()
+    val percent = rememberFormat(R.string.unit_percent)
+    val ms = rememberFormat(R.string.unit_ms)
+    val gain = rememberFormat(R.string.unit_db_gain)
 
     Column(
         Modifier
@@ -75,7 +79,7 @@ fun AudioScreen(state: EngineState) {
                 SettingChoice(
                     stringResource(R.string.audio_bitrate),
                     s.stream.opusBitrate.toString(),
-                    listOf(10, 24, 32, 64, 96, 128, 192, 256, 320, 450, 510).map { Choice((it * 1000).toString(), "$it kb/s") },
+                    listOf(10, 24, 32, 64, 96, 128, 192, 256, 320, 450, 510).map { Choice((it * 1000).toString(), stringResource(R.string.unit_kbps, it)) },
                 ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(opusBitrate = v.toInt())) } }
             }
         }
@@ -86,7 +90,7 @@ fun AudioScreen(state: EngineState) {
                 label = stringResource(R.string.audio_volume),
                 value = s.output.volume,
                 range = 0f..2f,
-                format = { "${(it * 100).roundToInt()}%" },
+                format = { percent((it * 100).roundToInt()) },
             ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(volume = v)) } }
             SettingSwitch(stringResource(R.string.audio_mono), s.output.mono) { v ->
                 SoundPush.updateSettings { it.copy(output = it.output.copy(mono = v)) }
@@ -96,7 +100,7 @@ fun AudioScreen(state: EngineState) {
                 label = stringResource(R.string.audio_av_offset),
                 value = s.output.avOffsetMs.toFloat(),
                 range = 0f..500f,
-                format = { "${(it / 10).roundToInt() * 10} ms" },
+                format = { ms((it / 10).roundToInt() * 10) },
             ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(avOffsetMs = (v / 10).roundToInt() * 10)) } }
             Divider()
             SettingChoice(
@@ -142,7 +146,7 @@ fun AudioScreen(state: EngineState) {
                 label = stringResource(R.string.audio_gain),
                 value = s.mic.gainDb,
                 range = 0f..20f,
-                format = { "+${it.roundToInt()} dB" },
+                format = { gain(it.roundToInt()) },
             ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(gainDb = v.roundToInt().toFloat())) } }
             SettingSwitch(
                 stringResource(R.string.audio_noise_suppression),

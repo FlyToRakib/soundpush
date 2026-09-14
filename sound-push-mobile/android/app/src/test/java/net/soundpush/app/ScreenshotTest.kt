@@ -29,6 +29,7 @@ import net.soundpush.settings.SettingsScreen
 import net.soundpush.settings.TroubleshootTopicScreen
 import net.soundpush.settings.TroubleshooterScreen
 import net.soundpush.ui.components.BannerModel
+import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.ScreenHeader
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.SoundPushTheme
@@ -176,6 +177,21 @@ class ScreenshotTest {
     /** Right-to-left layout (Arabic): mirrored chevrons and back arrow. */
     @Test @Config(qualifiers = "ar-w393dp-h851dp-xxhdpi")
     fun homeConnectedRtl() = capture("home-connected-rtl", "light", "home", home(connected))
+
+    private val languages = listOf(Choice("system", "System language"), Choice("en", "English"), Choice("ar", "العربية"))
+
+    /** Right-to-left Settings: rows, switches, choices and chevrons mirror; nothing is cut off. */
+    @Test @Config(qualifiers = "ar-w393dp-h851dp-xxhdpi")
+    fun settingsRtl() = capture("settings-rtl", "light", "settings") {
+        SettingsScreen(connected, onOpenAudio = {}, languages = languages, language = "ar")
+    }
+
+    @Test @Config(qualifiers = "ar-w393dp-h851dp-xxhdpi")
+    fun audioRtlDark() = capture("audio-rtl", "dark", "audio") { AudioScreen(connected) }
+
+    /** en-XA pseudo-locale (debug builds): about 40 % longer text; plain English here would be hard-coded. */
+    @Test @Config(qualifiers = "en-rXA-w393dp-h851dp-xxhdpi")
+    fun homeConnectedPseudoLocale() = capture("home-connected-en-XA", "light", "home", home(connected))
 
     private fun captureBare(name: String, theme: String, content: @Composable () -> Unit) {
         compose.setContent { SoundPushTheme(theme) { content() } }

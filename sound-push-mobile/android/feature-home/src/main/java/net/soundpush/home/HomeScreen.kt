@@ -59,6 +59,7 @@ import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.StatusBanner
 import net.soundpush.ui.components.TaskCard
 import net.soundpush.ui.components.formatElapsed
+import net.soundpush.ui.components.rememberFormat
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.Tokens
 
@@ -356,11 +357,12 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
             if (expanded) {
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outline)
                 if (!route.isSending && !route.isMic) {
+                    val percent = rememberFormat(R.string.unit_percent)
                     SettingSlider(
                         label = stringResource(R.string.route_volume),
                         value = route.volume,
                         range = 0f..2f,
-                        format = { "${(it * 100).roundToInt()}%" },
+                        format = { percent((it * 100).roundToInt()) },
                     ) { v -> SoundPush.command { setRouteVolume(route.routeId, v) } }
                 }
                 if (route.kind == "receiveSystemAudio") {

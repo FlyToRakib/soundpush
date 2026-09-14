@@ -54,6 +54,10 @@ fun SettingsScreen(
     onExportDiagnostics: () -> Unit = {},
     /** Microphone, camera and notifications, with their denied or blocked state (plan §26.1). */
     permissions: List<PermissionRow> = emptyList(),
+    /** "System language" first, then the languages this build has; empty hides the setting. */
+    languages: List<Choice> = emptyList(),
+    language: String = "system",
+    onLanguageChange: (String) -> Unit = {},
 ) {
     val s = state.settings
     val context = LocalContext.current
@@ -98,6 +102,9 @@ fun SettingsScreen(
                     Choice("dark", stringResource(R.string.theme_dark)),
                 ),
             ) { v -> SoundPush.updateSettings { it.copy(theme = v) } }
+            if (languages.isNotEmpty()) {
+                SettingChoice(stringResource(R.string.settings_language), language, languages, onLanguageChange)
+            }
             SettingSwitch(
                 stringResource(R.string.settings_audio_cues),
                 s.audioCues,
