@@ -993,6 +993,7 @@ impl Actor {
                         self.conn_index.remove(&s.conn_id);
                         let _ = s.tx.send(SessionCmd::Close(StopReason::UserStopped));
                     }
+                    self.peer_speakers_muted.remove(&id);
                     self.remove_routes_for(id);
                     self.end_network_test(id, EngineError::Unreachable);
                     self.flaps.remove(&id);
@@ -1925,6 +1926,7 @@ impl Actor {
             return;
         }
         self.sessions.remove(&id);
+        self.peer_speakers_muted.remove(&id);
         info!(peer = %id.short(), ?reason, "session closed");
         self.end_network_test(id, EngineError::Unreachable);
 
@@ -2643,6 +2645,7 @@ impl Actor {
             self.conn_index.remove(&s.conn_id);
             let _ = s.tx.send(SessionCmd::Close(StopReason::PermissionRevoked));
         }
+        self.peer_speakers_muted.remove(&id);
     }
 
     fn on_remote_volume(&mut self, peer: DeviceId, v: VolumeSet) {
@@ -3189,6 +3192,8 @@ impl Actor {
                 None => "",
             }
             .to_string(),
+            speakers_muted: session.is_some()
+                && self.peer_speakers_muted.get(&id).copied().unwrap_or(false),
         }
     }
 }

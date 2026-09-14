@@ -28,7 +28,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | unit tests plus two-engine tests: pairing → audio → prompt → stop → forget, restart-reconnect, resume without a second prompt, shared encoder, live codec switch, USB (TCP) + network test, resume after restart. Audio devices open off the actor |
 | Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, 9 UI tests |
 | Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`); speakers are not muted while sending on PulseAudio (its monitors follow the sink mute) |
-| Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test |
+| Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test. Notification Stop / Mute / Output (system output switcher per Android version), widget Mute, denied/blocked permission states with Open settings, process-level network watcher, per-app language picker (generated locale list, pseudo-locales in debug), custom latency, output device choice (platform player), connection details, OSS licences (AboutLibraries), share app, tablet/foldable layouts (rail, list-detail Devices, two-column Home). Robolectric flow tests with ATF accessibility checks and Light/Dark/RTL/en-XA/tablet screenshots |
 
 ## Phase 2 — Microphone & headset
 
@@ -38,7 +38,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Android mic presets (7 modes) + platform AEC/NS/AGC with availability | 🟡 | Kotlin `MicCapture` |
 | Gain 0–20 dB, soft limiter, RNNoise, level meter, mic monitor | ✅ | |
 | "Ask" permission prompt for microphone | ✅ | tested end-to-end |
-| Headset mode (both routes in one action) | 🟡 | desktop + Android home task |
+| Headset mode (both routes in one action) | 🟡 | desktop + Android home task; on Android the recorder uses the voice-call preset with echo cancellation while the headset task runs and returns to the user's preset afterwards. RNNoise "on the computer instead" needs receiver-side denoising in the engine (not yet) |
 | Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
 | Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | 🟡 | `sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT: "SoundPush Microphone Feed" → "SoundPush Microphone"); x64 builds locally with `/W4 /WX /analyze`, infverif, inf2cat and ApiValidator clean; CI builds x64 + ARM64 and test-signs (`windows-driver.yml`). Not yet installed on a test-signing PC. Not used by the app: VB-CABLE stays active until attestation signing |
 | Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
@@ -66,7 +66,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Local crash reports for Rust panics | ✅ | redacted report in the data folder, notice once on next start, included in the desktop diagnostics export; nothing uploaded |
 | Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
 | PipeWire app capture | ⏳ | ADR-0002. On Linux it means moving the app's stream to a private null sink and recording its monitor; `CaptureSource::Application` exists (Windows) but has no Linux implementation yet |
-| Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service |
+| Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service; "Lower volume" uses a separate output duck gain (`set_output_duck`), route volumes are never overwritten |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
 | Media Feature Pack detection (Windows N) | 🟡 | `src-tauri/src/system.rs` (missing `mfplat.dll`), Home banner → Optional features |

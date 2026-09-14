@@ -6,14 +6,16 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +36,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -79,19 +83,24 @@ import net.soundpush.home.HomeScreen
 import net.soundpush.service.StreamingService
 import net.soundpush.settings.AuditLogScreen
 import net.soundpush.settings.BatteryGuideScreen
+import net.soundpush.settings.PermissionRow
 import net.soundpush.settings.SettingsScreen
 import net.soundpush.settings.TroubleTopic
 import net.soundpush.settings.TroubleshootTopicScreen
 import net.soundpush.settings.TroubleshooterScreen
 import net.soundpush.ui.R
 import net.soundpush.ui.components.BannerModel
+import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.Labels
+import net.soundpush.ui.components.LocalWidthClass
+import net.soundpush.ui.components.WidthClass
 import net.soundpush.ui.components.ScreenHeader
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.SoundPushTheme
 import net.soundpush.ui.theme.Tokens
 
-class MainActivity : ComponentActivity() {
+/** AppCompatActivity (not only ComponentActivity) so the per-app language also works on Android 8–12. */
+class MainActivity : AppCompatActivity() {
 
     /** What to finish once a permission dialog or the screen-capture consent returns. Survives recreation. */
     private sealed interface Pending : Serializable {
@@ -122,6 +131,18 @@ class MainActivity : ComponentActivity() {
     private var exporting = false
 
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
+    private val permissionMemory by lazy { PermissionMemory(prefs) }
+
+    /** Runtime permission states, re-read on every resume (the user may change them in settings). */
+    private var notificationState by mutableStateOf(PermissionState.Granted)
+    private var micState by mutableStateOf(PermissionState.NotAsked)
+    private var cameraState by mutableStateOf(PermissionState.NotAsked)
+
+    /** A permission the user just needed was refused for good: explain it and offer app settings. */
+    private var blockedPermission by mutableStateOf<String?>(null)
+
+    /** Screen-capture consent was refused for streams the user started: offer to ask again. */
+    private var captureRefused by mutableStateOf<Pending.Start?>(null)
 
     private fun takePending(): Pending? = pending.also { pending = null }
 
@@ -131,17 +152,18 @@ class MainActivity : ComponentActivity() {
             is Pending.Respond -> SoundPush.command { respondRouteRequest(p.requestId.toULong(), granted, p.remember && granted) }
             else -> {}
         }
-        if (!granted) messages.tryEmit(getString(R.string.permission_mic_needed))
+        onPermissionResult(Manifest.permission.RECORD_AUDIO, granted, R.string.permission_mic_needed)
     }
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val next = afterCameraGranted
         afterCameraGranted = null
-        if (granted) next?.invoke() else messages.tryEmit(getString(R.string.scan_camera_denied))
+        if (granted) next?.invoke()
+        onPermissionResult(Manifest.permission.CAMERA, granted, R.string.scan_camera_denied)
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        refreshNotificationsEnabled()
+        refreshPermissions()
     }
 
     private val projectionConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -149,18 +171,24 @@ class MainActivity : ComponentActivity() {
         val ok = result.resultCode == RESULT_OK && data != null
         if (result.resultCode == RESULT_OK && data != null) StreamingService.startAppAudio(this, result.resultCode, data)
         when (val p = takePending()) {
-            is Pending.Start -> if (ok) p.kinds.forEach { kind -> SoundPush.command { startRoute(p.peerId, kind) } }
+            is Pending.Start -> when {
+                ok -> p.kinds.forEach { kind -> SoundPush.command { startRoute(p.peerId, kind) } }
+                // Consent is asked every time and can't be blocked: explain and let the user try again.
+                else -> captureRefused = p
+            }
             is Pending.Respond -> SoundPush.command { respondRouteRequest(p.requestId.toULong(), ok, p.remember && ok) }
             // Without consent the route would carry silence: end it rather than pretend.
             is Pending.Consent -> if (!ok) p.routeIds.forEach { id -> SoundPush.command { stopRoute(id) } }
             null -> {}
         }
-        if (!ok) messages.tryEmit(getString(R.string.permission_capture_needed))
+        if (!ok && captureRefused == null) messages.tryEmit(getString(R.string.permission_capture_needed))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Starts loading the preferences file on the framework's own thread, before the first resume reads it.
+        prefs
         // The engine starts with the first screen, not with the process (see SoundPushApplication).
         SoundPush.ensureStarted(applicationContext)
         DeviceStatus.start(this)
@@ -186,10 +214,14 @@ class MainActivity : ComponentActivity() {
             SoundPushTheme(theme) {
                 val current = state
                 val error = startError
-                when {
-                    current != null -> App(current)
-                    error != null -> StartupError(error) { SoundPush.start(applicationContext, BuildVersion.NAME) }
-                    else -> StartupLoading()
+                // Window width (split screen and foldables included) picks rail or bottom bar, one or two panes.
+                val widthClass = WidthClass.of(LocalConfiguration.current.screenWidthDp)
+                CompositionLocalProvider(LocalWidthClass provides widthClass) {
+                    when {
+                        current != null -> App(current)
+                        error != null -> StartupError(error) { SoundPush.start(applicationContext, BuildVersion.NAME) }
+                        else -> StartupLoading()
+                    }
                 }
             }
         }
@@ -197,7 +229,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshNotificationsEnabled()
+        refreshPermissions()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -208,10 +240,55 @@ class MainActivity : ComponentActivity() {
     private fun hasPermission(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
-    private fun refreshNotificationsEnabled() {
+    private fun refreshPermissions() {
         notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled() &&
             (Build.VERSION.SDK_INT < 33 || hasPermission(Manifest.permission.POST_NOTIFICATIONS))
+        notificationState = when {
+            notificationsEnabled -> PermissionState.Granted
+            Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean(KEY_NOTIFICATIONS_ASKED, false) -> PermissionState.NotAsked
+            Build.VERSION.SDK_INT >= 33 && shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS) -> PermissionState.Denied
+            // Refused for good, or turned off in the app's notification settings.
+            else -> PermissionState.Blocked
+        }
+        micState = permissionState(Manifest.permission.RECORD_AUDIO)
+        cameraState = permissionState(Manifest.permission.CAMERA)
     }
+
+    private fun permissionState(permission: String) = PermissionState.of(
+        granted = hasPermission(permission),
+        refusedBefore = permissionMemory.refusedBefore(permission),
+        shouldShowRationale = shouldShowRequestPermissionRationale(permission),
+    )
+
+    /**
+     * After a permission dialog: a first refusal says what the feature needs; a refusal for good
+     * (the system no longer shows its dialog) opens an explanation with a way to app settings.
+     * The history is read before recording this answer, so a dialog dismissed without a choice
+     * isn't mistaken for a permanent refusal.
+     */
+    private fun onPermissionResult(permission: String, granted: Boolean, @StringRes refusedMessage: Int) {
+        val state = PermissionState.of(granted, permissionMemory.refusedBefore(permission), shouldShowRequestPermissionRationale(permission))
+        permissionMemory.record(permission, granted)
+        refreshPermissions()
+        when (state) {
+            PermissionState.Granted -> {}
+            PermissionState.Blocked -> blockedPermission = permission
+            else -> messages.tryEmit(getString(refusedMessage))
+        }
+    }
+
+    /** Settings → Permissions: ask again; a blocked permission ends in the explanation with app settings. */
+    private fun askFromSettings(permission: String) {
+        when (permission) {
+            Manifest.permission.RECORD_AUDIO -> micPermission.launch(permission)
+            Manifest.permission.CAMERA -> cameraPermission.launch(permission)
+            else -> requestNotifications()
+        }
+    }
+
+    private fun openAppSettings() = openSettings(
+        Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)),
+    )
 
     /**
      * Ask for notifications with the system dialog while Android still offers it; after "Don't
@@ -276,6 +353,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Settings → General → Language. The engine setting is written first; Android then recreates the screen. */
+    private fun setLanguage(tag: String) {
+        SoundPush.updateSettings { it.copy(language = tag) }
+        AppLanguages.apply(tag)
+    }
+
     private fun dismissTip(key: String) {
         SoundPush.updateSettings { if (key in it.dismissedTips) it else it.copy(dismissedTips = it.dismissedTips + key) }
     }
@@ -295,12 +378,24 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             if (ONBOARDING_TIP !in state.settings.dismissedTips && state.trustedPeers.isNotEmpty()) dismissTip(ONBOARDING_TIP)
         }
+        // Android owns the per-app language (it can also change in system settings); the engine mirrors it.
+        LaunchedEffect(state.settings.language) {
+            val inUse = AppLanguages.current()
+            if (state.settings.language != inUse) SoundPush.updateSettings { it.copy(language = inUse) }
+        }
+        val systemLanguage = stringResource(R.string.language_system)
+        val languageChoices = remember(systemLanguage) {
+            listOf(Choice(AppLanguages.SYSTEM, systemLanguage)) +
+                AppLanguages.available(context).map { Choice(it, AppLanguages.displayName(it)) }
+        }
         val finishOnboarding: (String) -> Unit = { destination ->
             dismissTip(ONBOARDING_TIP)
             nav.navigate(destination) { popUpTo("onboarding") { inclusive = true } }
         }
         val fromOnboarding = nav.previousBackStackEntry?.destination?.route == "onboarding"
         val fullScreen = route == "scan" || route == "onboarding"
+        val showNavigation = !fullScreen && !fromOnboarding
+        val showRail = showNavigation && LocalWidthClass.current != WidthClass.Compact
 
         val exportDiagnostics: () -> Unit = {
             if (!exporting) {
@@ -358,6 +453,8 @@ class MainActivity : ComponentActivity() {
         val usbLabel = stringResource(R.string.peer_via_usb)
 
         Scaffold(
+            // The rail (medium and expanded windows) is drawn beside the scaffold, at the start edge.
+            modifier = Modifier.padding(start = if (showRail) RailWidth else 0.dp),
             containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
@@ -374,7 +471,7 @@ class MainActivity : ComponentActivity() {
                 }
             },
             bottomBar = {
-                if (!fullScreen && !fromOnboarding) BottomBar(route) { destination -> nav.navigateToTab(destination) }
+                if (showNavigation && !showRail) BottomBar(route) { destination -> nav.navigateToTab(destination) }
             },
         ) { padding ->
             NavHost(nav, startDestination = startDestination, modifier = Modifier.padding(padding)) {
@@ -413,6 +510,11 @@ class MainActivity : ComponentActivity() {
                         onOpenTroubleshooter = { nav.navigate("troubleshoot") },
                         onOpenBatteryGuide = { nav.navigate("battery") },
                         onExportDiagnostics = exportDiagnostics,
+                        onOpenLicenses = { nav.navigate("licenses") },
+                        permissions = permissionRows(),
+                        languages = languageChoices,
+                        language = AppLanguages.current(),
+                        onLanguageChange = ::setLanguage,
                         onOpenAuditLog = { nav.navigate("audit") },
                     )
                 }
@@ -432,6 +534,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 composable("battery") { BatteryGuideScreen() }
+                composable("licenses") { LicensesScreen() }
                 composable("scan") {
                     QrScanner(
                         onResult = { uri ->
@@ -444,7 +547,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        if (showRail) SideRail(route) { destination -> nav.navigateToTab(destination) }
+
         Overlays(state)
+        PermissionOverlays()
 
         if (crashNotice) {
             val close = {
@@ -483,6 +589,66 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Denied and blocked permission states (plan §26.1): each says what stopped working and how to fix it. */
+    @Composable
+    private fun PermissionOverlays() {
+        when (blockedPermission) {
+            Manifest.permission.RECORD_AUDIO -> PermissionBlockedDialog(
+                title = stringResource(R.string.perm_mic_blocked_title),
+                body = stringResource(R.string.perm_mic_blocked_body),
+                onOpenSettings = ::openAppSettings,
+                onDismiss = { blockedPermission = null },
+            )
+            Manifest.permission.CAMERA -> PermissionBlockedDialog(
+                title = stringResource(R.string.perm_camera_blocked_title),
+                body = stringResource(R.string.perm_camera_blocked_body),
+                onOpenSettings = ::openAppSettings,
+                onDismiss = { blockedPermission = null },
+            )
+            // Notifications have their own banner and settings row; nothing else is tracked.
+            else -> {}
+        }
+        captureRefused?.let { refused ->
+            AlertDialog(
+                onDismissRequest = { captureRefused = null },
+                icon = { Icon(SpIcons.Apps, null) },
+                title = { Text(stringResource(R.string.perm_capture_refused_title), textAlign = TextAlign.Center) },
+                text = { Text(stringResource(R.string.perm_capture_refused_body)) },
+                confirmButton = {
+                    Button(onClick = {
+                        captureRefused = null
+                        askCaptureConsent(refused)
+                    }) { Text(stringResource(R.string.common_retry)) }
+                },
+                dismissButton = { TextButton(onClick = { captureRefused = null }) { Text(stringResource(R.string.common_cancel)) } },
+            )
+        }
+    }
+
+    /** Settings → Permissions: microphone, camera and notifications with what the user can do about each. */
+    @Composable
+    private fun permissionRows(): List<PermissionRow> {
+        @Composable
+        fun row(@StringRes label: Int, state: PermissionState, onClick: () -> Unit) = PermissionRow(
+            label = stringResource(label),
+            status = stringResource(
+                when (state) {
+                    PermissionState.Granted -> R.string.perm_status_granted
+                    PermissionState.NotAsked -> R.string.perm_status_not_asked
+                    PermissionState.Denied -> R.string.perm_status_denied
+                    PermissionState.Blocked -> R.string.perm_status_blocked
+                },
+            ),
+            needsAction = state != PermissionState.Granted,
+            onClick = onClick,
+        )
+        return listOf(
+            row(R.string.perm_label_mic, micState) { askFromSettings(Manifest.permission.RECORD_AUDIO) },
+            row(R.string.perm_label_camera, cameraState) { askFromSettings(Manifest.permission.CAMERA) },
+            row(R.string.perm_label_notifications, notificationState) { requestNotifications() },
+        )
+    }
+
     /**
      * Contextual banners on Home, each with one fix and (for tips) Dismiss, remembered in
      * settings.dismissedTips like the desktop's tips.
@@ -502,7 +668,9 @@ class MainActivity : ComponentActivity() {
                         key = "notifications",
                         title = stringResource(R.string.home_banner_notifications),
                         message = stringResource(R.string.home_banner_notifications_body),
-                        actionLabel = stringResource(R.string.notif_rationale_allow),
+                        actionLabel = stringResource(
+                            if (notificationState == PermissionState.Blocked) R.string.common_open_settings else R.string.notif_rationale_allow,
+                        ),
                         onAction = ::requestNotifications,
                         icon = SpIcons.Alert,
                         warning = true,

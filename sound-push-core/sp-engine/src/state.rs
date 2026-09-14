@@ -126,6 +126,9 @@ pub struct PeerView {
     pub has_virtual_mic: bool,
     /// "quic" or "tcp" (USB via adb) while connected, empty otherwise.
     pub transport: String,
+    /// This device asked the peer to mute its own speakers ("Mute PC") in the current session.
+    /// Reset when the session ends; always false while disconnected.
+    pub speakers_muted: bool,
 }
 
 /// User-level route type. Named from the local device's perspective.

@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.ui.R
 import net.soundpush.ui.components.Labels
@@ -61,7 +62,14 @@ object Notifications {
      * tied to [session], which gives it media controls and, on Android 11+, the system output
      * switcher. Stop and Mute are always there; the microphone route adds "Microphone in use".
      */
-    fun streaming(context: Context, state: EngineState?, micLive: Boolean, session: MediaSessionCompat.Token? = null, connecting: Boolean = false) = run {
+    fun streaming(
+        context: Context,
+        state: EngineState?,
+        micLive: Boolean,
+        session: MediaSessionCompat.Token? = null,
+        connecting: Boolean = false,
+        output: DeviceStatus.Output? = null,
+    ) = run {
         val active = state?.routes?.filter { it.status == "active" }.orEmpty()
         val receiving = state?.routes?.filter { !it.isSending && it.status != "stopped" }.orEmpty()
         val peer = active.firstOrNull()?.peerName ?: state?.connectedPeers?.firstOrNull()?.name ?: ""
@@ -82,10 +90,12 @@ object Notifications {
 
         // Every action is shown in the compact media view too (at most three), in the order added.
         val compact = mutableListOf<Int>()
-        fun action(icon: Int, label: Int, pending: PendingIntent) {
+        fun action(icon: Int, label: String, pending: PendingIntent) {
             compact += compact.size
-            builder.addAction(icon, context.getString(label), pending)
+            builder.addAction(icon, label, pending)
         }
+
+        fun action(icon: Int, label: Int, pending: PendingIntent) = action(icon, context.getString(label), pending)
         if (session != null && receiving.isNotEmpty()) {
             val muted = receiving.all { it.muted }
             builder.setContentText(context.getString(Labels.routeTitle(receiving.first().kind), receiving.first().peerName))
@@ -106,6 +116,15 @@ object Notifications {
                 ServiceR.drawable.ic_action_mic_off,
                 if (micMuted) R.string.route_unmute_mic else R.string.route_mute_mic,
                 serviceAction(context, ACTION_TOGGLE_MUTE, 2),
+            )
+        }
+        // Stop / Mute / Output (plan §25.1). Android 13+ media controls also show their own output
+        // chip; older versions only have this action.
+        if (session != null && receiving.isNotEmpty() && output != null) {
+            action(
+                ServiceR.drawable.ic_action_output,
+                context.getString(R.string.notif_output, context.getString(Labels.output(output))),
+                OutputSwitcher.pendingIntent(context),
             )
         }
         if (session != null && receiving.isNotEmpty()) {

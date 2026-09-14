@@ -78,6 +78,8 @@ data class PeerView(
     val hasVirtualMic: Boolean = false,
     /** "quic" or "tcp" (USB) while connected. */
     val transport: String = "",
+    /** This phone muted the device's own speakers ("Mute computer speakers") in this session. */
+    val speakersMuted: Boolean = false,
 ) {
     /** A session exists: "connected", or "degraded" (connected with high loss or jitter). */
     val isConnected get() = connection == "connected" || connection == "degraded"

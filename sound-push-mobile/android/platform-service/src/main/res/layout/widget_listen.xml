@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home-screen widget. The whole widget is one touch target that starts or stops listening. -->
+<!-- Home-screen widget. The widget is one touch target that starts or stops listening; while
+     listening, Mute is a second, separate touch target. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
@@ -45,6 +46,17 @@
             android:textColor="@color/sp_widget_text_secondary"
             android:textSize="12sp" />
     </LinearLayout>
+
+    <ImageView
+        android:id="@+id/widget_mute"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="4dp"
+        android:background="@drawable/widget_action_background"
+        android:contentDescription="@string/widget_mute_desc"
+        android:padding="12dp"
+        android:src="@drawable/ic_action_mute"
+        android:visibility="gone" />
 
     <ImageView
         android:id="@+id/widget_action"

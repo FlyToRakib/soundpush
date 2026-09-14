@@ -450,4 +450,74 @@
     <string name="settings_license">License</string>
     <string name="settings_license_desc">Free and open source under GPL-3.0-or-later</string>
     <string name="settings_source">Source code</string>
+
+    <!-- Output device: notification switcher, Audio settings, connection details -->
+    <string name="output_speaker">Phone speaker</string>
+    <string name="output_wired">Wired headphones</string>
+    <string name="output_bluetooth">Bluetooth</string>
+    <string name="output_usb">USB audio</string>
+    <string name="output_other">Other output</string>
+    <string name="notif_output">Output: %1$s</string>
+    <string name="widget_mute_desc">Mute listening</string>
+    <string name="widget_unmute_desc">Unmute listening</string>
+    <string name="widget_listening_muted">Muted · %1$s</string>
+
+    <!-- Runtime permissions: denied and blocked states (plan 26.1) -->
+    <string name="settings_permissions">Permissions</string>
+    <string name="perm_label_mic">Microphone</string>
+    <string name="perm_label_camera">Camera</string>
+    <string name="perm_label_notifications">Notifications</string>
+    <string name="perm_status_granted">Allowed</string>
+    <string name="perm_status_not_asked">Asked when you first use it</string>
+    <string name="perm_status_denied">Not allowed · Tap to allow</string>
+    <string name="perm_status_blocked">Turned off · Tap to open settings</string>
+    <string name="perm_mic_blocked_title">Microphone access is off</string>
+    <string name="perm_mic_blocked_body">SoundPush needs the microphone to send your voice to another device. Open app settings, tap Permissions and allow Microphone.</string>
+    <string name="perm_camera_blocked_title">Camera access is off</string>
+    <string name="perm_camera_blocked_body">SoundPush uses the camera only to scan pairing codes. Open app settings, tap Permissions and allow Camera, or pair by entering the computer\'s address instead.</string>
+    <string name="perm_capture_refused_title">Sharing this phone\'s audio wasn\'t allowed</string>
+    <string name="perm_capture_refused_body">Android asks every time SoundPush starts sending this phone\'s audio. Try again and allow it to start.</string>
+
+    <!-- Language and units (units are strings so translations can reorder them) -->
+    <string name="settings_language">Language</string>
+    <string name="language_system">System language</string>
+    <string name="unit_ms">%1$d ms</string>
+    <string name="unit_kbps">%1$d kb/s</string>
+    <string name="unit_percent">%1$d%%</string>
+    <string name="unit_db_gain">+%1$d dB</string>
+    <string name="quality_with_latency">%1$s · %2$d ms</string>
+
+    <!-- Settings completeness: custom latency, output device, connection details, licences, share -->
+    <string name="latency_custom">Custom</string>
+    <string name="latency_custom_min">Minimum buffer</string>
+    <string name="latency_custom_max">Maximum buffer</string>
+    <string name="audio_output_device">Output</string>
+    <string name="audio_output_auto">Automatic</string>
+    <string name="audio_output_device_auto_desc">Android chooses: headphones or Bluetooth when connected, otherwise the speaker.</string>
+    <string name="audio_output_device_desc">Plays here through Android\'s standard player, which adds a little delay.</string>
+    <string name="audio_output_device_missing">Not connected right now. Sound plays where Android chooses until it is.</string>
+    <string name="stats_codec">Codec</string>
+    <string name="stats_codec_bitrate">%1$s · %2$d kb/s</string>
+    <string name="stats_latency">Latency</string>
+    <string name="stats_buffer">Buffer</string>
+    <string name="stats_jitter">Jitter</string>
+    <string name="stats_loss">Packet loss</string>
+    <string name="stats_drift">Clock drift</string>
+    <string name="stats_dropouts">Dropouts</string>
+    <string name="stats_rtt">Round trip</string>
+    <string name="stats_connection">Connection</string>
+    <string name="stats_output">Plays on</string>
+    <string name="stats_breakdown_title">How the delay adds up</string>
+    <string name="stats_breakdown">Network %1$d ms + buffer %2$d ms + output %3$s</string>
+    <string name="stats_not_measured">not measured</string>
+    <string name="transport_network">Network (QUIC)</string>
+    <string name="transport_usb">USB (TCP)</string>
+    <string name="unit_ms_decimal">%1$s ms</string>
+    <string name="unit_percent_decimal">%1$s %%</string>
+    <string name="unit_ppm">%1$d ppm</string>
+    <string name="settings_licenses">Open-source licences</string>
+    <string name="settings_licenses_desc">Libraries the Android app is built with</string>
+    <string name="settings_share_app">Share SoundPush</string>
+    <string name="devices_select">Choose a device to see its settings.</string>
+    <string name="share_app_text">SoundPush plays your computer\'s sound on your phone and turns your phone into a microphone. Free and open source: %1$s</string>
 </resources>

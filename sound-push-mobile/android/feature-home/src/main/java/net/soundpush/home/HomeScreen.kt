@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
@@ -25,6 +27,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.PeerView
 import net.soundpush.engine.RouteView
@@ -52,6 +56,9 @@ import net.soundpush.ui.components.BannerModel
 import net.soundpush.ui.components.EmptyState
 import net.soundpush.ui.components.IconTile
 import net.soundpush.ui.components.Labels
+import net.soundpush.ui.components.LocalWidthClass
+import net.soundpush.ui.components.WidthClass
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.QualityBadge
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingSlider
@@ -59,6 +66,7 @@ import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.StatusBanner
 import net.soundpush.ui.components.TaskCard
 import net.soundpush.ui.components.formatElapsed
+import net.soundpush.ui.components.rememberFormat
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.Tokens
 
@@ -145,11 +153,8 @@ fun HomeScreen(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = Tokens.Space.md, end = Tokens.Space.md, top = Tokens.Space.xs, bottom = Tokens.Space.lg),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
-    ) {
+    /** Connection problems and tips. */
+    fun LazyListScope.statusItems() {
         if (offlinePeer != null) {
             item(key = "banner") {
                 val reconnecting = offlinePeer.connection == "connecting" || offlinePeer.connection == "reconnecting"
@@ -166,7 +171,10 @@ fun HomeScreen(
         }
 
         items(banners, key = { "banner-${it.key}" }) { banner -> StatusBanner(banner) }
+    }
 
+    /** What is streaming now. */
+    fun LazyListScope.routeItems() {
         if (state.routes.isNotEmpty()) {
             item(key = "active-title") { SectionTitle(stringResource(R.string.home_active)) }
             items(state.routes, key = { it.routeId }) { route ->
@@ -174,6 +182,10 @@ fun HomeScreen(
             }
         }
 
+    }
+
+    /** "What do you want to do?" task cards. */
+    fun LazyListScope.taskItems() {
         item(key = "tasks-title") { SectionTitle(stringResource(R.string.home_title)) }
         items(TASKS, key = { it.titleRes }) { task ->
             val appsUnsupported = task.kinds.contains("sendAppAudio") && !state.capabilities.appAudio
@@ -210,8 +222,33 @@ fun HomeScreen(
             }
         }
 
+    }
+
+    /** Paired devices and their connection state. */
+    fun LazyListScope.peerItems() {
         item(key = "peers-title") { SectionTitle(stringResource(R.string.devices_paired)) }
         items(state.trustedPeers, key = { "peer-${it.deviceId}" }) { peer -> PeerRow(peer, peerLabel(peer), onOpenDevices) }
+    }
+
+    if (LocalWidthClass.current == WidthClass.Expanded) {
+        // Tablets and unfolded foldables: what to do on one side, what is running and with whom on the other.
+        Row(Modifier.fillMaxSize()) {
+            HomeColumn(Modifier.weight(1f)) {
+                statusItems()
+                taskItems()
+            }
+            HomeColumn(Modifier.weight(1f)) {
+                routeItems()
+                peerItems()
+            }
+        }
+    } else {
+        HomeColumn(Modifier.readableWidth()) {
+            statusItems()
+            routeItems()
+            taskItems()
+            peerItems()
+        }
     }
 
     // The list follows live state: devices that disconnect disappear, the dialog closes when none are left.
@@ -254,6 +291,16 @@ fun HomeScreen(
             confirmButton = { TextButton(onClick = { pickingRes = null }) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
+}
+
+@Composable
+private fun HomeColumn(modifier: Modifier, content: LazyListScope.() -> Unit) {
+    LazyColumn(
+        modifier = modifier.fillMaxHeight(),
+        contentPadding = PaddingValues(start = Tokens.Space.md, end = Tokens.Space.md, top = Tokens.Space.xs, bottom = Tokens.Space.lg),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
+        content = content,
+    )
 }
 
 @Composable
@@ -301,7 +348,6 @@ private fun RouteControls(route: RouteView) {
 @Composable
 private fun RouteCard(route: RouteView, peer: PeerView?) {
     var expanded by rememberSaveable(route.routeId) { mutableStateOf(false) }
-    var pcMuted by rememberSaveable(route.routeId) { mutableStateOf(false) }
     val quality = peer?.quality ?: "unknown"
     val qualityLabel = Labels.quality(quality)?.let { stringResource(it) } ?: ""
     val icon = when {
@@ -356,26 +402,24 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
             if (expanded) {
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outline)
                 if (!route.isSending && !route.isMic) {
+                    val percent = rememberFormat(R.string.unit_percent)
                     SettingSlider(
                         label = stringResource(R.string.route_volume),
                         value = route.volume,
                         range = 0f..2f,
-                        format = { "${(it * 100).roundToInt()}%" },
+                        format = { percent((it * 100).roundToInt()) },
                     ) { v -> SoundPush.command { setRouteVolume(route.routeId, v) } }
                 }
                 if (route.kind == "receiveSystemAudio") {
-                    SettingSwitch(stringResource(R.string.route_mute_pc), pcMuted) { v ->
-                        pcMuted = v
+                    // The engine's state, not a local flag: survives rotation, reconnects and changes from elsewhere.
+                    SettingSwitch(stringResource(R.string.route_mute_pc), peer?.speakersMuted == true) { v ->
                         SoundPush.command { setPeerSpeakersMuted(route.peerId, v) }
                     }
                 }
-                Text(
-                    "${route.stats.codec} · ${route.stats.bitrateKbps} kb/s · ${route.stats.latencyMs.roundToInt()} ms · " +
-                        "buffer ${route.stats.bufferMs.roundToInt()} ms · loss ${"%.1f".format(route.stats.lossPct)} %",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = Tokens.Space.xs),
-                )
+                // Collected only while the details are open.
+                val output by DeviceStatus.output.collectAsState()
+                val outputLatencyMs by DeviceStatus.outputLatencyMs.collectAsState()
+                ConnectionDetails(route, peer, output, outputLatencyMs)
             }
         }
     }

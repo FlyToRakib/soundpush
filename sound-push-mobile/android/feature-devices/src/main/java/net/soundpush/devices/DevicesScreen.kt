@@ -1,10 +1,12 @@
 package net.soundpush.devices
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -30,6 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +60,9 @@ import net.soundpush.ui.R
 import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.IconTile
 import net.soundpush.ui.components.Labels
+import net.soundpush.ui.components.LocalWidthClass
+import net.soundpush.ui.components.WidthClass
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.QualityBadge
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingChoice
@@ -68,9 +76,75 @@ fun DevicesScreen(state: EngineState, onScan: () -> Unit, onShowMessage: (String
     // Survive rotation: keep the address dialog and the open device sheet.
     var addressOpen by rememberSaveable { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selected = state.trustedPeers.firstOrNull { it.deviceId == selectedId }
+    // Expanded windows show the list and the selected device side by side (list-detail); phones use a sheet.
+    val twoPane = LocalWidthClass.current == WidthClass.Expanded
 
+    val list = @Composable { modifier: Modifier ->
+        DeviceList(
+            state,
+            selectedId = if (twoPane) selectedId else null,
+            onScan = onScan,
+            onEnterAddress = { addressOpen = true },
+            onSelect = { selectedId = it },
+            onShowMessage = onShowMessage,
+            modifier = modifier,
+        )
+    }
+
+    if (twoPane) {
+        Row(Modifier.fillMaxSize()) {
+            list(Modifier.weight(2f).fillMaxHeight())
+            VerticalDivider(color = MaterialTheme.colorScheme.outline)
+            Box(Modifier.weight(3f).fillMaxHeight()) {
+                if (selected != null) {
+                    // Keyed by device, so the rename field and dialogs never carry over to another device.
+                    androidx.compose.runtime.key(selected.deviceId) {
+                        DeviceDetail(
+                            selected,
+                            profile = state.settings.deviceProfiles[selected.deviceId] ?: DeviceProfile(),
+                            test = state.networkTests.firstOrNull { it.peerId == selected.deviceId },
+                            onForgotten = { selectedId = null },
+                            modifier = Modifier.padding(top = Tokens.Space.xs),
+                        )
+                    }
+                } else {
+                    Text(
+                        stringResource(if (state.trustedPeers.isEmpty()) R.string.devices_none else R.string.devices_select),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center).padding(Tokens.Space.lg),
+                    )
+                }
+            }
+        }
+    } else {
+        list(Modifier.readableWidth())
+        selected?.let { peer ->
+            DeviceSheet(
+                peer,
+                profile = state.settings.deviceProfiles[peer.deviceId] ?: DeviceProfile(),
+                test = state.networkTests.firstOrNull { it.peerId == peer.deviceId },
+                onDismiss = { selectedId = null },
+            )
+        }
+    }
+
+    if (addressOpen) AddressDialog(onDismiss = { addressOpen = false })
+}
+
+@Composable
+private fun DeviceList(
+    state: EngineState,
+    selectedId: String?,
+    onScan: () -> Unit,
+    onEnterAddress: () -> Unit,
+    onSelect: (String) -> Unit,
+    onShowMessage: (String) -> Unit,
+    modifier: Modifier,
+) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         contentPadding = PaddingValues(start = Tokens.Space.md, end = Tokens.Space.md, top = Tokens.Space.xs, bottom = Tokens.Space.lg),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -81,7 +155,7 @@ fun DevicesScreen(state: EngineState, onScan: () -> Unit, onShowMessage: (String
                     Spacer(Modifier.width(Tokens.Space.sm))
                     Text(stringResource(R.string.devices_scan))
                 }
-                OutlinedButton(onClick = { addressOpen = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = onEnterAddress, modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.devices_address))
                 }
             }
@@ -92,7 +166,7 @@ fun DevicesScreen(state: EngineState, onScan: () -> Unit, onShowMessage: (String
             item(key = "paired-empty") { EmptyLine(stringResource(R.string.devices_none)) }
         }
         items(state.trustedPeers, key = { "paired-${it.deviceId}" }) { peer ->
-            DeviceRow(peer, onClick = { selectedId = peer.deviceId })
+            DeviceRow(peer, selected = peer.deviceId == selectedId, onClick = { onSelect(peer.deviceId) })
         }
 
         item(key = "nearby-title") { SectionTitle(stringResource(R.string.devices_nearby)) }
@@ -107,16 +181,6 @@ fun DevicesScreen(state: EngineState, onScan: () -> Unit, onShowMessage: (String
             }
         }
     }
-
-    if (addressOpen) AddressDialog(onDismiss = { addressOpen = false })
-    state.trustedPeers.firstOrNull { it.deviceId == selectedId }?.let { peer ->
-        DeviceSheet(
-            peer,
-            profile = state.settings.deviceProfiles[peer.deviceId] ?: DeviceProfile(),
-            test = state.networkTests.firstOrNull { it.peerId == peer.deviceId },
-            onDismiss = { selectedId = null },
-        )
-    }
 }
 
 @Composable
@@ -130,12 +194,13 @@ private fun EmptyLine(text: String) {
 }
 
 @Composable
-private fun DeviceRow(peer: PeerView, actionLabel: String? = null, onClick: () -> Unit) {
+private fun DeviceRow(peer: PeerView, actionLabel: String? = null, selected: Boolean = false, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.background,
-        modifier = Modifier.fillMaxWidth(),
+        // The device open in the detail pane stays highlighted (and is announced as selected).
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.background,
+        modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
     ) {
         Row(Modifier.heightIn(min = 64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconTile(SpIcons.forPlatform(peer.platform), active = peer.trusted && peer.isConnected)
@@ -319,6 +384,20 @@ private fun NetworkTestCard(peer: PeerView, test: NetworkTestView?) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceSheet(peer: PeerView, profile: DeviceProfile, test: NetworkTestView?, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        DeviceDetail(peer, profile, test, onForgotten = onDismiss, modifier = Modifier.navigationBarsPadding())
+    }
+}
+
+/** Everything about one paired device: the bottom sheet on phones, the detail pane on wide windows. */
+@Composable
+private fun DeviceDetail(
+    peer: PeerView,
+    profile: DeviceProfile,
+    test: NetworkTestView?,
+    onForgotten: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     var confirmForget by remember { mutableStateOf(false) }
     var alias by remember(peer.deviceId) { mutableStateOf(peer.name) }
     val policies = listOf(
@@ -327,89 +406,86 @@ private fun DeviceSheet(peer: PeerView, profile: DeviceProfile, test: NetworkTes
         Choice("deny", stringResource(R.string.policy_deny)),
     )
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Tokens.Space.md)
-                .navigationBarsPadding()
-                .padding(bottom = Tokens.Space.md),
-            verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconTile(SpIcons.forPlatform(peer.platform), active = peer.isConnected)
-                Spacer(Modifier.width(Tokens.Space.md))
-                Column(Modifier.weight(1f)) {
-                    Text(peer.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    val status = stringResource(Labels.status(peer.connection))
-                    Text(
-                        if (peer.transport == "tcp") stringResource(R.string.status_with_link, status, stringResource(R.string.peer_via_usb)) else status,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (peer.isConnected) {
-                    OutlinedButton(onClick = { SoundPush.command { disconnect(peer.deviceId) } }) {
-                        Text(stringResource(R.string.devices_disconnect))
-                    }
-                } else {
-                    Button(onClick = { SoundPush.command { connect(peer.deviceId) } }) { Text(stringResource(R.string.devices_connect)) }
-                }
-            }
-
-            SpCard {
-                OutlinedTextField(
-                    value = alias,
-                    onValueChange = { alias = it.take(64) },
-                    label = { Text(stringResource(R.string.devices_rename)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        val value = alias.trim()
-                        SoundPush.command { renameDevice(peer.deviceId, value.ifEmpty { null }) }
-                    }),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = Tokens.Space.sm),
+    Column(
+        modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = Tokens.Space.md)
+            .padding(bottom = Tokens.Space.md),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconTile(SpIcons.forPlatform(peer.platform), active = peer.isConnected)
+            Spacer(Modifier.width(Tokens.Space.md))
+            Column(Modifier.weight(1f)) {
+                Text(peer.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val status = stringResource(Labels.status(peer.connection))
+                Text(
+                    if (peer.transport == "tcp") stringResource(R.string.status_with_link, status, stringResource(R.string.peer_via_usb)) else status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                SettingSwitch(stringResource(R.string.devices_auto_connect), peer.autoConnect) { v ->
-                    SoundPush.command { setAutoConnect(peer.deviceId, v) }
-                }
             }
-
-            peer.permissions?.let { p ->
-                SectionTitle(stringResource(R.string.devices_permissions))
-                SpCard {
-                    SettingChoice(stringResource(R.string.perm_receiveMyAudio), p.receive_my_audio, policies) { v ->
-                        SoundPush.command { setPermission(peer.deviceId, "receiveMyAudio", v) }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                    SettingChoice(stringResource(R.string.perm_useMyMicrophone), p.use_my_microphone, policies) { v ->
-                        SoundPush.command { setPermission(peer.deviceId, "useMyMicrophone", v) }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                    SettingChoice(stringResource(R.string.perm_sendAudioToMe), p.send_audio_to_me, policies) { v ->
-                        SoundPush.command { setPermission(peer.deviceId, "sendAudioToMe", v) }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                    SettingChoice(stringResource(R.string.perm_controlMe), p.control_me, policies) { v ->
-                        SoundPush.command { setPermission(peer.deviceId, "controlMe", v) }
-                    }
+            if (peer.isConnected) {
+                OutlinedButton(onClick = { SoundPush.command { disconnect(peer.deviceId) } }) {
+                    Text(stringResource(R.string.devices_disconnect))
                 }
+            } else {
+                Button(onClick = { SoundPush.command { connect(peer.deviceId) } }) { Text(stringResource(R.string.devices_connect)) }
             }
+        }
 
-            ProfileCard(peer, profile)
-            NetworkTestCard(peer, test)
+        SpCard {
+            OutlinedTextField(
+                value = alias,
+                onValueChange = { alias = it.take(64) },
+                label = { Text(stringResource(R.string.devices_rename)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    val value = alias.trim()
+                    SoundPush.command { renameDevice(peer.deviceId, value.ifEmpty { null }) }
+                }),
+                modifier = Modifier.fillMaxWidth().padding(vertical = Tokens.Space.sm),
+            )
+            SettingSwitch(stringResource(R.string.devices_auto_connect), peer.autoConnect) { v ->
+                SoundPush.command { setAutoConnect(peer.deviceId, v) }
+            }
+        }
 
+        peer.permissions?.let { p ->
+            SectionTitle(stringResource(R.string.devices_permissions))
             SpCard {
-                SettingSwitch(
-                    stringResource(R.string.devices_block),
-                    peer.blocked,
-                    stringResource(R.string.devices_block_desc),
-                ) { v -> SoundPush.command { setDeviceBlocked(peer.deviceId, v) } }
+                SettingChoice(stringResource(R.string.perm_receiveMyAudio), p.receive_my_audio, policies) { v ->
+                    SoundPush.command { setPermission(peer.deviceId, "receiveMyAudio", v) }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                SettingChoice(stringResource(R.string.perm_useMyMicrophone), p.use_my_microphone, policies) { v ->
+                    SoundPush.command { setPermission(peer.deviceId, "useMyMicrophone", v) }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                SettingChoice(stringResource(R.string.perm_sendAudioToMe), p.send_audio_to_me, policies) { v ->
+                    SoundPush.command { setPermission(peer.deviceId, "sendAudioToMe", v) }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                SettingChoice(stringResource(R.string.perm_controlMe), p.control_me, policies) { v ->
+                    SoundPush.command { setPermission(peer.deviceId, "controlMe", v) }
+                }
             }
+        }
 
-            TextButton(onClick = { confirmForget = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.devices_forget), color = MaterialTheme.colorScheme.error)
-            }
+        ProfileCard(peer, profile)
+        NetworkTestCard(peer, test)
+
+        SpCard {
+            SettingSwitch(
+                stringResource(R.string.devices_block),
+                peer.blocked,
+                stringResource(R.string.devices_block_desc),
+            ) { v -> SoundPush.command { setDeviceBlocked(peer.deviceId, v) } }
+        }
+
+        TextButton(onClick = { confirmForget = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.devices_forget), color = MaterialTheme.colorScheme.error)
         }
     }
 
@@ -422,7 +498,7 @@ private fun DeviceSheet(peer: PeerView, profile: DeviceProfile, test: NetworkTes
                 TextButton(onClick = {
                     confirmForget = false
                     SoundPush.command { forgetDevice(peer.deviceId) }
-                    onDismiss()
+                    onForgotten()
                 }) { Text(stringResource(R.string.devices_forget), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text(stringResource(R.string.common_cancel)) } },

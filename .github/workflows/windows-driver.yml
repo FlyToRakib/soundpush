@@ -26,7 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 64-bit MSBuild, like the amd64 Developer Shell Windows-driver-samples builds in. The NuGet
+      # WDK targets only resolve tool paths (stampinf etc.) when Processor_Architecture is AMD64;
+      # setup-msbuild's default x86 MSBuild fails with TRK0005 "Failed to locate: stampinf.exe".
+      # Directory.Build.props also sets InfToolPath explicitly as a fallback.
       - uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
 
       - name: Restore WDK and SDK (NuGet)
         run: |

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
@@ -38,7 +40,11 @@ import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingChoice
 import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.theme.Tokens
+
+/** One runtime permission in Settings → Permissions. [onClick] asks again or leads to app settings. */
+data class PermissionRow(val label: String, val status: String, val needsAction: Boolean, val onClick: () -> Unit)
 
 @Composable
 fun SettingsScreen(
@@ -47,6 +53,13 @@ fun SettingsScreen(
     onOpenTroubleshooter: () -> Unit = {},
     onOpenBatteryGuide: () -> Unit = {},
     onExportDiagnostics: () -> Unit = {},
+    onOpenLicenses: () -> Unit = {},
+    /** Microphone, camera and notifications, with their denied or blocked state (plan §26.1). */
+    permissions: List<PermissionRow> = emptyList(),
+    /** "System language" first, then the languages this build has; empty hides the setting. */
+    languages: List<Choice> = emptyList(),
+    language: String = "system",
+    onLanguageChange: (String) -> Unit = {},
     onOpenAuditLog: () -> Unit = {},
 ) {
     val s = state.settings
@@ -62,7 +75,7 @@ fun SettingsScreen(
 
     Column(
         Modifier
-            .fillMaxSize()
+            .readableWidth()
             .verticalScroll(rememberScrollState())
             .padding(start = Tokens.Space.md, end = Tokens.Space.md, bottom = Tokens.Space.lg),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
@@ -92,6 +105,9 @@ fun SettingsScreen(
                     Choice("dark", stringResource(R.string.theme_dark)),
                 ),
             ) { v -> SoundPush.updateSettings { it.copy(theme = v) } }
+            if (languages.isNotEmpty()) {
+                SettingChoice(stringResource(R.string.settings_language), language, languages, onLanguageChange)
+            }
             SettingSwitch(
                 stringResource(R.string.settings_audio_cues),
                 s.audioCues,
@@ -135,6 +151,20 @@ fun SettingsScreen(
             }
         }
 
+        if (permissions.isNotEmpty()) {
+            SectionTitle(stringResource(R.string.settings_permissions))
+            SpCard {
+                permissions.forEachIndexed { index, permission ->
+                    if (index > 0) Divider()
+                    if (permission.needsAction) {
+                        NavRow(permission.label, permission.status, permission.onClick)
+                    } else {
+                        InfoRow(permission.label, permission.status)
+                    }
+                }
+            }
+        }
+
         SectionTitle(stringResource(R.string.settings_privacy))
         SpCard {
             SettingChoice(
@@ -166,7 +196,7 @@ fun SettingsScreen(
         }
 
         SectionTitle(stringResource(R.string.settings_about))
-        AboutSection(state)
+        AboutSection(state, onOpenLicenses)
     }
 }
 
@@ -175,6 +205,22 @@ const val DESKTOP_DOWNLOAD_URL = ProjectLinks.RELEASES
 
 @Composable
 private fun Divider() = HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+/** A label with a status and nothing to do, read as one item. */
+@Composable
+private fun InfoRow(label: String, status: String) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp())
+            .semantics(mergeDescendants = true) {}
+            .padding(vertical = Tokens.Space.xs),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
 
 @Composable
 private fun Caption(text: String) {
