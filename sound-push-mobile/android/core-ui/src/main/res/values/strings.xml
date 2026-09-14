@@ -418,4 +418,15 @@
     <string name="settings_license">License</string>
     <string name="settings_license_desc">Free and open source under GPL-3.0-or-later</string>
     <string name="settings_source">Source code</string>
+
+    <!-- Output device: notification switcher, Audio settings, connection details -->
+    <string name="output_speaker">Phone speaker</string>
+    <string name="output_wired">Wired headphones</string>
+    <string name="output_bluetooth">Bluetooth</string>
+    <string name="output_usb">USB audio</string>
+    <string name="output_other">Other output</string>
+    <string name="notif_output">Output: %1$s</string>
+    <string name="widget_mute_desc">Mute listening</string>
+    <string name="widget_unmute_desc">Unmute listening</string>
+    <string name="widget_listening_muted">Muted · %1$s</string>
 </resources>

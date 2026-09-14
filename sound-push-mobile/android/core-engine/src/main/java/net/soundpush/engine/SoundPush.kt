@@ -102,6 +102,8 @@ object SoundPush {
                         .onFailure { Log.e(TAG, "could not decode engine state", it) }
                 }
             })
+            // Reconnect at once when the network changes, whether or not a stream is running.
+            NetworkWatcher.start(app) { command { networkChanged() } }
         } catch (e: FfiException.Engine) {
             Log.e(TAG, "engine start failed: ${e.key}: ${e.detail}", e)
             _startError.value = e.detail.ifBlank { e.key }
