@@ -126,6 +126,8 @@ pub struct PeerView {
     pub has_virtual_mic: bool,
     /// "quic" or "tcp" (USB via adb) while connected, empty otherwise.
     pub transport: String,
+    /// Address of the connection's other end ("192.168.1.20:47650"), empty while disconnected.
+    pub remote_address: String,
     /// This device asked the peer to mute its own speakers ("Mute PC") in the current session.
     /// Reset when the session ends; always false while disconnected.
     pub speakers_muted: bool,
@@ -237,6 +239,12 @@ pub struct RouteStats {
     pub underruns: u64,
     pub drift_ppm: i32,
     pub level_db: f32,
+    /// Estimated parts of `latency_ms` (connection details): capture period, codec frame,
+    /// half the round trip, and the playback device. The jitter buffer is `buffer_ms`.
+    pub capture_ms: f64,
+    pub encode_ms: f64,
+    pub network_ms: f64,
+    pub output_ms: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -11,9 +11,10 @@
   import { LINKS, docsUrl, type DocsPage } from "../lib/links";
   import { store } from "../lib/stores/engine.svelte";
   import { updateSettings } from "../lib/stores/settings";
-  import { run, toasts } from "../lib/stores/toast.svelte";
+  import { run } from "../lib/stores/toast.svelte";
   import { updater } from "../lib/stores/updater.svelte";
   import { platform } from "../lib/stores/platform.svelte";
+  import DiagnosticsDialog from "./DiagnosticsDialog.svelte";
   import Troubleshooter from "./Troubleshooter.svelte";
   import AuditLog from "./AuditLog.svelte";
 
@@ -51,10 +52,14 @@
     }
   });
 
-  async function exportDiagnostics() {
-    const path = await run(engine.exportDiagnostics());
-    if (path) toasts.show(t("settings.exported", path));
-  }
+  let exporting = $state(false);
+  /** The engine sends `debugLogging` once it supports switching the log level. */
+  const debugLoggingSupported = $derived("debugLogging" in s);
+  /** Translator credits for the current language; English has none. */
+  const translators = $derived.by(() => {
+    const names = t("settings.translators.names");
+    return names && names !== "settings.translators.names" ? names : "";
+  });
 
   const open = (url: string) => run(engine.openUrl(url));
   /** Help pages open on the documentation site, or on GitHub when the site can't be reached. */
@@ -143,12 +148,14 @@
 
   <Card title={t("settings.help")}>
     <Troubleshooter />
-    <SettingRow label={t("settings.debugLogging")} description={t("settings.debugLogging.desc")}>
-      <Toggle checked={s.debugLogging} label={t("settings.debugLogging")}
-        onchange={(v) => updateSettings((x) => (x.debugLogging = v))} />
-    </SettingRow>
+    {#if debugLoggingSupported}
+      <SettingRow label={t("settings.debugLogging")} description={t("settings.debugLogging.desc")}>
+        <Toggle checked={s.debugLogging === true} label={t("settings.debugLogging")}
+          onchange={(v) => updateSettings((x) => (x.debugLogging = v))} />
+      </SettingRow>
+    {/if}
     <div class="row wrap">
-      <Button onclick={exportDiagnostics}>{t("settings.export")}</Button>
+      <Button onclick={() => (exporting = true)}>{t("settings.export")}</Button>
       <Button variant="ghost" onclick={() => run(engine.openLogsFolder())}>{t("settings.openLogs")}</Button>
       <Button variant="ghost" onclick={() => openDocs("userGuide")}>{t("settings.userGuide")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.reportBug)}>{t("settings.reportBug")}</Button>
@@ -193,8 +200,15 @@
       <Button variant="ghost" onclick={() => open(LINKS.license)}>{t("settings.viewLicense")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.source)}>{t("settings.source")}</Button>
     </div>
+
+    <SettingRow label={t("settings.credits")} description={t("settings.credits.body")}>
+      <Button variant="ghost" onclick={() => open(LINKS.translate)}>{t("settings.translate")}</Button>
+    </SettingRow>
+    {#if translators}<p class="caption">{t("settings.translators", translators)}</p>{/if}
   </Card>
 </div>
+
+{#if exporting}<DiagnosticsDialog onclose={() => (exporting = false)} />{/if}
 
 <style>
   .page {

@@ -94,6 +94,8 @@ let state: EngineState = {
       canPlay: true,
       hasVirtualMic: false,
       transport: "quic",
+      remoteAddress: "192.168.1.23:47650",
+      speakersMuted: false,
     },
   ],
   routes: [],
@@ -197,7 +199,21 @@ export const mockEngine = {
               volume: 1,
               muted: false,
               keepRunning: false,
-              stats: { codec: "Opus", bitrateKbps: 128, latencyMs: 48, bufferMs: 30, jitterMs: 2, lossPct: 0, underruns: 0, driftPpm: 12, levelDb: -18 },
+              stats: {
+                codec: "Opus",
+                bitrateKbps: 128,
+                latencyMs: 52,
+                bufferMs: 30,
+                jitterMs: 2,
+                lossPct: 0,
+                underruns: 0,
+                driftPpm: 12,
+                levelDb: -18,
+                captureMs: 10,
+                encodeMs: 10,
+                networkMs: 2,
+                outputMs: 0,
+              },
             },
           ],
         });
@@ -219,6 +235,15 @@ export const mockEngine = {
       case "clear_audit_log":
         auditLog.splice(0, auditLog.length, { timeUnix: Date.now() / 1000, kind: "logCleared", peerName: "", peerCode: "", detail: "" });
         return undefined as T;
+      case "preview_diagnostics":
+        return {
+          sections: [
+            { id: "system", count: 0, redacted: [] },
+            { id: "state", count: state.peers.length, redacted: ["addresses", "deviceIds", "pairingCode"] },
+            { id: "log", count: 2, redacted: ["addresses", "deviceIds"] },
+          ],
+          text: "SoundPush 0.1.0 diagnostics\nOS: windows x86_64\n\n== State ==\n{}\n\n== Recent log ==\nINFO SoundPush starting\nINFO listening on <address>\n",
+        } as T;
       case "set_device_profile": {
         const profiles = { ...state.settings.deviceProfiles };
         const profile = args?.profile as DeviceProfile | null;
@@ -235,6 +260,9 @@ export const mockEngine = {
       }
       case "usb_status":
         return { adbFound: true, devices: [{ serial: "mock123", model: "Redmi Note 9 Pro", authorized: true }], tcpPort: state.local.tcpPort } as T;
+      case "set_peer_speakers_muted":
+        emit({ peers: state.peers.map((p) => (p.deviceId === args?.deviceId ? { ...p, speakersMuted: Boolean(args?.muted) } : p)) });
+        return undefined as T;
       case "set_mic_muted":
         emit({ micMuted: Boolean(args?.muted) });
         return undefined as T;
@@ -252,6 +280,8 @@ export const mockEngine = {
           defaultOutput: "Speakers",
           appCapture: true,
         } as T;
+      case "tethering_status":
+        return { active: false, internetViaPhone: false, peers: [] } as T;
       case "hotkey_status":
         return { mute: null, pushToTalk: null } as T;
       case "set_hotkey": {

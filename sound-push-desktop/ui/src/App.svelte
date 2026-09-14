@@ -15,6 +15,7 @@
   import Overlays from "./features/Overlays.svelte";
   import Onboarding from "./features/Onboarding.svelte";
   import UpdateBanner from "./features/UpdateBanner.svelte";
+  import CloseHint from "./features/CloseHint.svelte";
 
   const nav: { id: Page; icon: IconName }[] = [
     { id: "home", icon: "home" },
@@ -103,6 +104,7 @@
     </div>
 
     <Overlays />
+    <CloseHint />
     {#if onboarding}<Onboarding />{/if}
   {:else if store.startError}
     <div class="starting" role="alert">

@@ -25,6 +25,16 @@
     onaction={() => run(engine.openSystemSettings("systemAudio"))}
   />
 {/if}
+{#if platform.tethering?.internetViaPhone && !dismissed.includes("usbTethering")}
+  <!-- Plan §8.1: tethering carries this computer's internet over mobile data; adb does not. -->
+  <Banner
+    severity="warning"
+    message={t("banner.tethering")}
+    actionLabel={t("banner.tethering.fix")}
+    onaction={() => (ui.page = "devices")}
+    ondismiss={() => updateSettings((x) => x.dismissedTips.push("usbTethering"))}
+  />
+{/if}
 {#if sys?.mediaFeaturePackMissing && !dismissed.includes("mediaFeaturePack")}
   <Banner
     severity="info"

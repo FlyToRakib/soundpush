@@ -185,10 +185,11 @@ export interface Settings {
   deviceProfiles: Record<string, DeviceProfile>;
   checkForUpdates: boolean;
   updateChannel: UpdateChannel;
-  /** Debug-level logs; the engine switches this off again after 24 hours. */
-  debugLogging: boolean;
+  /** Detailed logging (plan §28.1). Present only when the engine supports it; the engine switches it
+   *  off again after 24 hours. */
+  debugLogging?: boolean;
   /** When debug logging switches itself off (unix seconds, 0 while off). Set by the engine. */
-  debugLoggingUntilUnix: number;
+  debugLoggingUntilUnix?: number;
 }
 
 /** Desktop update channel (docs/release-signing.md). */
@@ -227,6 +228,10 @@ export interface PeerView {
   hasVirtualMic: boolean;
   /** "quic" or "tcp" (USB) while connected, "" otherwise. */
   transport: "" | "quic" | "tcp";
+  /** Other end of the connection ("192.168.1.20:47650", "[fe80::1%3]:47650"), "" while disconnected. */
+  remoteAddress: string;
+  /** This computer asked the device to mute its speakers. */
+  speakersMuted: boolean;
 }
 
 export interface RouteStats {
@@ -239,6 +244,11 @@ export interface RouteStats {
   underruns: number;
   driftPpm: number;
   levelDb: number;
+  /** Parts of latencyMs; the jitter buffer is bufferMs. */
+  captureMs: number;
+  encodeMs: number;
+  networkMs: number;
+  outputMs: number;
 }
 
 export interface RouteView {
@@ -386,6 +396,28 @@ export interface HotkeyStatus {
 export interface AudioApps {
   supported: boolean;
   apps: { process: string; active: boolean }[];
+}
+
+/** USB tethering to a phone (src-tauri tethering.rs). */
+export interface TetheringStatus {
+  active: boolean;
+  /** This computer's internet goes through the phone's mobile data. */
+  internetViaPhone: boolean;
+  /** Connected devices reached through the tethering network. */
+  peers: string[];
+}
+
+/** What a diagnostics export contains (src-tauri commands.rs `preview_diagnostics`). */
+export interface DiagnosticsSection {
+  id: "system" | "state" | "crashes" | "log";
+  count: number;
+  redacted: ("addresses" | "deviceIds" | "pairingCode")[];
+}
+
+export interface DiagnosticsPreview {
+  sections: DiagnosticsSection[];
+  /** Exactly the text an export writes. */
+  text: string;
 }
 
 export type SettingsTopic = "microphone" | "systemAudio" | "network" | "optionalFeatures" | "sound" | "startup";

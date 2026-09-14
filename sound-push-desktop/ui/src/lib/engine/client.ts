@@ -4,6 +4,7 @@ import type {
   AuditEntry,
   AudioApps,
   DeviceProfile,
+  DiagnosticsPreview,
   EngineState,
   HotkeyKind,
   HotkeyStatus,
@@ -15,6 +16,7 @@ import type {
   Settings,
   SettingsTopic,
   SystemStatus,
+  TetheringStatus,
 } from "./types";
 import { mockEngine } from "./mock";
 
@@ -63,6 +65,20 @@ export async function onStartError(handler: (message: string) => void): Promise<
   const earlier = await call<string | null>("get_start_error");
   if (earlier) handler(earlier);
   return unlisten;
+}
+
+/** The window was closed for the first time while SoundPush keeps running (`tray`: an icon is visible). */
+export async function onCloseHint(handler: (tray: boolean) => void): Promise<Unlisten> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<boolean>("window://close-hint", (e) => handler(e.payload));
+}
+
+/** The OS reported a network change or a wake from sleep (src-tauri/src/os_events.rs). */
+export async function onNetworkChanged(handler: () => void): Promise<Unlisten> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("platform://network-changed", () => handler());
 }
 
 export const engine = {
@@ -116,6 +132,7 @@ export const engine = {
   networkStatus: () => call<NetworkStatus>("network_status"),
   fixFirewall: (includePublic: boolean) => call<NetworkStatus>("fix_firewall", { includePublic }),
   systemStatus: () => call<SystemStatus>("system_status"),
+  tetheringStatus: () => call<TetheringStatus>("tethering_status"),
   requestMicrophone: () => call<void>("request_microphone"),
   openSystemSettings: (topic: SettingsTopic) => call<void>("open_system_settings", { topic }),
 
@@ -123,8 +140,11 @@ export const engine = {
   updateSettings: (settings: Settings) => call<Settings>("update_settings", { settings }),
   dismissNotice: (id: number) => call<void>("dismiss_notice", { id }),
   exportDiagnostics: () => call<string>("export_diagnostics"),
+  previewDiagnostics: () => call<DiagnosticsPreview>("preview_diagnostics"),
   openLogsFolder: () => call<void>("open_logs_folder"),
   auditLog: () => call<AuditEntry[]>("get_audit_log"),
   clearAuditLog: () => call<void>("clear_audit_log"),
   openUrl: (url: string) => call<void>("open_url", { url }),
+  closeMainWindow: () => call<void>("close_main_window"),
+  quitApp: () => call<void>("quit_app"),
 };

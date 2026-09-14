@@ -21,9 +21,15 @@ struct TestHooks {
     name: &'static str,
     platform: &'static str,
     backend: Arc<dyn AudioBackend>,
+    /// Every `set_speakers_muted` call, in order.
+    speakers: Arc<Mutex<Vec<bool>>>,
 }
 
 impl PlatformHooks for TestHooks {
+    fn set_speakers_muted(&self, muted: bool) -> bool {
+        self.speakers.lock().unwrap().push(muted);
+        true
+    }
     fn data_dir(&self) -> PathBuf {
         self.dir.clone()
     }
@@ -120,10 +126,70 @@ fn start_with(
             name,
             platform,
             backend,
+            speakers: Arc::default(),
         }),
         config,
     )
     .expect("engine starts")
+}
+
+/// Like `start`, returning the engine's record of speaker mutes.
+fn start_recording_speakers(
+    dir: &tempfile::TempDir,
+    name: &'static str,
+) -> (EngineHandle, Arc<Mutex<Vec<bool>>>) {
+    let speakers = Arc::new(Mutex::new(Vec::new()));
+    let engine = EngineHandle::start(
+        Arc::new(TestHooks {
+            dir: dir.path().to_path_buf(),
+            name,
+            platform: "windows",
+            backend: Arc::new(NullBackend::default()),
+            speakers: speakers.clone(),
+        }),
+        config(),
+    )
+    .expect("engine starts");
+    (engine, speakers)
+}
+
+#[test]
+fn peer_speaker_mute_is_shown_and_ends_with_the_session() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let (desk, speakers) = start_recording_speakers(&desk_dir, "Desk");
+    let phone = start(&phone_dir, "Phone", Arc::new(NullBackend::default()));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (desk_id, phone_id) = pair(&rt, &desk, &phone);
+    desk.set_permission(
+        phone_id.clone(),
+        sp_engine::PermissionKind::ControlMe,
+        sp_engine::Policy::Allow,
+    )
+    .unwrap();
+
+    // "Mute PC" on the phone targets the desk, and the phone's state shows it.
+    phone
+        .set_peer_speakers_muted(desk_id.clone(), true)
+        .unwrap();
+    wait_for(&phone, "phone shows the desk muted", |s| {
+        s.peers
+            .iter()
+            .any(|p| p.device_id == desk_id && p.speakers_muted && !p.remote_address.is_empty())
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while speakers.lock().unwrap().last() != Some(&true) {
+        assert!(Instant::now() < deadline, "desk speakers were not muted");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // The phone disappears: the desk must not stay muted.
+    desk.simulate_connection_loss(phone_id).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while speakers.lock().unwrap().last() != Some(&false) {
+        assert!(Instant::now() < deadline, "desk speakers stayed muted");
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn start(

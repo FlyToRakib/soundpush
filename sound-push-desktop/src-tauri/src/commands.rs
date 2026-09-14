@@ -11,7 +11,7 @@ use sp_engine::{
     DeviceProfile, EngineError, EngineState, ErrorView, NetworkReport, PermissionKind, Policy,
     Severity,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::AppState;
@@ -306,63 +306,200 @@ pub async fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<String>
     let data_dir = state.data_dir.clone();
     let log_dir = state.log_dir.clone();
     // Reading the log can take a while: keep it off the UI thread.
-    tauri::async_runtime::spawn_blocking(move || write_diagnostics(&snapshot, &data_dir, &log_dir))
-        .await
-        .map_err(|e| EngineError::Internal(e.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let report = build_diagnostics(&snapshot, &data_dir, &log_dir);
+        let dir = data_dir.join("diagnostics");
+        std::fs::create_dir_all(&dir).map_err(|e| EngineError::Storage(e.to_string()))?;
+        let path = dir.join(format!("soundpush-diagnostics-{}.txt", unix_now()));
+        std::fs::write(&path, report.text).map_err(|e| EngineError::Storage(e.to_string()))?;
+        Ok(path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| EngineError::Internal(e.to_string()))?
 }
 
-fn write_diagnostics(
+/// What an export would contain, shown before anything is written (plan §28.2 "User previews
+/// contents").
+#[tauri::command]
+pub async fn preview_diagnostics(state: State<'_, AppState>) -> CmdResult<DiagnosticsPreview> {
+    let snapshot = state.engine()?.state();
+    let data_dir = state.data_dir.clone();
+    let log_dir = state.log_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || build_diagnostics(&snapshot, &data_dir, &log_dir))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsSection {
+    /// "system", "state", "crashes" or "log" (UI text keys).
+    pub id: &'static str,
+    /// Devices, crash reports or log lines included.
+    pub count: usize,
+    /// What was removed: "addresses", "deviceIds", "pairingCode".
+    pub redacted: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsPreview {
+    pub sections: Vec<DiagnosticsSection>,
+    /// Exactly the text an export writes.
+    pub text: String,
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn build_diagnostics(
     snapshot: &EngineState,
     data_dir: &std::path::Path,
     log_dir: &std::path::Path,
-) -> CmdResult<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let dir = data_dir.join("diagnostics");
-    std::fs::create_dir_all(&dir).map_err(|e| EngineError::Storage(e.to_string()))?;
-    let path = dir.join(format!("soundpush-diagnostics-{now}.txt"));
-
+) -> DiagnosticsPreview {
     let mut report = String::new();
     report.push_str(&format!(
-        "SoundPush {} diagnostics\nOS: {} {}\nGenerated: {now}\n\n",
+        "SoundPush {} diagnostics\nOS: {} {}\nGenerated: {}\n\n",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
-        std::env::consts::ARCH
+        std::env::consts::ARCH,
+        unix_now()
     ));
-    // Redact remote addresses; keep only the local device code and peer prefixes.
+    // Addresses (including host names) and the pairing secret go; device ids are shortened
+    // by `redact`, and the local device keeps only its display code.
     let mut redacted = snapshot.clone();
+    let hide = |values: &mut Vec<String>| {
+        for v in values.iter_mut() {
+            *v = "<redacted>".to_string();
+        }
+    };
     for peer in &mut redacted.peers {
-        peer.addresses = peer
-            .addresses
-            .iter()
-            .map(|_| "<redacted>".to_string())
-            .collect();
-        peer.device_id.truncate(8);
+        hide(&mut peer.addresses);
+        if !peer.remote_address.is_empty() {
+            peer.remote_address = "<redacted>".to_string();
+        }
+    }
+    hide(&mut redacted.local.addresses);
+    if redacted.pairing.qr_uri.is_some() {
+        redacted.pairing.qr_uri = Some("<redacted>".to_string());
     }
     report.push_str("== State ==\n");
-    report.push_str(&serde_json::to_string_pretty(&redacted).unwrap_or_default());
+    report.push_str(&redact(
+        &serde_json::to_string_pretty(&redacted).unwrap_or_default(),
+    ));
+    let mut sections = vec![
+        DiagnosticsSection {
+            id: "system",
+            count: 0,
+            redacted: Vec::new(),
+        },
+        DiagnosticsSection {
+            id: "state",
+            count: snapshot.peers.len(),
+            redacted: vec!["addresses", "deviceIds", "pairingCode"],
+        },
+    ];
+
     // Written by the panic hook, already redacted; stored locally only.
     let crashes = sp_engine::crash::recent(data_dir, 5);
     if !crashes.is_empty() {
         report.push_str("\n\n== Crash reports ==\n");
+        sections.push(DiagnosticsSection {
+            id: "crashes",
+            count: crashes.len(),
+            redacted: Vec::new(),
+        });
         for (name, contents) in crashes {
             report.push_str(&format!("--- {name}\n{contents}\n"));
         }
     }
+
     report.push_str("\n\n== Recent log ==\n");
-    if let Some(latest) = latest_log(log_dir) {
-        if let Ok(file) = std::fs::File::open(latest) {
-            let lines: Vec<String> = BufReader::new(file).lines().map_while(Result::ok).collect();
-            for line in lines.iter().skip(lines.len().saturating_sub(2000)) {
-                report.push_str(line);
-                report.push('\n');
-            }
+    let mut log_lines = 0;
+    if let Some(file) = latest_log(log_dir).and_then(|p| std::fs::File::open(p).ok()) {
+        let lines: Vec<String> = BufReader::new(file).lines().map_while(Result::ok).collect();
+        for line in lines.iter().skip(lines.len().saturating_sub(2000)) {
+            report.push_str(&redact(line));
+            report.push('\n');
+            log_lines += 1;
         }
     }
-    std::fs::write(&path, report).map_err(|e| EngineError::Storage(e.to_string()))?;
-    Ok(path.to_string_lossy().to_string())
+    sections.push(DiagnosticsSection {
+        id: "log",
+        count: log_lines,
+        redacted: vec!["addresses", "deviceIds"],
+    });
+    DiagnosticsPreview {
+        sections,
+        text: report,
+    }
+}
+
+/// Replace IP addresses (with or without port and zone) by `<address>` and shorten device ids
+/// (32 or more hex digits) to their first 8 digits. Only whole words count, so module paths
+/// such as `sp_engine::actor` and timestamps stay intact.
+fn redact(text: &str) -> String {
+    let in_token = |b: u8| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'[' | b']' | b'%');
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if !in_token(bytes[i]) || (i > 0 && word(bytes[i - 1])) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        // An IPv6 zone may be a name ("%wlan0").
+        let mut zone = false;
+        while i < bytes.len() && (in_token(bytes[i]) || (zone && word(bytes[i]))) {
+            match bytes[i] {
+                b'%' => zone = true,
+                b']' => zone = false,
+                _ => {}
+            }
+            i += 1;
+        }
+        if i < bytes.len() && word(bytes[i]) {
+            continue;
+        }
+        // Sentence punctuation after an address is not part of it.
+        let token = text[start..i].trim_end_matches(['.', ':']);
+        let end = start + token.len();
+        let replacement = if is_address(token) {
+            Some("<address>".to_string())
+        } else if token.len() >= 32 && token.bytes().all(|b| b.is_ascii_hexdigit()) {
+            Some(token[..8].to_string())
+        } else {
+            None
+        };
+        if let Some(replacement) = replacement {
+            out.push_str(&text[copied..start]);
+            out.push_str(&replacement);
+            copied = end;
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+fn is_address(token: &str) -> bool {
+    if token.parse::<std::net::SocketAddr>().is_ok() {
+        return true;
+    }
+    // "[fe80::1%3]:47650", "fe80::1%wlan0" (zone cut at the first % or ]).
+    let bare = token.trim_start_matches('[');
+    let bare = bare.split(['%', ']']).next().unwrap_or(bare);
+    match bare.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(_)) => true,
+        Ok(std::net::IpAddr::V6(_)) => bare.len() > 2,
+        Err(_) => false,
+    }
 }
 
 fn latest_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -484,6 +621,27 @@ pub async fn fix_firewall(
     network_status(state).await
 }
 
+/// USB tethering to a phone, the devices reached through it, and whether it carries this
+/// computer's internet (plan §8.1). Lists network adapters, so off the UI thread.
+#[tauri::command]
+pub async fn tethering_status(
+    state: State<'_, AppState>,
+) -> CmdResult<crate::tethering::TetheringStatus> {
+    let peers: Vec<(String, std::net::IpAddr)> = state
+        .engine()?
+        .state()
+        .peers
+        .iter()
+        .filter_map(|p| {
+            let addr: std::net::SocketAddr = p.remote_address.parse().ok()?;
+            Some((p.device_id.clone(), addr.ip()))
+        })
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || crate::tethering::status(&peers))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
 #[tauri::command]
 pub async fn system_status() -> CmdResult<crate::system::SystemStatus> {
     tauri::async_runtime::spawn_blocking(crate::system::status)
@@ -574,6 +732,28 @@ pub async fn list_audio_apps() -> CmdResult<AudioApps> {
     .map_err(|e| EngineError::Internal(e.to_string()).into())
 }
 
+/// Close the main window after the one-time "still running" hint: into the tray, or minimized
+/// on desktops without a tray, where a closed window would leave nothing to click.
+#[tauri::command]
+pub async fn close_main_window(app: AppHandle) {
+    let Some(window) = app.get_webview_window(crate::MAIN_WINDOW) else {
+        return;
+    };
+    if crate::tray::available(&app) {
+        if let Some(saved) = app.try_state::<crate::window_state::WindowState>() {
+            saved.save();
+        }
+        let _ = window.destroy();
+    } else {
+        let _ = window.minimize();
+    }
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 pub fn open_url(app: AppHandle, url: String) -> CmdResult<()> {
     if !url.starts_with("https://") {
@@ -582,6 +762,31 @@ pub fn open_url(app: AppHandle, url: String) -> CmdResult<()> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact;
+
+    #[test]
+    fn diagnostics_hide_addresses_and_shorten_device_ids() {
+        assert_eq!(
+            redact("dialing 192.168.1.20:47650 and 10.0.0.2."),
+            "dialing <address> and <address>."
+        );
+        assert_eq!(
+            redact("peer [fe80::1c2b:3d4e%12]:47650 via fe80::1%wlan0, \"::1\""),
+            "peer <address> via <address>, \"<address>\""
+        );
+        assert_eq!(
+            redact("\"deviceId\": \"0123456789abcdef0123456789abcdef\""),
+            "\"deviceId\": \"01234567\""
+        );
+        let untouched =
+            "2026-09-14T15:35:38.123Z INFO sound_push_desktop::os_events: v0.1.0 took 12ms at ::";
+        assert_eq!(redact(untouched), untouched);
+        assert_eq!(redact("SP-0000-0000 · déjà 1.2"), "SP-0000-0000 · déjà 1.2");
+    }
 }
 
 /// Rolling GitHub release holding one updater manifest per channel (`.github/workflows/update-channels.yml`).
