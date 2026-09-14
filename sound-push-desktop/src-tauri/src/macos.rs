@@ -1,5 +1,6 @@
-//! macOS integration: privacy permissions (TCC), Core Audio device notifications, and device
-//! properties cpal does not expose (Bluetooth transport, "device is running somewhere").
+//! macOS integration: privacy permissions (TCC), Core Audio device notifications, device
+//! properties cpal does not expose (Bluetooth transport, "device is running somewhere"), and the
+//! login item (`SMAppService`, macOS 13+).
 //!
 //! Permissions (plan §26.2): checking never shows a prompt. The microphone prompt appears only
 //! when SoundPush first opens a microphone (or the user presses "Allow" in the app); when access
@@ -12,10 +13,11 @@
 use std::ffi::{c_char, c_void};
 use std::sync::Mutex;
 use std::sync::mpsc::Sender;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use objc2::msg_send;
-use objc2::rc::Retained;
-use objc2::runtime::AnyClass;
+use objc2::rc::{Retained, autoreleasepool};
+use objc2::runtime::{AnyClass, AnyObject};
 use objc2_foundation::NSString;
 use tracing::warn;
 
@@ -84,6 +86,15 @@ unsafe extern "C" {
 #[link(name = "AVFoundation", kind = "framework")]
 unsafe extern "C" {}
 
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+}
+
+// SMAppService lives in ServiceManagement (macOS 13+). On older systems the class is missing.
+#[link(name = "ServiceManagement", kind = "framework")]
+unsafe extern "C" {}
+
 unsafe extern "C" {
     fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
@@ -139,7 +150,18 @@ pub fn microphone_permission() -> &'static str {
 }
 
 /// "System Audio Recording" (Core Audio process taps, TCC service `kTCCServiceAudioCapture`).
+/// Before macOS 14.2 system audio comes from ScreenCaptureKit, which needs Screen Recording.
 pub fn system_audio_permission() -> &'static str {
+    if !sp_audio_io::macos_sck::process_taps_supported() {
+        // CGPreflightScreenCaptureAccess never prompts; "false" also covers "not asked yet".
+        // https://developer.apple.com/documentation/coregraphics/cgpreflightscreencaptureaccess()
+        // SAFETY: a plain status query without arguments.
+        return if unsafe { CGPreflightScreenCaptureAccess() } {
+            "granted"
+        } else {
+            "unknown"
+        };
+    }
     // SAFETY: dlopen/dlsym with valid C strings; the symbol has the documented preflight
     // signature `int TCCAccessPreflight(CFStringRef service, CFDictionaryRef options)`.
     unsafe {
@@ -166,6 +188,111 @@ pub fn system_audio_permission() -> &'static str {
             _ => "unknown",
         }
     }
+}
+
+// ------------------------------------------------------------------ login item
+
+/// `SMAppServiceStatus` values.
+/// https://developer.apple.com/documentation/servicemanagement/smappservice/status-swift.enum
+const LOGIN_ITEM_ENABLED: isize = 1;
+const LOGIN_ITEM_REQUIRES_APPROVAL: isize = 2;
+/// A launch this soon after the user logged in counts as the login item starting.
+const LOGIN_WINDOW_SECS: i64 = 120;
+
+/// `SMAppService.mainAppService`: SoundPush itself as a login item, listed in System Settings →
+/// General → Login Items. `None` before macOS 13.
+/// https://developer.apple.com/documentation/servicemanagement/smappservice/mainapp
+fn main_app_service() -> Option<Retained<AnyObject>> {
+    let class = AnyClass::get(c"SMAppService")?;
+    // SAFETY: +[SMAppService mainAppService] takes no arguments and returns an SMAppService.
+    unsafe { msg_send![class, mainAppService] }
+}
+
+/// Login items through `SMAppService` are available (macOS 13+).
+pub fn login_items_supported() -> bool {
+    AnyClass::get(c"SMAppService").is_some()
+}
+
+fn login_item_status() -> Option<isize> {
+    autoreleasepool(|_| {
+        let service = main_app_service()?;
+        // SAFETY: `status` is a read-only NSInteger property.
+        Some(unsafe { msg_send![&*service, status] })
+    })
+}
+
+/// SoundPush is registered to open at login, but the user turned it off in Login Items.
+pub fn login_item_needs_approval() -> bool {
+    login_item_status() == Some(LOGIN_ITEM_REQUIRES_APPROVAL)
+}
+
+/// Register or unregister the login item. Registering again while the user has it switched off
+/// in System Settings would not turn it on, so that state is left alone.
+/// https://developer.apple.com/documentation/servicemanagement/smappservice/register()
+pub fn set_login_item(enabled: bool) -> Result<(), String> {
+    autoreleasepool(|_| {
+        let service = main_app_service().ok_or("login items need macOS 13 or later")?;
+        // SAFETY: `status` is a read-only NSInteger property.
+        let status: isize = unsafe { msg_send![&*service, status] };
+        let registered = matches!(status, LOGIN_ITEM_ENABLED | LOGIN_ITEM_REQUIRES_APPROVAL);
+        if enabled == registered {
+            return Ok(());
+        }
+        let mut error: *mut AnyObject = std::ptr::null_mut();
+        let out = std::ptr::from_mut(&mut error);
+        // SAFETY: both methods take an `NSError **` out parameter and return BOOL.
+        let ok: bool = unsafe {
+            if enabled {
+                msg_send![&*service, registerAndReturnError: out]
+            } else {
+                msg_send![&*service, unregisterAndReturnError: out]
+            }
+        };
+        if ok {
+            return Ok(());
+        }
+        // SAFETY: on failure the out parameter is nil or an autoreleased NSError.
+        let message = unsafe { error.as_ref() }
+            .and_then(|e| unsafe { msg_send![e, localizedDescription] })
+            .map(|d: Retained<NSString>| d.to_string());
+        Err(message.unwrap_or_else(|| "the login item could not be changed".into()))
+    })
+}
+
+/// Whether this launch is the login item starting at login. `SMAppService` opens the app without
+/// arguments (unlike `--autostart` elsewhere), so a launch counts when the login item is enabled
+/// and the user's console login (utmpx) happened moments ago.
+pub fn launched_at_login() -> bool {
+    if login_item_status() != Some(LOGIN_ITEM_ENABLED) {
+        return false;
+    }
+    let text = |chars: &[c_char]| -> String {
+        let bytes: Vec<u8> = chars
+            .iter()
+            .take_while(|&&c| c != 0)
+            .map(|&c| c as u8)
+            .collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    let user = std::env::var("USER").unwrap_or_default();
+    let mut login: Option<i64> = None;
+    // SAFETY: getutxent returns a record valid until the next call; the fields are copied out.
+    unsafe {
+        libc::setutxent();
+        while let Some(e) = libc::getutxent().as_ref() {
+            if e.ut_type == libc::USER_PROCESS
+                && text(&e.ut_line) == "console"
+                && text(&e.ut_user) == user
+            {
+                login = login.max(Some(e.ut_tv.tv_sec));
+            }
+        }
+        libc::endutxent();
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    login.is_some_and(|at| (0..LOGIN_WINDOW_SECS).contains(&(now - at)))
 }
 
 // ------------------------------------------------------------------ devices

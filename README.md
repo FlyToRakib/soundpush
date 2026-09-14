@@ -73,7 +73,8 @@ Virtual microphone on Windows: open **Audio → Install VB-CABLE** in the app. S
 ### macOS desktop app
 
 Easiest: GitHub → **Actions** → **macOS build** → latest run → artifact `SoundPush-macOS` (a `.dmg`,
-universal for Apple Silicon and Intel). The app is not notarised yet, so macOS shows
+universal for Apple Silicon and Intel; macOS 13 or later, where macOS 13 to 14.1 record system audio
+through Screen Recording). The app is not notarised yet, so macOS shows
 *"SoundPush" Not Opened* the first time. Click **Done** (not Move to Trash), then either:
 
 - System Settings → Privacy & Security → **Open Anyway**, or
@@ -107,7 +108,8 @@ Easiest: GitHub → **Actions** → **Linux build** → latest run → artifact 
 - Fedora, openSUSE: `sudo dnf install ./SoundPush-0.1.0-1.x86_64.rpm`
 - Other distributions: `chmod +x SoundPush_0.1.0_amd64.AppImage`, then run it.
 
-SoundPush uses PipeWire (the default on current Ubuntu and Fedora) or PulseAudio. The packages
+SoundPush uses PipeWire (the default on current Ubuntu and Fedora) or PulseAudio; on both it can
+send one app's sound (or everything except one app) and mute the speakers while sending. The packages
 are built on the GitHub `ubuntu-latest` runner, so they need a distribution at least as new as
 its glibc. The tray icon needs AppIndicator support; on plain GNOME install the
 "AppIndicator and KStatusNotifierItem Support" extension (Ubuntu ships it).

@@ -540,6 +540,19 @@ pub async fn list_audio_apps() -> CmdResult<AudioApps> {
                 })
                 .collect(),
         };
+        // Streams on the sound server, moved to a private sink while capturing.
+        #[cfg(target_os = "linux")]
+        return AudioApps {
+            supported: sp_audio_io::pulse::available(),
+            apps: sp_audio_io::pulse::audio_apps()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| AudioApp {
+                    process: a.process,
+                    active: a.active,
+                })
+                .collect(),
+        };
         #[allow(unreachable_code)]
         AudioApps {
             supported: false,

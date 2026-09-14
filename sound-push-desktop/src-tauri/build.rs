@@ -1,5 +1,11 @@
 fn main() {
     build_macos_virtual_mic();
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        // SoundPush runs on macOS 13, but Core Audio's process tap functions exist from 14.2.
+        // Weak references let the app start there; they are only called when available
+        // (`sp_audio_io::macos_sck::process_taps_supported`).
+        println!("cargo:rustc-link-arg-bins=-Wl,-weak_framework,CoreAudio");
+    }
     tauri_build::build();
 }
 
