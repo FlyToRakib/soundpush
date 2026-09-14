@@ -85,6 +85,8 @@ export interface MicSettings {
   systemNoiseSuppression: boolean;
   systemEchoCancellation: boolean;
   monitor: boolean;
+  /** 80 Hz high-pass filter before noise suppression. */
+  highPass: boolean;
 }
 
 export interface CaptureSettings {

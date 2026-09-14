@@ -12,7 +12,7 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use sp_audio_io::{AudioBackend, AudioStream, CaptureSource, ErrorCallback};
 use sp_media::codec::{Encoder, OpusApplication, encoder_for};
-use sp_media::dsp::{Gain, LevelMeter, NoiseSuppressor, SoftLimiter, db_to_gain};
+use sp_media::dsp::{Gain, HighPass, LevelMeter, NoiseSuppressor, SoftLimiter, db_to_gain};
 use sp_media::samples_per_frame;
 use sp_protocol::control::StreamProfile;
 use sp_protocol::{Codec, MediaFlags, MediaHeader, MediaPacket};
@@ -21,14 +21,20 @@ use tracing::{debug, warn};
 use super::controls::SenderControls;
 use crate::EngineError;
 
+/// A datagram could not be handed to the transport (closed, congested or malformed).
+/// Media is best effort: callers count these and move on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("datagram not sent")]
+pub struct SendFailed;
+
 /// Something that can carry media datagrams (a connection, or a test sink).
 pub trait DatagramSink: Send + Sync + 'static {
-    fn send(&self, datagram: Bytes) -> Result<(), ()>;
+    fn send(&self, datagram: Bytes) -> Result<(), SendFailed>;
 }
 
 impl DatagramSink for sp_transport::SecureConnection {
-    fn send(&self, datagram: Bytes) -> Result<(), ()> {
-        self.send_datagram(datagram).map_err(|_| ())
+    fn send(&self, datagram: Bytes) -> Result<(), SendFailed> {
+        self.send_datagram(datagram).map_err(|_| SendFailed)
     }
 }
 
@@ -116,13 +122,9 @@ impl Sender {
                 if n < samples.len() {
                     overruns.capture_overruns.fetch_add(1, Ordering::Relaxed);
                 }
-                if let Ok(mut chunk) = producer.write_chunk_uninit(n) {
-                    let (a, b) = chunk.as_mut_slices();
-                    for (dst, src) in a.iter_mut().chain(b.iter_mut()).zip(samples.iter()) {
-                        dst.write(*src);
-                    }
-                    // SAFETY: all `n` slots were initialized just above.
-                    unsafe { chunk.commit_all() };
+                if let Ok(chunk) = producer.write_chunk_uninit(n) {
+                    // Safe, allocation-free copy that commits exactly what it wrote.
+                    chunk.fill_from_iter(samples.iter().copied());
                 }
             }),
             on_error,
@@ -240,6 +242,7 @@ fn encode_loop(
     let limiter = SoftLimiter::default();
     let mut meter = LevelMeter::default();
     let mut denoiser: Option<NoiseSuppressor> = None;
+    let mut high_pass: Option<HighPass> = None;
     let mut applied_bitrate = 0u32;
     let mut applied_loss = u32::MAX;
     let mut timestamp: u64 = 0;
@@ -288,7 +291,14 @@ fn encode_loop(
         }
         gain.set(db_to_gain(controls.gain_db.get()));
 
-        // DSP.
+        // DSP (plan §15.7): high-pass → noise suppression → gain → limiter → meter.
+        if controls.high_pass.load(Ordering::Relaxed) {
+            high_pass
+                .get_or_insert_with(|| HighPass::new(80.0, channels))
+                .process(&mut buf);
+        } else {
+            high_pass = None;
+        }
         if controls.noise_suppression.load(Ordering::Relaxed) && channels == 1 && frame % 480 == 0 {
             denoiser
                 .get_or_insert_with(NoiseSuppressor::new)
@@ -408,7 +418,7 @@ mod tests {
     struct Collect(Mutex<Vec<Bytes>>);
 
     impl DatagramSink for Collect {
-        fn send(&self, datagram: Bytes) -> Result<(), ()> {
+        fn send(&self, datagram: Bytes) -> Result<(), SendFailed> {
             if let Ok(mut v) = self.0.lock() {
                 v.push(datagram);
             }

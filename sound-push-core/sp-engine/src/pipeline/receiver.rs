@@ -313,7 +313,9 @@ mod tests {
 
     use super::*;
     use crate::pipeline::controls::SenderControls;
-    use crate::pipeline::sender::{DatagramSink, Sender, SenderConfig, Subscriber, Subscription};
+    use crate::pipeline::sender::{
+        DatagramSink, SendFailed, Sender, SenderConfig, Subscriber, Subscription,
+    };
 
     fn start_sender(
         backend: &NullBackend,
@@ -344,12 +346,12 @@ mod tests {
     struct Loopback(Mutex<Option<PacketSink>>, u64, std::sync::atomic::AtomicU64);
 
     impl DatagramSink for Loopback {
-        fn send(&self, datagram: Bytes) -> Result<(), ()> {
+        fn send(&self, datagram: Bytes) -> Result<(), SendFailed> {
             let n = self.2.fetch_add(1, Ordering::Relaxed);
             if self.1 > 0 && n % self.1 == self.1 - 1 {
                 return Ok(()); // simulated loss
             }
-            let packet = MediaPacket::decode(datagram).map_err(|_| ())?;
+            let packet = MediaPacket::decode(datagram).map_err(|_| SendFailed)?;
             if let Ok(mut guard) = self.0.lock() {
                 if let Some(sink) = guard.as_mut() {
                     sink.push(packet);

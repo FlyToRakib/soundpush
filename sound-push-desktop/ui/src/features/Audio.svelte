@@ -310,6 +310,10 @@
       <Slider value={s.mic.gainDb} min={0} max={20} step={1} label={t("audio.gain")} format={(v) => `+${v} dB`}
         onchange={(v) => updateSettings((x) => (x.mic.gainDb = v))} />
     </SettingRow>
+    <SettingRow label={t("audio.highPass")} description={t("audio.highPass.desc")}>
+      <Toggle checked={s.mic.highPass} label={t("audio.highPass")}
+        onchange={(v) => updateSettings((x) => (x.mic.highPass = v))} />
+    </SettingRow>
     <SettingRow label={t("audio.noiseSuppression")} description={t("audio.noiseSuppression.desc")}>
       <Toggle checked={s.mic.noiseSuppression} label={t("audio.noiseSuppression")}
         onchange={(v) => updateSettings((x) => (x.mic.noiseSuppression = v))} />

@@ -3,6 +3,7 @@
 //! The engine runs on its own Tokio runtime as a single actor that owns all
 //! mutable state. Apps send commands through [`EngineHandle`] and render the
 //! immutable [`EngineState`] snapshots it publishes.
+#![forbid(unsafe_code)]
 
 mod actor;
 pub mod crash;
@@ -328,8 +329,11 @@ impl EngineHandle {
     // ---------------------------------------------------------------- settings & misc
 
     pub async fn update_settings(&self, settings: Settings) -> Result<Settings, EngineError> {
-        self.request(|reply| Command::UpdateSettings { settings, reply })
-            .await
+        self.request(|reply| Command::UpdateSettings {
+            settings: Box::new(settings),
+            reply,
+        })
+        .await
     }
 
     pub fn dismiss_notice(&self, id: u64) -> Result<(), EngineError> {

@@ -129,6 +129,8 @@
   "audio.mic": "Microphone",
   "audio.micDevice": "Input",
   "audio.gain": "Volume boost",
+  "audio.highPass": "Low-cut filter",
+  "audio.highPass.desc": "Removes rumble, desk bumps and wind noise below 80 Hz.",
   "audio.noiseSuppression": "Noise suppression",
   "audio.noiseSuppression.desc": "Reduces keyboard, fan and background noise. Uses more CPU.",
   "audio.monitor": "Listen to my microphone",

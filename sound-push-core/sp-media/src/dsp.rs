@@ -76,6 +76,57 @@ impl SoftLimiter {
     }
 }
 
+/// Second-order Butterworth high-pass filter (RBJ biquad) for interleaved 48 kHz audio.
+/// The microphone chain uses it at 80 Hz, ahead of noise suppression (plan §15.7).
+pub struct HighPass {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    /// Per channel: x[n-1], x[n-2], y[n-1], y[n-2].
+    state: Vec<[f32; 4]>,
+}
+
+impl HighPass {
+    pub fn new(cutoff_hz: f32, channels: usize) -> Self {
+        let w0 = 2.0 * std::f32::consts::PI * cutoff_hz.clamp(1.0, 20_000.0) / 48_000.0;
+        let (sin, cos) = w0.sin_cos();
+        let alpha = sin / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
+        let a0 = 1.0 + alpha;
+        Self {
+            b0: (1.0 + cos) / 2.0 / a0,
+            b1: -(1.0 + cos) / a0,
+            b2: (1.0 + cos) / 2.0 / a0,
+            a1: -2.0 * cos / a0,
+            a2: (1.0 - alpha) / a0,
+            state: vec![[0.0; 4]; channels.max(1)],
+        }
+    }
+
+    pub fn process(&mut self, samples: &mut [f32]) {
+        let channels = self.state.len();
+        for frame in samples.chunks_exact_mut(channels) {
+            for (s, st) in frame.iter_mut().zip(self.state.iter_mut()) {
+                let x = *s;
+                let mut y = self.b0 * x + self.b1 * st[0] + self.b2 * st[1]
+                    - self.a1 * st[2]
+                    - self.a2 * st[3];
+                // Decaying silence would otherwise reach denormals, which are slow on x86.
+                if y.abs() < 1e-20 {
+                    y = 0.0;
+                }
+                *st = [x, st[0], y, st[2]];
+                *s = y;
+            }
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.state.iter_mut().for_each(|st| *st = [0.0; 4]);
+    }
+}
+
 /// Peak/RMS level meter with decay, for UI level bars.
 #[derive(Default)]
 pub struct LevelMeter {
@@ -255,6 +306,28 @@ mod tests {
         let mut s = vec![1.0; 10];
         g.process(&mut s);
         assert!(s.iter().all(|x| (x - 2.0).abs() < 1e-5));
+    }
+
+    #[test]
+    fn high_pass_removes_rumble_and_keeps_speech() {
+        let tone = |freq: f32| -> f32 {
+            let mut hp = HighPass::new(80.0, 2);
+            let mut buf: Vec<f32> = (0..48_000 * 2)
+                .map(|i| (2.0 * std::f32::consts::PI * freq * (i / 2) as f32 / 48_000.0).sin())
+                .collect();
+            hp.process(&mut buf);
+            // Peak over the last half second, after the filter settled.
+            buf[48_000..].iter().fold(0f32, |m, s| m.max(s.abs()))
+        };
+        assert!(tone(1000.0) > 0.97, "1 kHz passes");
+        assert!(tone(20.0) < 0.1, "20 Hz is attenuated");
+        let dc = {
+            let mut hp = HighPass::new(80.0, 1);
+            let mut buf = vec![0.5f32; 48_000];
+            hp.process(&mut buf);
+            buf[47_999].abs()
+        };
+        assert!(dc < 1e-3, "DC removed: {dc}");
     }
 
     #[test]

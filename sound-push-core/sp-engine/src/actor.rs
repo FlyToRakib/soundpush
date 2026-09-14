@@ -150,7 +150,8 @@ pub(crate) enum Command {
         default_output: bool,
     },
     UpdateSettings {
-        settings: Settings,
+        // Boxed: `Settings` is several times larger than every other command.
+        settings: Box<Settings>,
         reply: Reply<Settings>,
     },
     DismissNotice {
@@ -1108,10 +1109,8 @@ impl Actor {
                 default_input,
                 default_output,
             } => self.on_audio_devices_changed(default_input, default_output),
-            Command::UpdateSettings {
-                mut settings,
-                reply,
-            } => {
+            Command::UpdateSettings { settings, reply } => {
+                let mut settings = *settings;
                 settings.sanitize();
                 if settings.device_name.is_empty() {
                     settings.device_name = self.settings.device_name.clone();

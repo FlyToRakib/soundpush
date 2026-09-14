@@ -231,6 +231,7 @@ data class MicSettings(
     val systemNoiseSuppression: Boolean = true,
     val systemEchoCancellation: Boolean = true,
     val monitor: Boolean = false,
+    val highPass: Boolean = true,
 )
 
 @Serializable
@@ -255,7 +256,7 @@ data class SavedRoute(val peerId: String, val kind: String, val keep: Boolean = 
 
 @Serializable
 data class Settings(
-    val version: Int = 1,
+    val version: Int = 2,
     val deviceName: String = "",
     val theme: String = "system",
     val language: String = "system",

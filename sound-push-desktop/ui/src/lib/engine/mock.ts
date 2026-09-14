@@ -2,7 +2,7 @@
 import type { DeviceProfile, EngineState, NetworkReport, RouteKind, Settings } from "./types";
 
 const settings: Settings = {
-  version: 1,
+  version: 2,
   deviceName: "My PC",
   theme: "system",
   language: "system",
@@ -28,6 +28,7 @@ const settings: Settings = {
     systemNoiseSuppression: true,
     systemEchoCancellation: true,
     monitor: false,
+    highPass: true,
   },
   capture: { systemDevice: null, muteLocalSpeakers: false, app: null, excludeApp: false },
   desktop: {

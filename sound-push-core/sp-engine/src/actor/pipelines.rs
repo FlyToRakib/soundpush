@@ -235,6 +235,9 @@ impl Actor {
                 group
                     .muted
                     .store(is_mic && self.mic_muted, Ordering::Relaxed);
+                group
+                    .high_pass
+                    .store(is_mic && self.settings.mic.high_pass, Ordering::Relaxed);
                 let failed_tx = self.internal_tx.clone();
                 let failed_key = key.clone();
                 let on_error = Box::new(move |e: sp_audio_io::AudioError| {
@@ -554,6 +557,10 @@ impl Actor {
                     .controls
                     .noise_suppression
                     .store(self.settings.mic.noise_suppression, Ordering::Relaxed);
+                sender
+                    .controls
+                    .high_pass
+                    .store(self.settings.mic.high_pass, Ordering::Relaxed);
                 sender
                     .controls
                     .muted
