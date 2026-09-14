@@ -430,6 +430,11 @@ pub(crate) async fn spawn(
         settings.device_name = hooks.default_device_name();
         let _ = settings_store.save(&settings);
     }
+    // Debug logging survives a restart until its 24 hours are up.
+    if settings.expire_debug_logging(now_unix()) {
+        let _ = settings_store.save(&settings);
+    }
+    crate::logging::set_debug(settings.debug_logging);
 
     let endpoint = Arc::new(Endpoint::bind(
         &identity,
@@ -1164,6 +1169,8 @@ impl Actor {
                 if settings.device_name.is_empty() {
                     settings.device_name = self.settings.device_name.clone();
                 }
+                settings.schedule_debug_logging(self.settings.debug_logging, now_unix());
+                crate::logging::set_debug(settings.debug_logging);
                 let old = std::mem::replace(&mut self.settings, settings);
                 self.save_settings();
                 self.apply_settings(&old);
@@ -2818,6 +2825,10 @@ impl Actor {
         self.expire_stable_holds(now);
         self.refused_audited
             .retain(|_, t| now.duration_since(*t) < REFUSED_AUDIT_INTERVAL);
+        if self.settings.expire_debug_logging(now_unix()) {
+            crate::logging::set_debug(false);
+            self.save_settings();
+        }
 
         // Capabilities can change while connected (e.g. a virtual microphone was installed).
         // Re-send Hello so peers enable or disable the matching tasks without reconnecting.

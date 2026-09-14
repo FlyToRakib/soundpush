@@ -291,4 +291,7 @@ data class Settings(
     /** Keyed by device id; kept here so settings written from this app don't drop profiles. */
     val deviceProfiles: Map<String, DeviceProfile> = emptyMap(),
     val checkForUpdates: Boolean = true,
+    /** Kept so settings written from this app don't switch debug logging off. */
+    val debugLogging: Boolean = false,
+    val debugLoggingUntilUnix: Long = 0,
 )

@@ -184,6 +184,10 @@ export interface Settings {
   /** Keyed by device id. */
   deviceProfiles: Record<string, DeviceProfile>;
   checkForUpdates: boolean;
+  /** Debug-level logs; the engine switches this off again after 24 hours. */
+  debugLogging: boolean;
+  /** When debug logging switches itself off (unix seconds, 0 while off). Set by the engine. */
+  debugLoggingUntilUnix: number;
 }
 
 export interface LocalDevice {

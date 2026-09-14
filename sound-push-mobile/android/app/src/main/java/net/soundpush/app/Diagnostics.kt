@@ -22,7 +22,8 @@ import net.soundpush.engine.SoundPush
  * to the app's cache and handed to the share sheet; nothing leaves the phone unless the user shares it.
  */
 object Diagnostics {
-    private const val LOG_LINES = 3000
+    private const val LOG_LINES = 1000
+    private const val LOG_BYTES = 512L * 1024
 
     /** Build the report file. Reads the log and files: runs on the IO dispatcher. */
     suspend fun export(context: Context): Uri? = withContext(Dispatchers.IO) {
@@ -65,9 +66,31 @@ object Diagnostics {
         appendLine("== Crash reports ==")
         appendLine(CrashReports.collect(context))
         appendLine()
-        appendLine("== Recent log ==")
+        appendLine("== Engine and app log ==")
+        appendLine(engineLog(context))
+        appendLine()
+        appendLine("== Recent logcat ==")
         appendLine(recentLog())
     }
+
+    /**
+     * The engine's log files (app messages go through the engine logger too), oldest first, at most
+     * the last [LOG_BYTES] of each. Rotated by the engine at 3 × 2 MB.
+     */
+    private fun engineLog(context: Context): String = runCatching {
+        val dir = File(context.filesDir, "logs")
+        val files = listOf("soundpush.2.log", "soundpush.1.log", "soundpush.log").map { File(dir, it) }.filter { it.isFile }
+        if (files.isEmpty()) return@runCatching "(no log files)"
+        files.joinToString("\n") { file ->
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                val start = (raf.length() - LOG_BYTES).coerceAtLeast(0)
+                raf.seek(start)
+                val bytes = ByteArray((raf.length() - start).toInt())
+                raf.readFully(bytes)
+                "--- ${file.name}\n" + String(bytes, Charsets.UTF_8)
+            }
+        }
+    }.getOrElse { "(log unavailable: ${it.javaClass.simpleName})" }
 
     /** Same redaction as the desktop export, plus the pairing QR (it carries a one-time secret). */
     internal fun redact(state: EngineState): EngineState = state.copy(

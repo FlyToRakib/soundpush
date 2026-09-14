@@ -10,6 +10,7 @@ pub mod audit;
 pub mod crash;
 pub mod error;
 mod health;
+pub mod logging;
 mod net;
 pub mod nettest;
 mod pairing_limit;

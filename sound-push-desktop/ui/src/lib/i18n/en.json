@@ -264,6 +264,8 @@
   "settings.export": "Export diagnostics",
   "settings.exported": "Saved to {0}",
   "settings.openLogs": "Open logs folder",
+  "settings.debugLogging": "Detailed logs",
+  "settings.debugLogging.desc": "Records more detail to help find a problem. Turns itself off after 24 hours. Logs stay on this computer.",
   "settings.troubleshoot": "Troubleshooting",
   "settings.about": "About",
   "settings.version": "Version {0}",

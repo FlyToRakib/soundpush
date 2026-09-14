@@ -141,6 +141,10 @@
 
   <Card title={t("settings.help")}>
     <Troubleshooter />
+    <SettingRow label={t("settings.debugLogging")} description={t("settings.debugLogging.desc")}>
+      <Toggle checked={s.debugLogging} label={t("settings.debugLogging")}
+        onchange={(v) => updateSettings((x) => (x.debugLogging = v))} />
+    </SettingRow>
     <div class="row wrap">
       <Button onclick={exportDiagnostics}>{t("settings.export")}</Button>
       <Button variant="ghost" onclick={() => run(engine.openLogsFolder())}>{t("settings.openLogs")}</Button>

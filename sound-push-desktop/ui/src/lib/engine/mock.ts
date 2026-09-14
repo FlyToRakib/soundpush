@@ -56,6 +56,8 @@ const settings: Settings = {
   audioCues: false,
   deviceProfiles: {},
   checkForUpdates: true,
+  debugLogging: false,
+  debugLoggingUntilUnix: 0,
 };
 
 let state: EngineState = {

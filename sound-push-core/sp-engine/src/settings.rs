@@ -358,7 +358,15 @@ pub struct Settings {
     pub device_profiles: std::collections::BTreeMap<String, DeviceProfile>,
     /// Look for a new SoundPush release in the background (GitHub Releases). Never installs by itself.
     pub check_for_updates: bool,
+    /// Write debug-level logs for troubleshooting (plan §28.1). Switches itself off after
+    /// [`DEBUG_LOGGING_SECS`].
+    pub debug_logging: bool,
+    /// When debug logging switches itself off (unix seconds; 0 while off). Set by the engine.
+    pub debug_logging_until_unix: u64,
 }
+
+/// Debug logging switches itself off after this long.
+pub const DEBUG_LOGGING_SECS: u64 = 24 * 3600;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -381,6 +389,8 @@ impl Default for Settings {
             audio_cues: false,
             device_profiles: std::collections::BTreeMap::new(),
             check_for_updates: true,
+            debug_logging: false,
+            debug_logging_until_unix: 0,
         }
     }
 }
@@ -417,6 +427,28 @@ impl Settings {
             self.device_profiles.pop_last();
         }
         self.version = SETTINGS_VERSION;
+    }
+
+    /// Give debug logging its end time: [`DEBUG_LOGGING_SECS`] after it was switched on (never
+    /// later, whatever a client sends). Off clears it. `was_on`: the setting before this change.
+    pub fn schedule_debug_logging(&mut self, was_on: bool, now_unix: u64) {
+        let latest = now_unix.saturating_add(DEBUG_LOGGING_SECS);
+        self.debug_logging_until_unix = match (self.debug_logging, was_on) {
+            (false, _) => 0,
+            (true, false) => latest,
+            (true, true) if self.debug_logging_until_unix == 0 => latest,
+            (true, true) => self.debug_logging_until_unix.min(latest),
+        };
+    }
+
+    /// Switch debug logging off once its time is up. True when it changed.
+    pub fn expire_debug_logging(&mut self, now_unix: u64) -> bool {
+        if self.debug_logging && now_unix >= self.debug_logging_until_unix {
+            self.debug_logging = false;
+            self.debug_logging_until_unix = 0;
+            return true;
+        }
+        false
     }
 
     /// Stream settings for routes with `peer_id` (hex): the global settings plus the device's profile.
@@ -569,6 +601,30 @@ mod tests {
         assert!(!migrate(&mut newer, SETTINGS_VERSION + 1));
         let mut current = written;
         assert!(!migrate(&mut current, SETTINGS_VERSION));
+    }
+
+    #[test]
+    fn debug_logging_switches_itself_off_after_a_day() {
+        let now = 1_800_000_000;
+        let mut s = Settings {
+            debug_logging: true,
+            ..Settings::default()
+        };
+        s.schedule_debug_logging(false, now);
+        assert_eq!(s.debug_logging_until_unix, now + DEBUG_LOGGING_SECS);
+        // Later changes keep the end; a client cannot push it further out.
+        s.debug_logging_until_unix = u64::MAX;
+        s.schedule_debug_logging(true, now + 60);
+        assert_eq!(s.debug_logging_until_unix, now + 60 + DEBUG_LOGGING_SECS);
+        s.schedule_debug_logging(true, now + 120);
+        assert_eq!(s.debug_logging_until_unix, now + 60 + DEBUG_LOGGING_SECS);
+
+        assert!(!s.expire_debug_logging(now + 3600));
+        assert!(s.expire_debug_logging(now + 60 + DEBUG_LOGGING_SECS));
+        assert!(!s.debug_logging);
+        assert_eq!(s.debug_logging_until_unix, 0);
+        s.schedule_debug_logging(true, now);
+        assert_eq!(s.debug_logging_until_unix, 0, "off stays off");
     }
 
     #[test]
