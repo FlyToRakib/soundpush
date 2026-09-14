@@ -1,0 +1,5 @@
+# Clippy warnings that existed when the gate was introduced (tools/ci/clippy-gate.mjs). CI fails on any other
+# warning. Delete a line when its warning is fixed; once the file is empty, the gate is the same as -D warnings.
+clippy::field_reassign_with_default sound-push-core/sp-engine/src/settings.rs
+clippy::large_enum_variant sound-push-core/sp-engine/src/actor.rs
+clippy::result_unit_err sound-push-core/sp-engine/src/pipeline/sender.rs

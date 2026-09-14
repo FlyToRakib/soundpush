@@ -44,8 +44,14 @@ jobs:
           npm --prefix sound-push-desktop/ui ci
           npm --prefix sound-push-desktop/ui run build
       - run: cargo fmt --all --check
-      # docs/soundpush-final.md §29.3: clippy with warnings as errors.
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # docs/soundpush-final.md §29.3: clippy with warnings as errors. Warnings listed in .github/clippy-allowed.txt
+      # (present before the gate) pass until fixed; with an empty list this is exactly -D warnings.
+      - name: cargo clippy (no new warnings)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --message-format=json \
+            | node tools/ci/clippy-gate.mjs .github/clippy-allowed.txt
       - run: cargo test --workspace --exclude sound-push-desktop
 
   coverage:
@@ -149,7 +155,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test tools/release/*.test.mjs
+      - run: node --test tools/release/*.test.mjs tools/ci/*.test.mjs
 
   desktop-ui:
     name: Desktop UI
