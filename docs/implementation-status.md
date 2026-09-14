@@ -12,8 +12,10 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Design tokens → CSS + Compose, WCAG contrast check | ✅ | `design/scripts/generate.mjs` |
 | Wire protocol spec, pairing/security doc, threat model, ADRs 0001–0019 | ✅ | `docs/protocol`, `docs/security`, `docs/adr` (index maps the plan's ADR numbers) |
 | Open-source files (full GPL-3.0 LICENSE, CONTRIBUTING, CoC, SECURITY, PRIVACY, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot) | ✅ | |
-| CI quality gates: fmt, clippy, tests, svelte-check, vitest, `cargo deny`, `npm audit --audit-level=high`, Android unit tests + lint | 🟡 | `ci.yml`; `cargo fmt --check` fails on existing formatting (not yet reformatted) |
-| Fuzz targets (media, control, framing, QR, beacon) | ✅ | `fuzz/` — run with `cargo +nightly fuzz run <target>` |
+| CI quality gates: fmt, clippy `-D warnings`, tests, svelte-check, vitest, `cargo deny`, `npm audit --audit-level=high`, Android unit tests + lint, coverage, release-tool tests, desktop e2e hook | 🟡 | `ci.yml`; Android job fixed (host `libasound2-dev` for the binding build). Coverage (`cargo-llvm-cov`): core crates 92 % lines, gated at 80 %; sp-engine 74 %, reported only. e2e job runs `npm run test:e2e` once it exists. Needs a green run on GitHub |
+| Fuzz targets (media, control, framing, QR, beacon) + nightly fuzzing | ✅ | `fuzz/` — `cargo +nightly fuzz run <target>`; `fuzz.yml` runs each target 30 min nightly, corpus cached, crashes uploaded |
+| Documentation site (MkDocs Material, GitHub Pages) | 🟡 | `mkdocs.yml`, `docs.yml`; builds with `--strict`. Needs Pages enabled (Settings → Pages → GitHub Actions) and a push to `main` |
+| Community translation (Weblate) | 🟡 | component settings in `docs/translating.md`, `.weblate`; needs the Hosted Weblate project created |
 
 ## Phase 1 — Core engine + "Listen to PC on phone"
 
@@ -78,7 +80,7 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Audio cues | 🟡 | `src-tauri/src/cues.rs`, generated tones, `settings.audioCues` |
 | Diagnostics export, guided troubleshooter, logs | ✅ (desktop) / 🟡 (Android tips only) | desktop troubleshooter runs checks (firewall, network profile, driver, devices, permissions, Bluetooth) with fix buttons; the export is previewed first (sections, what is removed, exact text) and redacts addresses, device ids and the pairing code, also inside log lines. The "Detailed logging" toggle appears once the engine exposes `debugLogging` |
 | macOS permissions (microphone, System Audio Recording) | 🟡 | `src-tauri/src/macos.rs`: status without prompting, deep links to System Settings. Not yet compiled on macOS |
-| Windows ARM64 installer | 🟡 | `windows-build.yml` matrix, artifact `SoundPush-Windows-arm64` (cross-compiled, not yet run) |
+| Windows ARM64 installer | 🟡 | `windows-build.yml` matrix, artifact `SoundPush-Windows-arm64` (cross-compiled; build passes on GitHub); also built and published by `release.yml` with a `windows-aarch64` updater entry. Needs a test on an ARM64 PC |
 | i18n infrastructure (English; locale files, plurals, Intl formats, RTL, pseudo-locales en-XA/ar-XB) | ✅ | `docs/translating.md`; translations via community later |
 | Accessibility pass (desktop: keyboard, focus, dialogs, live regions, reduced motion, high contrast, text zoom) | 🟡 | done in code; screen-reader test on NVDA/VoiceOver/Orca and external audit pending |
 | Help/About (user guide, privacy, license, report a problem, logs) | ✅ desktop / ✅ Android | |
@@ -99,6 +101,8 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 |---|---|
 | Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices); in-process soak and latency harness: `tools/soak` |
 | External security review | ⏳ |
-| Release workflow: NSIS, universal DMG, deb/rpm/AppImage, APK, SHA256SUMS, CycloneDX SBOMs, draft GitHub Release | 🟡 (`release.yml`, not yet run on GitHub) |
+| Release workflow: NSIS (x64 + ARM64), universal DMG, deb/rpm/AppImage, APK, SHA256SUMS, CycloneDX SBOMs, draft GitHub Release, beta pre-releases | 🟡 (`release.yml`, not yet run on GitHub) |
 | Desktop auto-update signed with a free minisign key; Android update check against GitHub Releases | 🟡 (needs the `TAURI_SIGNING_*` secrets and a first published release) |
-| Paid platform signing (Authenticode, Developer ID + notarisation, Android release key), store listings | ⛔ (certificates/accounts; steps in `docs/release-signing.md`) |
+| Update channels (stable/beta) and staged rollout 10 % → 50 % → 100 % over 72 h, hold/halt | 🟡 (`settings.updateChannel`, `check_update`, `rollout.ts`, `update-channels.yml` + `tools/release/channels.mjs`; unit-tested; needs a first published release) |
+| Store manifests: winget, Homebrew cask, Flathub, F-Droid, Play listing texts | 🟡 (`packaging/`, fastlane metadata, filled per release by `fill-manifests.mjs`; winget validated, AppStream validated. Submissions need store accounts; Flathub needs screenshots and portal-based autostart/sleep inhibit) |
+| Paid platform signing (Authenticode, Developer ID + notarisation, Android release key) | ⛔ (certificates/accounts; steps in `docs/release-signing.md`) |

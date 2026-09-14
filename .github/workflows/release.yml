@@ -65,10 +65,16 @@ jobs:
           if [ "$android_version" != "$app_version" ]; then
             echo "::warning title=Version::Android versionName ($android_version) differs from the desktop version ($app_version)."
           fi
+          # x.y.z is a stable release; any pre-release suffix (x.y.z-beta.1) goes to the beta update channel.
+          case "$app_version" in
+            *-*) channel=beta ;;
+            *) channel=stable ;;
+          esac
           {
             echo "version=$app_version"
             echo "tag=$tag"
             echo "publish=$publish"
+            echo "channel=$channel"
           } >> "$GITHUB_OUTPUT"
 
       - name: Release notes from CHANGELOG.md
@@ -93,6 +99,13 @@ jobs:
             target-args: ""
             bundles: nsis
             out: target/release/bundle
+          # Cross-compiled on the x64 runner (MSVC ARM64 build tools are preinstalled), as in windows-build.yml.
+          - name: windows-arm64
+            os: windows-latest
+            rust-targets: aarch64-pc-windows-msvc
+            target-args: --target aarch64-pc-windows-msvc
+            bundles: nsis
+            out: target/aarch64-pc-windows-msvc/release/bundle
           - name: macos-universal
             os: macos-latest
             rust-targets: aarch64-apple-darwin, x86_64-apple-darwin
@@ -137,6 +150,11 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libasound2-dev libdbus-1-dev libssl-dev libxdo-dev patchelf file \
             libpipewire-0.3-dev libspa-0.2-dev libclang-dev
+
+      # `ring` (TLS) builds its ARM64 assembly with clang, which the runner ships with LLVM.
+      - name: Put clang on PATH (Windows ARM64)
+        if: matrix.name == 'windows-arm64'
+        run: echo "C:\Program Files\LLVM\bin" >> "$GITHUB_PATH"
 
       - name: Install UI dependencies
         run: npm --prefix sound-push-desktop/ui ci
@@ -224,7 +242,7 @@ jobs:
           mkdir -p dist
           shopt -s nullglob
           case "${{ matrix.name }}" in
-            windows-x64)
+            windows-x64|windows-arm64)
               cp "$out"/nsis/*-setup.exe* dist/ ;;
             macos-universal)
               cp "$out"/dmg/*.dmg dist/
@@ -266,6 +284,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: sdkmanager "ndk;27.2.12479018"
       - run: cargo install cargo-ndk --locked
+      # sp-ffi's host build (for the Kotlin bindings) links cpal's ALSA backend (alsa-sys).
+      - name: Host audio libraries for the binding build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
       - name: Kotlin bindings and native libraries
         run: |
           cargo build -p sp-ffi
@@ -357,12 +380,16 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # The per-channel manifests the app reads (stable.json with staged rollout, beta.json) are written from this
+      # file by update-channels.yml once the release is published.
       - name: Updater manifest (latest.json)
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           mv dist/release-notes.md release-notes.md
           if ls dist/*.sig >/dev/null 2>&1; then
             node tools/release/latest-json.mjs "$VERSION" dist \
-              "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}" release-notes.md > dist/latest.json
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}" release-notes.md --channel "$CHANNEL" > dist/latest.json
             cat dist/latest.json
           else
             echo "::warning title=Updater::No signed update bundles: the release has no latest.json. Add TAURI_SIGNING_PRIVATE_KEY (docs/release-signing.md)."
@@ -374,6 +401,18 @@ jobs:
           sha256sum -- * > ../SHA256SUMS
           mv ../SHA256SUMS .
           cat SHA256SUMS
+
+      # winget, Homebrew, Flathub and F-Droid manifests for this version, ready to submit (packaging/README.md).
+      - name: Store manifests
+        if: needs.prepare.outputs.channel == 'stable'
+        run: node tools/release/fill-manifests.mjs --version "$VERSION" --sums dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --out store-manifests
+
+      - uses: actions/upload-artifact@v4
+        if: needs.prepare.outputs.channel == 'stable'
+        with:
+          name: store-manifests
+          path: store-manifests
+          if-no-files-found: warn
 
       - name: "GPG signature of SHA256SUMS (disabled until LINUX_GPG_PRIVATE_KEY is set)"
         env:
@@ -401,8 +440,9 @@ jobs:
             for f in dist/*; do
               name=$(basename "$f")
               case "$name" in
+                *_arm64-setup.exe) echo "| Windows 11 on ARM (ARM64) | \`$name\` |" ;;
                 *-setup.exe) echo "| Windows 10/11 (x64) | \`$name\` |" ;;
-                *.dmg) echo "| macOS 14.2+ (Apple Silicon and Intel) | \`$name\` |" ;;
+                *.dmg) echo "| macOS 13+ (Apple Silicon and Intel) | \`$name\` |" ;;
                 *.deb) echo "| Ubuntu / Debian (x64) | \`$name\` |" ;;
                 *.rpm) echo "| Fedora / openSUSE (x64) | \`$name\` |" ;;
                 *.AppImage) echo "| Linux AppImage (x64, updates itself) | \`$name\` |" ;;
@@ -430,12 +470,16 @@ jobs:
           } > release-body.md
           cat release-body.md
 
+      # Beta versions are GitHub pre-releases: they never become "latest" and reach only the beta update channel.
       - name: Create or update the draft release
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
+          prerelease=$( [ "$CHANNEL" = beta ] && echo true || echo false )
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --draft --title "SoundPush $VERSION" --notes-file release-body.md
+            gh release edit "$TAG" --draft --prerelease="$prerelease" --title "SoundPush $VERSION" --notes-file release-body.md
             gh release upload "$TAG" dist/* --clobber
           else
-            gh release create "$TAG" dist/* --draft --verify-tag --title "SoundPush $VERSION" --notes-file release-body.md
+            gh release create "$TAG" dist/* --draft --prerelease="$prerelease" --verify-tag --title "SoundPush $VERSION" --notes-file release-body.md
           fi
           echo "::notice title=Release::Draft release $TAG created. Test the files, then publish it on GitHub."

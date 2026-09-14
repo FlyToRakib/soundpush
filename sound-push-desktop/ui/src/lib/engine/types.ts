@@ -180,9 +180,13 @@ export interface Settings {
   /** Keyed by device id. */
   deviceProfiles: Record<string, DeviceProfile>;
   checkForUpdates: boolean;
+  updateChannel: UpdateChannel;
   /** Detailed logging (plan §28.1). Present only when the engine supports it. */
   debugLogging?: boolean;
 }
+
+/** Desktop update channel (docs/release-signing.md). */
+export type UpdateChannel = "stable" | "beta";
 
 export interface LocalDevice {
   deviceId: string;

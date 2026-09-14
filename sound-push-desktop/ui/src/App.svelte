@@ -32,6 +32,13 @@
   const onboarding = $derived(app !== null && !app.settings.dismissedTips.includes("onboarding"));
   const modifier = $derived(app?.local.platform === "macos" ? "Meta" : "Control");
 
+  // The channel is set before automatic checks start, so the first check already uses it.
+  const updateChannel = $derived(app?.settings.updateChannel ?? "stable");
+  const installId = $derived(app?.local.deviceId ?? "");
+  $effect(() => {
+    updater.configure(updateChannel, installId);
+  });
+
   const autoUpdate = $derived(app?.settings.checkForUpdates ?? false);
   $effect(() => {
     updater.setAutomatic(autoUpdate);

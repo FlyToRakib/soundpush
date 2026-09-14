@@ -1,0 +1,7 @@
+First public preview.
+• Pair with your computer by QR code or a short code.
+• Listen to your computer on your phone.
+• Use your phone as a microphone or a headset.
+• Send app audio from the phone to the computer (Android 10+).
+• Notification controls and a Quick Settings tile.
+Audio stays on your devices and is encrypted end to end.

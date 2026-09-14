@@ -37,8 +37,18 @@ First public preview. Nothing has been released yet; everything below is new.
   keep focus and return it, reduced-motion and Windows high-contrast support.
 - **Localisation readiness**: one JSON file per language, plural forms, number and list formatting, right-to-left
   layouts, pseudo-locales for testing (`en-XA`, `ar-XB`), and a translation guide (`docs/translating.md`).
-- **Release infrastructure**: release workflow for Windows (NSIS), macOS (universal DMG), Linux (deb, rpm, AppImage)
-  and Android (APK) with checksums, SBOMs and a draft GitHub Release; dependency license and advisory checks in CI.
+- **Release infrastructure**: release workflow for Windows (NSIS, x64 and ARM64), macOS (universal DMG), Linux (deb,
+  rpm, AppImage) and Android (APK) with checksums, SBOMs and a draft GitHub Release; dependency license and advisory
+  checks in CI.
+- **Update channels**: Stable and Beta in Settings → About. Stable updates reach installs in stages (10 % → 50 % →
+  100 % over three days, can be held or halted); Beta gets `x.y.z-beta.n` versions as soon as they are published.
+- **Store manifests**: winget, Homebrew cask, Flathub, F-Droid and Google Play listings, filled in from each release
+  (`packaging/`, `tools/release/fill-manifests.mjs`).
+- **Documentation site** (MkDocs Material on GitHub Pages) with the user guide, troubleshooting, virtual microphone,
+  privacy, translating and release pages; the app's help links open it, or GitHub when it can't be reached.
+- **Translations on Weblate**: component setup for the desktop and Android strings (`docs/translating.md`).
+- **Quality gates in CI**: clippy with warnings as errors, line coverage report with an 80 % gate on the core
+  crates, nightly fuzzing of every fuzz target, and a hook for desktop end-to-end tests.
 - **Documentation**: user guide, privacy policy, threat model, release-signing guide, ADRs 0006–0019, issue and pull
   request templates.
 
@@ -58,5 +68,6 @@ First public preview. Nothing has been released yet; everything below is new.
 - Windows uninstaller removes SoundPush's data when "Delete the application data" is ticked.
 - Android: computer-initiated app-audio streams ask for screen-capture consent instead of sending silence.
 - Pairing by address: "Back" no longer submits the form.
+- CI: the Android job builds the Kotlin bindings again (the host build needed the ALSA development package).
 
 [Unreleased]: https://github.com/FlyToRakib/soundpush/commits/HEAD

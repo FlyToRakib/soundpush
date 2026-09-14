@@ -50,8 +50,9 @@ multiple-versions = "warn"
 wildcards = "warn"
 allow-wildcard-paths = true
 # Dependency direction (§11.2): apps depend on the engine, never the other way round.
+# soundpush-soak (tools/soak, unpublished) is a top-level harness that drives two engines like an app does.
 deny = [
-    { crate = "sp-engine", wrappers = ["sound-push-desktop", "sp-ffi"] },
+    { crate = "sp-engine", wrappers = ["sound-push-desktop", "sp-ffi", "soundpush-soak"] },
     { crate = "sp-audio-io", wrappers = ["sp-engine", "sound-push-desktop", "sp-ffi"] },
 ]
 
