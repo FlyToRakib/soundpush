@@ -15,6 +15,11 @@ unsafe-libopus = "0.2"
 
 [dev-dependencies]
 rand = "0.8"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "media"
+harness = false
 
 [lints]
 workspace = true
