@@ -30,7 +30,7 @@ Download from **[GitHub Releases](https://github.com/FlyToRakib/soundpush/releas
 3. If Windows Firewall asks, allow SoundPush on **private networks**.
 4. SoundPush starts in the tray (notification area). It opens with Windows unless you turn that off.
 
-### macOS 14.2 or newer (Apple Silicon and Intel)
+### macOS 13 or newer (Apple Silicon and Intel)
 
 1. Open `SoundPush_<version>_universal.dmg` and drag SoundPush to **Applications**.
 2. Until builds are notarised, macOS says it can't verify SoundPush the first time. Click **Done**, then

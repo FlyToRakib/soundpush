@@ -442,7 +442,7 @@ jobs:
               case "$name" in
                 *_arm64-setup.exe) echo "| Windows 11 on ARM (ARM64) | \`$name\` |" ;;
                 *-setup.exe) echo "| Windows 10/11 (x64) | \`$name\` |" ;;
-                *.dmg) echo "| macOS 14.2+ (Apple Silicon and Intel) | \`$name\` |" ;;
+                *.dmg) echo "| macOS 13+ (Apple Silicon and Intel) | \`$name\` |" ;;
                 *.deb) echo "| Ubuntu / Debian (x64) | \`$name\` |" ;;
                 *.rpm) echo "| Fedora / openSUSE (x64) | \`$name\` |" ;;
                 *.AppImage) echo "| Linux AppImage (x64, updates itself) | \`$name\` |" ;;

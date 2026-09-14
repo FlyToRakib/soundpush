@@ -14,8 +14,8 @@ cask "soundpush" do
   end
 
   auto_updates true
-  # Needs macOS 14.2 (Core Audio process taps); Homebrew can only express the major version.
-  depends_on macos: ">= :sonoma"
+  # macOS 13.0 minimum (tauri.conf.json): ScreenCaptureKit on 13.x, Core Audio process taps on 14.2+.
+  depends_on macos: ">= :ventura"
 
   app "SoundPush.app"
 

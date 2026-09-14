@@ -53,6 +53,16 @@ jobs:
           cargo clippy --workspace --all-targets --message-format=json \
             | node tools/ci/clippy-gate.mjs .github/clippy-allowed.txt
       - run: cargo test --workspace --exclude sound-push-desktop
+      # sp-audio-io/tests/pulse_server.rs: speaker muting, per-app capture and device events against a real
+      # PulseAudio server. The tests are #[ignore]d without a server and share it, so run them one at a time.
+      - name: PulseAudio server tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y pulseaudio pulseaudio-utils
+          pulseaudio --daemonize=yes --exit-idle-time=-1
+          for _ in $(seq 20); do pactl info >/dev/null 2>&1 && break; sleep 0.5; done
+          pactl info
+          cargo test -p sp-audio-io --features pulse --test pulse_server -- --ignored --test-threads=1
 
   coverage:
     name: Coverage

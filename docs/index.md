@@ -9,7 +9,7 @@ accounts, ads or tracking, and audio stays on your own devices, encrypted end to
 | Platform | Download |
 |---|---|
 | Windows 10 and 11 (x64, ARM64) | [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) · `winget install SoundPush.SoundPush` |
-| macOS 14.2 or newer | [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) (universal DMG) |
+| macOS 13 or newer | [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) (universal DMG) |
 | Linux (x64) | [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) (deb, rpm, AppImage) |
 | Android 8 or newer | [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) (APK) |
 
