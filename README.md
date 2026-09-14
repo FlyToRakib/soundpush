@@ -58,6 +58,29 @@ The same steps run in GitHub Actions (`.github/workflows/windows-build.yml`).
 
 Virtual microphone on Windows: open **Audio → Install VB-CABLE** in the app. See [`docs/virtual-microphone.md`](docs/virtual-microphone.md).
 
+### macOS desktop app
+
+Easiest: GitHub → **Actions** → **macOS build** → latest run → artifact `SoundPush-macOS` (a `.dmg`,
+universal for Apple Silicon and Intel). The app is not notarised yet, so the first time:
+right-click **SoundPush.app → Open** (or System Settings → Privacy & Security → **Open Anyway**).
+
+To build on the Mac itself:
+
+1. Install the prerequisites (once): Xcode Command Line Tools (`xcode-select --install`),
+   [Rust](https://rustup.rs), [Node.js 22](https://nodejs.org).
+2. Build:
+
+   ```bash
+   git clone https://github.com/FlyToRakib/soundpush.git
+   cd soundpush
+   npm --prefix sound-push-desktop/ui ci
+   cd sound-push-desktop
+   ./ui/node_modules/.bin/tauri build --bundles dmg
+   ```
+
+3. The disk image is at `target/release/bundle/dmg/`. The virtual microphone is built in:
+   **Audio → Install SoundPush Microphone** (macOS asks for your password).
+
 ## License
 
 GPL-3.0-or-later. See `LICENSE`.

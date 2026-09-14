@@ -12,6 +12,21 @@
   const request = $derived(app.requests[0]);
   const notices = $derived(app.notices.slice(-3));
 
+  // Engine notices close by themselves like toasts do; nothing should need a manual close.
+  // Warnings and errors stay a little longer so they can be read.
+  const scheduled = new Set<number>();
+  $effect(() => {
+    for (const notice of notices) {
+      if (scheduled.has(notice.id)) continue;
+      scheduled.add(notice.id);
+      const delay = notice.severity === "info" ? 4000 : 8000;
+      setTimeout(() => {
+        scheduled.delete(notice.id);
+        void engine.dismissNotice(notice.id).catch(() => {});
+      }, delay);
+    }
+  });
+
   function requestTitle(kind: string, name: string): string {
     // `kind` is from this computer's point of view: "sendMic…" = the other device wants our microphone.
     if (kind.startsWith("sendMic")) return t("request.title", name);

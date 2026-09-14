@@ -1,0 +1,48 @@
+name: macOS build
+
+# Builds the SoundPush desktop app for macOS (Apple Silicon + Intel, universal) and uploads the
+# .dmg as an artifact. The app is ad-hoc signed only: on first launch, right-click → Open (or
+# System Settings → Privacy & Security → Open Anyway). Notarised builds need an Apple Developer ID.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+
+jobs:
+  macos:
+    name: macOS app (universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sound-push-desktop/ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: npm --prefix sound-push-desktop/ui ci
+
+      - name: Build app and disk image
+        working-directory: sound-push-desktop
+        run: |
+          set -o pipefail
+          ./ui/node_modules/.bin/tauri build --target universal-apple-darwin --bundles dmg 2>&1 | tee ../build.log || {
+            grep -E "^error|error\[| --> " ../build.log | head -40 | sed 's/^/::error title=Build::/'
+            exit 1
+          }
+
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundPush-macOS
+          path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

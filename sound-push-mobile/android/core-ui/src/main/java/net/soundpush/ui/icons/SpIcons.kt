@@ -30,12 +30,13 @@ object SpIcons {
         return builder.build()
     }
 
-    /** A house with rounded corners and an arched door. */
+    /** A house: overhanging roof, rounded walls, arched door. */
     val Home by lazy {
         icon(
             "home",
-            "M3 10.5a2 2 0 0 1 0.7 -1.5l7 -6a2 2 0 0 1 2.6 0l7 6a2 2 0 0 1 0.7 1.5V19a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z",
-            "M9.5 21v-6a1.5 1.5 0 0 1 1.5 -1.5h2a1.5 1.5 0 0 1 1.5 1.5v6",
+            "M3 11l8.3 -7.2a1 1 0 0 1 1.4 0L21 11",
+            "M5 9.5V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2V9.5",
+            "M9.5 21v-5a2.5 2.5 0 0 1 5 0v5",
         )
     }
     /** A computer screen with a phone in front of it. */
