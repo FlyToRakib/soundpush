@@ -90,6 +90,18 @@ impl DesktopHooks {
                 let _ = std::fs::remove_file(&marker);
             }
         }
+        // Per-app capture left by a crashed run keeps apps on a private sink; put them back.
+        #[cfg(target_os = "linux")]
+        if let Err(e) = std::thread::Builder::new()
+            .name("sp-app-capture-cleanup".into())
+            .spawn(|| {
+                if let Err(e) = sp_audio_io::pulse::remove_stale_app_captures() {
+                    tracing::debug!(error = %e, "no stale app capture removed");
+                }
+            })
+        {
+            warn!(error = %e, "could not check for stale app capture");
+        }
         Self {
             app,
             data_dir,
