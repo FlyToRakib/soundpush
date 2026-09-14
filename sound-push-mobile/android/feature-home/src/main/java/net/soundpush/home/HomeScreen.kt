@@ -104,7 +104,9 @@ fun HomeScreen(
     onOpenDevices: () -> Unit,
     onShowMessage: (String) -> Unit,
 ) {
-    var picking by remember { mutableStateOf<Task?>(null) }
+    // The open device picker survives rotation; tasks are identified by their title resource.
+    var pickingRes by rememberSaveable { mutableStateOf<Int?>(null) }
+    val picking = TASKS.firstOrNull { it.titleRes == pickingRes }
 
     if (state.trustedPeers.isEmpty()) {
         EmptyState(
@@ -121,6 +123,17 @@ fun HomeScreen(
 
     val connected = state.connectedPeers
     val offlinePeer = if (connected.isEmpty()) state.trustedPeers.firstOrNull { !it.blocked } else null
+
+    // A task is running with a peer when every one of its route kinds is open with that peer.
+    val running = state.routes.filter { it.status != "stopped" }
+    fun runs(task: Task, peerId: String) = task.kinds.all { kind -> running.any { it.peerId == peerId && it.kind == kind } }
+
+    /** Peers [task] runs with. A larger task (headset) claims its parts, so it lights one card, not three. */
+    fun activePeers(task: Task): List<PeerView> = state.trustedPeers.filter { peer ->
+        runs(task, peer.deviceId) && TASKS.none { other ->
+            other !== task && other.kinds.size > task.kinds.size && other.kinds.containsAll(task.kinds) && runs(other, peer.deviceId)
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -160,18 +173,27 @@ fun HomeScreen(
                 else -> null
             }
             val reason = reasonRes?.let { stringResource(it) }
+            val activeWith = activePeers(task)
+            val activeNames = activeWith.joinToString { it.name }
+            val activeHint = if (activeWith.isEmpty()) null else stringResource(R.string.home_task_active_hint, activeNames)
             TaskCard(
                 title = stringResource(task.titleRes),
-                description = reason ?: stringResource(task.descRes),
+                description = when {
+                    activeWith.isNotEmpty() -> stringResource(R.string.home_task_active, activeNames)
+                    else -> reason ?: stringResource(task.descRes)
+                },
                 icon = task.icon,
                 enabled = reason == null,
+                active = activeWith.isNotEmpty(),
             ) {
                 when {
+                    // Already running with the only device there is: nothing to start, point at Stop.
+                    activeHint != null && connected.size <= 1 -> onShowMessage(activeHint)
                     reason != null -> onShowMessage(reason)
                     // With one connected device there is nothing to choose.
                     connected.size == 1 -> onStartRoutes(capable[0].deviceId, task.kinds)
                     // With several, always ask, so audio never goes to a device the user didn't pick.
-                    else -> picking = task
+                    else -> pickingRes = task.titleRes
                 }
             }
         }
@@ -183,18 +205,19 @@ fun HomeScreen(
     // The list follows live state: devices that disconnect disappear, the dialog closes when none are left.
     picking?.takeIf { connected.isNotEmpty() }?.let { task ->
         AlertDialog(
-            onDismissRequest = { picking = null },
+            onDismissRequest = { pickingRes = null },
             title = { Text(stringResource(R.string.home_pick_device)) },
             text = {
                 Column {
                     connected.forEach { peer ->
-                        val supported = task.supports(peer)
+                        val alreadyRunning = runs(task, peer.deviceId)
+                        val supported = task.supports(peer) && !alreadyRunning
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 56.dp)
                                 .clickable(enabled = supported) {
-                                    picking = null
+                                    pickingRes = null
                                     onStartRoutes(peer.deviceId, task.kinds)
                                 }
                                 .alpha(if (supported) 1f else 0.5f),
@@ -206,7 +229,7 @@ fun HomeScreen(
                                 Text(peer.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (!supported) {
                                     Text(
-                                        stringResource(peerReasonRes(task, peer)),
+                                        stringResource(if (alreadyRunning) R.string.home_peer_reason_active else peerReasonRes(task, peer)),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -216,7 +239,7 @@ fun HomeScreen(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { picking = null }) { Text(stringResource(R.string.common_cancel)) } },
+            confirmButton = { TextButton(onClick = { pickingRes = null }) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 }

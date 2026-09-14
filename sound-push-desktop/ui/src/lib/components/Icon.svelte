@@ -2,7 +2,7 @@
   // Minimal outline icon set (24×24, 1.75 stroke). Drawn for SoundPush.
   export const icons = {
     // Kept identical to the Android set (SpIcons.kt). Arc flags are written out in full.
-    home: "M4 10.5 12 4l8 6.5 M6 9.5V20h4.5v-5.5h3V20H18V9.5",
+    home: "M3 10.5a2 2 0 0 1 0.7 -1.5l7 -6a2 2 0 0 1 2.6 0l7 6a2 2 0 0 1 0.7 1.5V19a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z M9.5 21v-6a1.5 1.5 0 0 1 1.5 -1.5h2a1.5 1.5 0 0 1 1.5 1.5v6",
     devices:
       "M4 5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z M2 18h15 M19 8h2a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z",
     audio: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2",

@@ -30,7 +30,14 @@ object SpIcons {
         return builder.build()
     }
 
-    val Home by lazy { icon("home", "M4 10.5 12 4l8 6.5", "M6 9.5V20h4.5v-5.5h3V20H18V9.5") }
+    /** A house with rounded corners and an arched door. */
+    val Home by lazy {
+        icon(
+            "home",
+            "M3 10.5a2 2 0 0 1 0.7 -1.5l7 -6a2 2 0 0 1 2.6 0l7 6a2 2 0 0 1 0.7 1.5V19a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z",
+            "M9.5 21v-6a1.5 1.5 0 0 1 1.5 -1.5h2a1.5 1.5 0 0 1 1.5 1.5v6",
+        )
+    }
     /** A computer screen with a phone in front of it. */
     val Devices by lazy {
         icon(

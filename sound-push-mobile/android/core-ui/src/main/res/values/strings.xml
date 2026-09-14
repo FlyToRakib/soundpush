@@ -23,6 +23,10 @@
     <string name="task_send_apps">Send phone audio</string>
     <string name="task_send_apps_desc">Play this phone\'s apps on another device</string>
     <string name="task_unavailable_apps">Needs Android 10 or newer</string>
+    <string name="home_task_active">Streaming to %1$s</string>
+    <string name="home_task_active_badge">Active</string>
+    <string name="home_task_active_hint">Already streaming to %1$s. Tap Stop above to end it.</string>
+    <string name="home_peer_reason_active">Already streaming</string>
 
     <string name="route_stop">Stop</string>
     <string name="route_mute">Mute</string>
@@ -210,7 +214,16 @@
     <string name="request_remember">Remember for this device</string>
     <string name="notif_available">Available to paired devices</string>
     <string name="settings_battery_miui">Allow autostart and set battery saver to “No restrictions”.</string>
+    <string name="notice_pairing_success">Paired with %1$s</string>
+    <string name="notice_peer_forgot_us">%1$s no longer recognises this phone. Pair again to reconnect.</string>
+    <string name="notice_identity_reset">This phone\'s identity was reset because its stored key was damaged. Pair your devices again.</string>
+    <string name="notice_trust_store_recovered">Paired devices were reset because the stored list was damaged.</string>
+    <string name="notice_settings_recovered">Settings were reset because the stored file was damaged.</string>
+    <string name="notice_mute_speakers_unsupported">Muting the computer\'s speakers isn\'t supported there.</string>
+    <string name="notice_generic">SoundPush needs your attention.</string>
+
     <string name="permission_mic_needed">Microphone permission is needed for this.</string>
+    <string name="permission_capture_needed">Screen-capture permission is needed to send this phone\'s audio.</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_close">Close</string>
     <string name="common_save">Save</string>

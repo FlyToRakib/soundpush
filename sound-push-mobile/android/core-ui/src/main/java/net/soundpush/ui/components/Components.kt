@@ -43,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -97,46 +98,87 @@ fun SpCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     }
 }
 
+/** [filled]: solid accent tile, used for the one task that is running so it stands out from the tinted ones. */
 @Composable
-fun IconTile(icon: ImageVector, active: Boolean = true) {
+fun IconTile(icon: ImageVector, active: Boolean = true, filled: Boolean = false) {
+    val background = when {
+        filled -> MaterialTheme.colorScheme.primary
+        active -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val tint = when {
+        filled -> MaterialTheme.colorScheme.onPrimary
+        active -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Box(
-        Modifier
-            .size(44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+        Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(background),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Icon(icon, contentDescription = null, tint = tint)
     }
 }
 
-/** Home task. Stays tappable when unavailable so it can explain why; looks muted and shows the reason. */
+/**
+ * Home task. Stays tappable when unavailable so it can explain why; looks muted and shows the reason.
+ * When [active] a route for this task is running: accent outline and tint, a solid icon tile and an
+ * "Active" badge in place of the chevron, so the running task is obvious in the list.
+ */
 @Composable
-fun TaskCard(title: String, description: String, icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
+fun TaskCard(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    enabled: Boolean,
+    active: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    val muted = !enabled && !active
     Surface(
         onClick = onClick,
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        modifier = Modifier.fillMaxWidth(),
+        color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(if (active) 1.5.dp else 1.dp, if (active) accent else MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth().semantics { selected = active },
     ) {
         Row(Modifier.padding(Tokens.Space.md), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(icon, enabled)
+            IconTile(icon, active = !muted, filled = active)
             Spacer(Modifier.width(Tokens.Space.md))
             Column(Modifier.weight(1f)) {
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 )
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Icon(SpIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            if (active) {
+                ActiveBadge(stringResource(R.string.home_task_active_badge))
+            } else {
+                Icon(SpIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            }
         }
+    }
+}
+
+/** Small accent pill with a live dot, e.g. "Active". Decorative: the card's caption already says what runs. */
+@Composable
+private fun ActiveBadge(label: String) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.onPrimary))
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
     }
 }
 

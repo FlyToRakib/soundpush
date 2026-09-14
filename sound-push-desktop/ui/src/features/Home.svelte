@@ -35,6 +35,24 @@
     }
   }
 
+  /** A task runs with a peer when every one of its route kinds is open with that peer. */
+  function runs(task: Task, peerId: string): boolean {
+    return task.kinds.every((k) => active.some((r) => r.peerId === peerId && r.kind === k && r.status !== "stopped"));
+  }
+
+  /** Peers the task runs with. A larger task (headset) claims its parts, so it lights one card, not three. */
+  function activePeersFor(task: Task): PeerView[] {
+    return store.trustedPeers.filter(
+      (p) =>
+        runs(task, p.deviceId) &&
+        !TASKS.some(
+          (o) => o !== task && o.kinds.length > task.kinds.length && task.kinds.every((k) => o.kinds.includes(k)) && runs(o, p.deviceId),
+        ),
+    );
+  }
+
+  const names = (peers: PeerView[]) => peers.map((p) => p.name).join(", ");
+
   function onTask(task: Task) {
     if (!task.available(app)) {
       onnavigate("audio");
@@ -42,7 +60,10 @@
     }
     const connected = store.connectedPeers;
     const peers = peersForTask(task);
-    if (connected.length === 0) toasts.show(t("home.noConnected"), "warning");
+    const running = activePeersFor(task);
+    // Already running with the only device there is: nothing to start, point at Stop.
+    if (running.length > 0 && connected.length <= 1) toasts.show(t("home.alreadyActive", names(running)));
+    else if (connected.length === 0) toasts.show(t("home.noConnected"), "warning");
     else if (peers.length === 0) toasts.show(t("home.noCapable"), "warning");
     // With one connected device there is nothing to choose; with several, always ask.
     else if (connected.length === 1 && peers[0]) void startTask(task, peers[0]);
@@ -77,12 +98,21 @@
       <div class="tasks">
         {#each TASKS as task (task.id)}
           {@const available = task.available(app)}
-          <button class="task" class:unavailable={!available} onclick={() => onTask(task)}>
+          {@const running = activePeersFor(task)}
+          <button
+            class="task"
+            class:unavailable={!available}
+            class:active={running.length > 0}
+            aria-pressed={running.length > 0}
+            onclick={() => onTask(task)}
+          >
             <span class="task-icon"><Icon name={task.icon} size={22} /></span>
             <span class="task-text">
               <strong>{t(`task.${task.id}`)}</strong>
               <span class="caption">
-                {#if !available}
+                {#if running.length > 0}
+                  {t("task.active", names(running))}
+                {:else if !available}
                   {t(task.unavailableKey ?? "")}
                 {:else if task.id === "receiveMicToVirtualMic" && app.capabilities.virtualMicInput}
                   {t("task.receiveMicToVirtualMic.descNamed", app.capabilities.virtualMicInput)}
@@ -91,6 +121,7 @@
                 {/if}
               </span>
             </span>
+            {#if running.length > 0}<span class="task-badge">{t("task.activeBadge")}</span>{/if}
           </button>
         {/each}
       </div>
@@ -123,12 +154,13 @@
 {#if picking && pickable.length > 0}
   <Dialog title={t("task.pickDevice")} onclose={() => (picking = null)}>
     {#each pickable as peer (peer.deviceId)}
-      {@const supported = capableIds.has(peer.deviceId)}
+      {@const alreadyRunning = picking ? runs(picking, peer.deviceId) : false}
+      {@const supported = capableIds.has(peer.deviceId) && !alreadyRunning}
       <button class="peer" disabled={!supported} onclick={() => picking && startTask(picking, peer)}>
         <Icon name={platformIcon(peer.platform)} />
         <span class="peer-name">
           {peer.name}
-          {#if !supported}<span class="caption">{t("task.peerUnsupported")}</span>{/if}
+          {#if !supported}<span class="caption">{t(alreadyRunning ? "task.peerActive" : "task.peerUnsupported")}</span>{/if}
         </span>
         {#if supported}<Icon name="chevron" size={16} />{/if}
       </button>
@@ -186,10 +218,43 @@
   .task.unavailable .task-icon {
     color: var(--color-text-secondary);
   }
+  /* The running task: accent outline and tint, solid icon tile, "Active" badge. */
+  .task.active {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+  }
+  .task.active .task-icon {
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+  .task.active .caption {
+    color: var(--color-accent);
+  }
   .task-text {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+  .task-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .task-badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
   }
   .peers {
     list-style: none;
