@@ -16,6 +16,9 @@
   import { platform } from "../lib/stores/platform.svelte";
   import DiagnosticsDialog from "./DiagnosticsDialog.svelte";
   import Troubleshooter from "./Troubleshooter.svelte";
+  import AuditLog from "./AuditLog.svelte";
+
+  let showAuditLog = $state(false);
 
   const app = $derived(store.state!);
   const s = $derived(app.settings);
@@ -135,7 +138,13 @@
       <Toggle checked={s.autoConnectTrusted} label={t("settings.autoConnect")}
         onchange={(v) => updateSettings((x) => (x.autoConnectTrusted = v))} />
     </SettingRow>
+    <SettingRow label={t("settings.auditLog")} description={t("settings.auditLog.desc")}>
+      <Button onclick={() => (showAuditLog = true)}>{t("audit.view")}</Button>
+    </SettingRow>
   </Card>
+  {#if showAuditLog}
+    <AuditLog onclose={() => (showAuditLog = false)} />
+  {/if}
 
   <Card title={t("settings.help")}>
     <Troubleshooter />

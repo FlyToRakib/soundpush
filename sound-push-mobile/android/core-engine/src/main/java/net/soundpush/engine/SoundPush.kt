@@ -75,7 +75,7 @@ object SoundPush {
             OutputPreference.target.value != OutputPreference.Target.Automatic
         if (platformOutput == wanted) return
         platformOutput = wanted
-        runCatching { engine.setPlatformOutput(wanted) }.onFailure { Log.w(TAG, "could not switch playback path", it) }
+        runCatching { engine.setPlatformOutput(wanted) }.onFailure { log(LogLevel.Warn, TAG, "could not switch playback path", it) }
     }
 
     /**
@@ -103,7 +103,7 @@ object SoundPush {
                             applyPlatformOutput(it)
                             _state.value = it
                         }
-                        .onFailure { Log.e(TAG, "could not decode engine state", it) }
+                        .onFailure { log(LogLevel.Error, TAG, "could not decode engine state", it) }
                 }
             })
             // Reconnect at once when the network changes, whether or not a stream is running.
@@ -111,15 +111,33 @@ object SoundPush {
             // Picking or clearing an output device (Settings → Audio) switches the playback path live.
             scope.launch { OutputPreference.target.collect { _state.value?.let(::applyPlatformOutput) } }
         } catch (e: FfiException.Engine) {
-            Log.e(TAG, "engine start failed: ${e.key}: ${e.detail}", e)
+            log(LogLevel.Error, TAG, "engine start failed: ${e.key}: ${e.detail}", e)
             _startError.value = e.detail.ifBlank { e.key }
         } catch (t: Throwable) {
-            Log.e(TAG, "engine start failed", t)
+            log(LogLevel.Error, TAG, "engine start failed", t)
             _startError.value = t.message ?: t.javaClass.simpleName
         }
     }
 
     private const val TAG = "SoundPush"
+
+    /**
+     * App log line through the engine logger (plan §28.1): the same log files and logcat stream as
+     * the engine, so one log tells the whole story. Before the native library is loaded it falls
+     * back to logcat only. Never pass secrets or pairing codes.
+     */
+    fun log(level: LogLevel, tag: String, message: String, error: Throwable? = null) {
+        val text = if (error != null) "$message: ${error.javaClass.simpleName}: ${error.message}" else message
+        if (isStarted && runCatching { uniffi.soundpush_ffi.logMessage(level.value, tag, text) }.isSuccess) return
+        when (level) {
+            LogLevel.Error -> Log.e(tag, message, error)
+            LogLevel.Warn -> Log.w(tag, message, error)
+            LogLevel.Info -> Log.i(tag, message, error)
+            LogLevel.Debug -> Log.d(tag, message, error)
+        }
+    }
+
+    enum class LogLevel(val value: String) { Error("error"), Warn("warn"), Info("info"), Debug("debug") }
 
     fun setDelegate(d: PlatformDelegate) {
         delegate = d
@@ -139,6 +157,13 @@ object SoundPush {
 
     /** Blocking access for background components (service threads). */
     fun <T> direct(block: SoundPushEngine.() -> T): T? = if (isStarted) runCatching { engine.block() }.getOrNull() else null
+
+    /** The local security log, newest first. Blocking: call off the main thread. Null if the engine isn't running. */
+    fun securityLog(): List<AuditEntry>? =
+        direct { auditLogJson() }?.let { json -> runCatching { EngineJson.decodeFromString<List<AuditEntry>>(json) }.getOrNull() }
+
+    /** Delete the security log (a "log cleared" entry remains). Blocking: call off the main thread. */
+    fun clearSecurityLog(): Boolean = direct { clearAuditLog() } != null
 
     fun updateSettings(transform: (Settings) -> Settings) {
         val current = _state.value?.settings ?: return

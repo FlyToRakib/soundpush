@@ -312,7 +312,7 @@ private fun PeerRow(peer: PeerView, label: String?, onOpen: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.heightIn(min = 60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(SpIcons.forPlatform(peer.platform), active = peer.connection == "connected")
+            IconTile(SpIcons.forPlatform(peer.platform), active = peer.isConnected)
             Spacer(Modifier.width(Tokens.Space.md))
             Column(Modifier.weight(1f)) {
                 Text(peer.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)

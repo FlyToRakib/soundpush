@@ -144,6 +144,7 @@ impl TcpEndpoint {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
             let stream = TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
+            crate::qos::mark_socket(socket2::SockRef::from(&stream), addr.is_ipv6());
             let tls = connector.connect(name, stream).await?;
             let (peer_key, exported) = session_info(tls.get_ref().1)?;
             Ok(start(tls, addr, peer_key, exported))
@@ -174,6 +175,7 @@ impl TcpHandshake {
         let remote = self.remote;
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
             self.stream.set_nodelay(true)?;
+            crate::qos::mark_socket(socket2::SockRef::from(&self.stream), remote.is_ipv6());
             let tls = self.acceptor.accept(self.stream).await?;
             let (peer_key, exported) = session_info(tls.get_ref().1)?;
             Ok(start(tls, remote, peer_key, exported))

@@ -32,18 +32,23 @@ use sp_transport::{Endpoint, EndpointConfig, SecureConnection, TcpEndpoint, Tran
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
+use crate::audit::{AuditEntry, AuditKind, AuditLog, permission_name, policy_name};
 use crate::error::{ErrorView, Severity};
+use crate::health::LinkHealth;
 use crate::net::{local_addresses, resolve, sort_candidates};
 use crate::nettest::NetworkReport;
+use crate::pairing_limit::{Decision, PairingLimiter};
 use crate::pipeline::monitor::MicMonitor;
 use crate::pipeline::receiver::{PacketSink, Receiver, ReceiverConfig};
 use crate::pipeline::sender::{Sender, SenderConfig, Subscriber, Subscription};
 use crate::pipeline::{ReceiverControls, SenderControls};
 use crate::platform::{KeepAlive, PlatformHooks};
-use crate::reconnect::Backoff;
+use crate::reconnect::{Backoff, FlapDetector};
 use crate::resume::ResumeTokens;
 use crate::session::{self, Established, SessionCmd, SessionEvent};
-use crate::settings::{DeviceProfile, MicMode, SavedRoute, Settings, SettingsStore, Visibility};
+use crate::settings::{
+    DeviceProfile, LatencyMode, MicMode, SavedRoute, Settings, SettingsStore, Visibility,
+};
 use crate::state::*;
 use crate::{EngineConfig, EngineError};
 
@@ -63,6 +68,11 @@ const TRUST_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const USB_FALLBACK_DELAY: Duration = Duration::from_secs(2);
 /// Time to open audio devices once a route is accepted.
 const PIPELINE_START_DEADLINE: Duration = Duration::from_secs(20);
+/// A blocked device that keeps reconnecting is written to the security log at most this often.
+const REFUSED_AUDIT_INTERVAL: Duration = Duration::from_secs(600);
+/// Anti-flap (plan §20): a device held on the Stable profile returns to its own latency setting
+/// after this long without another reconnect.
+const STABLE_HOLD: Duration = Duration::from_secs(600);
 
 pub(crate) enum Command {
     StartPairing(Reply<String>),
@@ -150,7 +160,8 @@ pub(crate) enum Command {
         default_output: bool,
     },
     UpdateSettings {
-        settings: Settings,
+        // Boxed: `Settings` is several times larger than every other command.
+        settings: Box<Settings>,
         reply: Reply<Settings>,
     },
     DismissNotice {
@@ -174,6 +185,8 @@ pub(crate) enum Command {
     SimulateConnectionLoss {
         device_id: String,
     },
+    AuditLog(Reply<Vec<AuditEntry>>),
+    ClearAuditLog(Reply<()>),
     /// `done` is signalled once sessions are closed and everything held has been released.
     Shutdown {
         done: Option<std::sync::mpsc::Sender<()>>,
@@ -235,6 +248,10 @@ struct Session {
     tx: mpsc::UnboundedSender<SessionCmd>,
     next_route: u8,
     connected_at: Instant,
+    /// `Degraded` detection, and the path counters it last saw.
+    health: LinkHealth,
+    path_sent: u64,
+    path_lost: u64,
 }
 
 impl Session {
@@ -382,6 +399,15 @@ pub(crate) struct Actor {
     last_publish: Instant,
     trust_flushed_at: Instant,
     local_audio: local_audio::LocalAudio,
+    /// Anti-flap (plan §20): recent reconnects per device, and devices streaming with the Stable
+    /// profile since their last reconnect.
+    flaps: HashMap<DeviceId, FlapDetector>,
+    stabilized: HashMap<DeviceId, Instant>,
+    /// Local security log (plan §21) and the pairing rate limit per source address.
+    audit: AuditLog,
+    pairing_limiter: PairingLimiter,
+    /// When a refused connection from each device was last written to the security log.
+    refused_audited: HashMap<DeviceId, Instant>,
 }
 
 pub(crate) async fn spawn(
@@ -406,6 +432,11 @@ pub(crate) async fn spawn(
         settings.device_name = hooks.default_device_name();
         let _ = settings_store.save(&settings);
     }
+    // Debug logging survives a restart until its 24 hours are up.
+    if settings.expire_debug_logging(now_unix()) {
+        let _ = settings_store.save(&settings);
+    }
+    crate::logging::set_debug(settings.debug_logging);
 
     let endpoint = Arc::new(Endpoint::bind(
         &identity,
@@ -488,6 +519,11 @@ pub(crate) async fn spawn(
         last_publish: Instant::now(),
         trust_flushed_at: Instant::now(),
         local_audio: local_audio::LocalAudio::default(),
+        flaps: HashMap::new(),
+        stabilized: HashMap::new(),
+        audit: AuditLog::open(&data_dir, now_unix()),
+        pairing_limiter: PairingLimiter::default(),
+        refused_audited: HashMap::new(),
     };
     actor.refresh_local_addresses();
     if identity_reset {
@@ -667,7 +703,8 @@ impl Actor {
             .with(Capabilities::FEATURE_MIC_MONITOR)
             .with(Capabilities::FEATURE_SESSION_RESUME)
             .with(Capabilities::FEATURE_NETWORK_TEST)
-            .with(Capabilities::FEATURE_ROUTE_RECONFIGURE);
+            .with(Capabilities::FEATURE_ROUTE_RECONFIGURE)
+            .with(Capabilities::FEATURE_DTX);
         if self.tcp.as_ref().is_some_and(|t| t.local_port() != 0) {
             bits = bits.with(Capabilities::TRANSPORT_TCP);
         }
@@ -967,13 +1004,19 @@ impl Actor {
                     self.forget_speaker_mutes(id);
                     self.remove_routes_for(id);
                     self.end_network_test(id, EngineError::Unreachable);
+                    self.flaps.remove(&id);
+                    self.stabilized.remove(&id);
                     // Suppress auto reconnect for this device until the user connects again.
                     let _ = self.trust.update(&id, |d| d.auto_connect = false);
                 }
             }
             Command::ForgetDevice { device_id } => {
                 if let Ok(id) = parse_device(&device_id) {
+                    // Logged after its routes stop, while the name is still known.
                     self.revoke(id);
+                    if self.trust.get(&id).is_some() {
+                        self.audit_peer(AuditKind::DeviceForgotten, &id, None, "");
+                    }
                     let _ = self.trust.remove(&id);
                     self.forget_network_test(&id);
                     let peer_id = id.to_hex();
@@ -990,6 +1033,14 @@ impl Actor {
                     let _ = self.trust.update(&id, |d| d.blocked = blocked);
                     if blocked {
                         self.revoke(id);
+                    }
+                    if self.trust.get(&id).is_some() {
+                        let kind = if blocked {
+                            AuditKind::DeviceBlocked
+                        } else {
+                            AuditKind::DeviceUnblocked
+                        };
+                        self.audit_peer(kind, &id, None, "");
                     }
                 }
             }
@@ -1013,6 +1064,9 @@ impl Actor {
             } => {
                 if let Ok(id) = parse_device(&device_id) {
                     let _ = self.trust.update(&id, |d| d.permissions.set(kind, policy));
+                    if self.trust.get(&id).is_some() {
+                        self.audit_permission(&id, kind, policy);
+                    }
                     // Revocation takes effect immediately.
                     if policy == Policy::Deny {
                         self.enforce_permissions(id);
@@ -1112,14 +1166,14 @@ impl Actor {
                 default_input,
                 default_output,
             } => self.on_audio_devices_changed(default_input, default_output),
-            Command::UpdateSettings {
-                mut settings,
-                reply,
-            } => {
+            Command::UpdateSettings { settings, reply } => {
+                let mut settings = *settings;
                 settings.sanitize();
                 if settings.device_name.is_empty() {
                     settings.device_name = self.settings.device_name.clone();
                 }
+                settings.schedule_debug_logging(self.settings.debug_logging, now_unix());
+                crate::logging::set_debug(settings.debug_logging);
                 let old = std::mem::replace(&mut self.settings, settings);
                 self.save_settings();
                 self.apply_settings(&old);
@@ -1175,6 +1229,16 @@ impl Actor {
                 {
                     s.conn.close(0, b"simulated loss");
                 }
+            }
+            Command::AuditLog(reply) => {
+                let _ = reply.send(Ok(self.audit.entries()));
+            }
+            Command::ClearAuditLog(reply) => {
+                let result = self
+                    .audit
+                    .clear(now_unix())
+                    .map_err(|e| EngineError::Storage(e.to_string()));
+                let _ = reply.send(result);
             }
             Command::Shutdown { .. } => {}
         }
@@ -1602,6 +1666,14 @@ impl Actor {
         if let Some(device) = self.trust.get(&id).cloned() {
             if device.blocked || device.public_key != key {
                 let _ = est.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
+                self.audit_refused(
+                    id,
+                    if device.blocked {
+                        "blocked"
+                    } else {
+                        "keyChanged"
+                    },
+                );
                 return;
             }
             // Session resume: looked at only after authentication and the trust check (resume.rs).
@@ -1625,9 +1697,67 @@ impl Actor {
                 }
             }
         } else {
+            // Pairing rate limit per source address (plan §21.1), before any pairing work.
+            let address = est.conn.remote_address().ip().to_canonical();
+            if let Decision::Refused { first } = self.pairing_limiter.check(address, Instant::now())
+            {
+                let _ = est.tx.send(SessionCmd::Close(StopReason::RateLimited));
+                if first {
+                    warn!(%address, "too many pairing attempts; refusing this address for a minute");
+                    self.audit.record(
+                        AuditEntry::new(now_unix(), AuditKind::PairingRateLimited)
+                            .peer(&est.hello.device_name, id.display_code())
+                            .detail(address.to_string()),
+                    );
+                    self.notice(
+                        "notice.pairingRateLimited",
+                        vec![address.to_string()],
+                        Severity::Warning,
+                        None,
+                    );
+                }
+                return;
+            }
             // Wait for the peer's PairRequest (30 s).
             self.unpaired.insert(est.conn_id, (est, Instant::now()));
         }
+    }
+
+    /// Write a security event about `peer` (its current name and short code) to the audit log.
+    fn audit_peer(
+        &mut self,
+        kind: AuditKind,
+        peer: &DeviceId,
+        route: Option<RouteKind>,
+        detail: &str,
+    ) {
+        let mut entry = AuditEntry::new(now_unix(), kind)
+            .peer(&self.peer_name(peer), peer.display_code())
+            .detail(detail);
+        if let Some(route) = route {
+            entry = entry.route(route);
+        }
+        self.audit.record(entry);
+    }
+
+    fn audit_permission(&mut self, peer: &DeviceId, kind: PermissionKind, policy: Policy) {
+        let detail = format!("{}={}", permission_name(kind), policy_name(policy));
+        self.audit_peer(AuditKind::PermissionChanged, peer, None, &detail);
+    }
+
+    /// A refused connection from a paired device, logged at most once per
+    /// [`REFUSED_AUDIT_INTERVAL`] so a blocked device that keeps retrying cannot flood the log.
+    fn audit_refused(&mut self, id: DeviceId, detail: &str) {
+        let now = Instant::now();
+        if self
+            .refused_audited
+            .get(&id)
+            .is_some_and(|t| now.duration_since(*t) < REFUSED_AUDIT_INTERVAL)
+        {
+            return;
+        }
+        self.refused_audited.insert(id, now);
+        self.audit_peer(AuditKind::ConnectionRefused, &id, None, detail);
     }
 
     fn begin_pairing(&mut self, id: DeviceId, est: Established, qr_scanner: bool) {
@@ -1680,6 +1810,7 @@ impl Actor {
             Body::PairResult(PairResult { accepted: accept }),
         )));
         if !accept {
+            self.audit_peer(AuditKind::PairingRejected, &id, None, "local");
             if let Some(p) = self.pairings.remove(&id) {
                 let _ = p.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
             }
@@ -1712,6 +1843,9 @@ impl Actor {
             self.error_notice(&e.into(), vec![]);
             return;
         }
+        self.audit.record(
+            AuditEntry::new(now_unix(), AuditKind::PairingSucceeded).peer(&name, id.display_code()),
+        );
         self.notice("notice.pairingSuccess", vec![name], Severity::Info, None);
         let est = Established {
             conn_id: p.conn_id,
@@ -1760,6 +1894,7 @@ impl Actor {
             d.backoff.reset();
         }
         self.conn_index.insert(est.conn_id, id);
+        let path = est.conn.stats();
         let session = Session {
             conn_id: est.conn_id,
             conn: est.conn,
@@ -1768,6 +1903,9 @@ impl Actor {
             tx: est.tx,
             next_route: if est.dialed { 2 } else { 1 },
             connected_at: Instant::now(),
+            health: LinkHealth::default(),
+            path_sent: path.sent_packets,
+            path_lost: path.lost_packets,
         };
         // A token to resume this session after a network interruption (plan §20).
         if Capabilities(session.hello.capabilities).has(Capabilities::FEATURE_SESSION_RESUME) {
@@ -1792,8 +1930,14 @@ impl Actor {
             .map(|(k, v)| (*k, v.conn_id))
         {
             self.pairings.remove(&id);
-            if reason == StopReason::PermissionDenied {
-                self.error_notice(&EngineError::PairingRejected, vec![]);
+            match reason {
+                StopReason::PermissionDenied => {
+                    self.error_notice(&EngineError::PairingRejected, vec![]);
+                }
+                StopReason::RateLimited => {
+                    self.error_notice(&EngineError::PairingRateLimited, vec![]);
+                }
+                _ => {}
             }
         }
         let Some(id) = self.conn_index.remove(&conn_id) else {
@@ -1825,12 +1969,98 @@ impl Actor {
             // one may already be established (or about to be) and resumes the paused routes.
             _ => {
                 self.pause_routes_for(id);
+                // A superseded connection was replaced on purpose; it is not a drop.
+                if reason != StopReason::Superseded {
+                    self.record_reconnect(id);
+                }
                 if self.trust.get(&id).is_some_and(|d| d.auto_connect) {
                     let state = self.dials.entry(id).or_insert_with(new_dial);
                     state.in_flight = false;
                     state.backoff.reset();
                     state.next_attempt = Instant::now() + Duration::from_millis(300);
                 }
+            }
+        }
+    }
+
+    /// Anti-flap (plan §20): more than five drops in two minutes switch the device's routes to
+    /// the Stable profile until it has stayed connected for [`STABLE_HOLD`]. Paused routes pick
+    /// it up when they resume ([`Self::profile_for`]).
+    fn record_reconnect(&mut self, id: DeviceId) {
+        let now = Instant::now();
+        let flapping = self.flaps.entry(id).or_default().record(now);
+        if let Some(since) = self.stabilized.get_mut(&id) {
+            *since = now;
+            return;
+        }
+        if flapping {
+            self.stabilized.insert(id, now);
+            warn!(peer = %id.short(), "connection keeps dropping; switching to the Stable profile");
+            let name = self.peer_name(&id);
+            self.notice(
+                "notice.unstableConnection",
+                vec![name],
+                Severity::Warning,
+                None,
+            );
+        }
+    }
+
+    /// Devices held on the Stable profile that have been connected long enough go back to their
+    /// own latency setting; running routes are reconfigured live.
+    fn expire_stable_holds(&mut self, now: Instant) {
+        let expired: Vec<DeviceId> = self
+            .stabilized
+            .iter()
+            .filter(|(_, since)| now.duration_since(**since) >= STABLE_HOLD)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in expired {
+            self.stabilized.remove(&id);
+            self.flaps.remove(&id);
+            info!(peer = %id.short(), "connection stable again; restoring its latency profile");
+            let keys: Vec<String> = self
+                .routes
+                .iter()
+                .filter(|r| r.peer == id && r.status == RouteStatus::Active)
+                .map(Route::key)
+                .collect();
+            for key in keys {
+                self.reconfigure_route(&key);
+            }
+        }
+    }
+
+    /// Once per second: a session is `Degraded` while loss or jitter stays above the threshold
+    /// (plan §19.1). Loss is the worse of the QUIC path and the session's routes.
+    fn update_link_health(&mut self) {
+        for (id, s) in &mut self.sessions {
+            let path = s.conn.stats();
+            let sent = path.sent_packets.saturating_sub(s.path_sent);
+            let lost = path.lost_packets.saturating_sub(s.path_lost);
+            s.path_sent = path.sent_packets;
+            s.path_lost = path.lost_packets;
+            // Keep-alives alone are too few packets to say anything about loss.
+            let mut loss = if sent >= 20 {
+                lost as f64 * 100.0 / sent as f64
+            } else {
+                0.0
+            };
+            let mut jitter = 0.0f64;
+            for r in self
+                .routes
+                .iter()
+                .filter(|r| r.peer == *id && r.status == RouteStatus::Active)
+            {
+                loss = loss.max(r.loss_pct);
+                if let Some(c) = &r.receiver_controls {
+                    jitter = jitter.max(c.jitter_ms.get() as f64);
+                } else if let Some(remote) = &r.remote_stats {
+                    jitter = jitter.max(remote.jitter_us as f64 / 1000.0);
+                }
+            }
+            if s.health.update(loss, jitter) {
+                info!(peer = %id.short(), degraded = s.health.is_degraded(), loss, jitter, "connection quality changed");
             }
         }
     }
@@ -1860,6 +2090,7 @@ impl Actor {
                     return;
                 };
                 if !result.accepted {
+                    self.audit_peer(AuditKind::PairingRejected, &id, None, "peer");
                     if let Some(p) = self.pairings.remove(&id) {
                         let _ = p.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
                     }
@@ -1945,6 +2176,13 @@ impl Actor {
 
     fn on_pair_request(&mut self, est: Established, req: PairRequest) {
         let id = est.conn.peer_fingerprint().device_id();
+        let entry = |kind| {
+            AuditEntry::new(now_unix(), kind).peer(&est.hello.device_name, id.display_code())
+        };
+        self.audit.record(
+            entry(AuditKind::PairingAttempt)
+                .detail(est.conn.remote_address().ip().to_canonical().to_string()),
+        );
         match (req.qr_proof, self.qr.as_ref()) {
             (Some(proof), Some(qr)) if !qr.is_expired(now_unix()) => {
                 let ok = verify_pairing_proof(
@@ -1955,6 +2193,8 @@ impl Actor {
                 )
                 .is_ok();
                 if !ok {
+                    self.audit
+                        .record(entry(AuditKind::PairingRejected).detail("proof"));
                     let _ = est.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
                     return;
                 }
@@ -1977,7 +2217,15 @@ impl Actor {
                 // Code pairing is only accepted while pairing mode is open on this device.
                 self.begin_pairing(id, est, false);
             }
-            _ => {
+            (proof, _) => {
+                // A QR proof whose code expired, or pairing mode is not open.
+                let detail = if proof.is_some() && self.qr.is_some() {
+                    "proof"
+                } else {
+                    "closed"
+                };
+                self.audit
+                    .record(entry(AuditKind::PairingRejected).detail(detail));
                 let _ = est.tx.send(SessionCmd::Close(StopReason::PermissionDenied));
             }
         }
@@ -2045,7 +2293,12 @@ impl Actor {
 
     /// Profile proposed for a route with `peer`: global stream settings plus the device's profile.
     fn profile_for(&self, kind: RouteKind, peer: &DeviceId) -> StreamProfile {
-        let s = self.settings.stream_for(&peer.to_hex());
+        let mut s = self.settings.stream_for(&peer.to_hex());
+        // Anti-flap: a connection that keeps dropping streams with the Stable profile for a
+        // while. A custom buffer is the user's explicit choice and stays.
+        if self.stabilized.contains_key(peer) && s.latency != LatencyMode::Custom {
+            s.latency = LatencyMode::Stable;
+        }
         let channels = if kind.is_mic() { 1 } else { 2 };
         let mut p = build_profile(s.latency_profile(), s.quality(), channels, s.redundancy);
         if kind.is_mic() && p.frame_us < 10_000 {
@@ -2094,7 +2347,10 @@ impl Actor {
             });
         match policy {
             Policy::Allow => self.accept_route(peer, req, kind),
-            Policy::Deny => self.reject(peer, req.route, StopReason::PermissionDenied),
+            Policy::Deny => {
+                self.audit_peer(AuditKind::RouteDenied, &peer, Some(kind), "permission");
+                self.reject(peer, req.route, StopReason::PermissionDenied);
+            }
             // The user approved this route before the connection dropped, and the peer proved with
             // a resume token that this connection continues that session: no second prompt.
             Policy::Ask if resumed => self.accept_route(peer, req, kind),
@@ -2135,7 +2391,14 @@ impl Actor {
             let _ = self
                 .trust
                 .update(&pending.peer, |d| d.permissions.set(kind, policy));
+            self.audit_permission(&pending.peer, kind, policy);
         }
+        let decision = if accept {
+            AuditKind::RouteApproved
+        } else {
+            AuditKind::RouteDenied
+        };
+        self.audit_peer(decision, &pending.peer, Some(pending.kind), "user");
         if accept {
             self.accept_route(pending.peer, pending.request, pending.kind);
         } else {
@@ -2249,6 +2512,14 @@ impl Actor {
         };
         let mut route = self.routes.remove(pos);
         self.release_pipelines(&mut route);
+        if matches!(route.status, RouteStatus::Active | RouteStatus::Paused) {
+            self.audit_peer(
+                AuditKind::RouteStopped,
+                &route.peer,
+                Some(route.kind),
+                &format!("{reason:?}"),
+            );
+        }
         if notify_peer {
             if let Some(s) = self.sessions.get(&route.peer) {
                 s.send(Body::RouteStop(RouteStop {
@@ -2387,6 +2658,8 @@ impl Actor {
     }
 
     fn revoke(&mut self, id: DeviceId) {
+        self.flaps.remove(&id);
+        self.stabilized.remove(&id);
         self.remove_routes_for(id);
         self.cancel_dial(&id);
         self.dials.remove(&id);
@@ -2584,6 +2857,15 @@ impl Actor {
                 r.bitrate_kbps = (bytes.saturating_sub(r.last_bytes) * 8 / 1000) as u32;
                 r.last_bytes = bytes;
             }
+        }
+
+        self.update_link_health();
+        self.expire_stable_holds(now);
+        self.refused_audited
+            .retain(|_, t| now.duration_since(*t) < REFUSED_AUDIT_INTERVAL);
+        if self.settings.expire_debug_logging(now_unix()) {
+            crate::logging::set_debug(false);
+            self.save_settings();
         }
 
         // Capabilities can change while connected (e.g. a virtual microphone was installed).
@@ -2886,8 +3168,12 @@ impl Actor {
             .map(|s| Capabilities(s.hello.capabilities))
             .or_else(|| advert.map(|a| a.capabilities))
             .unwrap_or_default();
-        let connection = if session.is_some() {
-            ConnectionStatus::Connected
+        let connection = if let Some(s) = session {
+            if s.health.is_degraded() {
+                ConnectionStatus::Degraded
+            } else {
+                ConnectionStatus::Connected
+            }
         } else if self.pairings.contains_key(&id) {
             ConnectionStatus::PairingRequired
         } else if let Some(d) = self.dials.get(&id) {

@@ -24,7 +24,7 @@ use sp_engine::sp_audio_io::{
     AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo, DeviceKind,
     ErrorCallback, RenderCallback, RenderTarget, StreamInfo,
 };
-use sp_engine::state::{ConnectionStatus, RouteKind, RouteStatus};
+use sp_engine::state::{RouteKind, RouteStatus};
 use sp_engine::{EngineConfig, EngineHandle, EngineState, PlatformHooks};
 
 const RATE: u64 = 48_000;
@@ -311,7 +311,7 @@ fn wait_for(
 fn connected(s: &EngineState, peer: &str) -> bool {
     s.peers
         .iter()
-        .any(|p| p.device_id == peer && p.trusted && p.connection == ConnectionStatus::Connected)
+        .any(|p| p.device_id == peer && p.trusted && p.connection.is_connected())
 }
 
 fn rss_kb() -> Option<u64> {

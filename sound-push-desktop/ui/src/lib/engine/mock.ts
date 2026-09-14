@@ -1,8 +1,14 @@
 // In-browser mock engine so the UI can be previewed and tested without Tauri.
-import type { DeviceProfile, EngineState, NetworkReport, RouteKind, Settings } from "./types";
+import type { AuditEntry, DeviceProfile, EngineState, NetworkReport, RouteKind, Settings } from "./types";
+
+const auditLog: AuditEntry[] = [
+  { timeUnix: Date.now() / 1000 - 60, kind: "routeStarted", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", route: "sendSystemAudio", detail: "peer" },
+  { timeUnix: Date.now() / 1000 - 3600, kind: "permissionChanged", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", detail: "useMyMicrophone=ask" },
+  { timeUnix: Date.now() / 1000 - 7200, kind: "pairingSucceeded", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", detail: "" },
+];
 
 const settings: Settings = {
-  version: 1,
+  version: 2,
   deviceName: "My PC",
   theme: "system",
   language: "system",
@@ -28,6 +34,7 @@ const settings: Settings = {
     systemNoiseSuppression: true,
     systemEchoCancellation: true,
     monitor: false,
+    highPass: true,
   },
   capture: { systemDevice: null, muteLocalSpeakers: false, app: null, excludeApp: false },
   desktop: {
@@ -50,6 +57,8 @@ const settings: Settings = {
   deviceProfiles: {},
   checkForUpdates: true,
   updateChannel: "stable",
+  debugLogging: false,
+  debugLoggingUntilUnix: 0,
 };
 
 let state: EngineState = {
@@ -221,6 +230,11 @@ export const mockEngine = {
         return undefined as T;
       case "export_diagnostics":
         return "/tmp/soundpush-diagnostics.zip" as T;
+      case "get_audit_log":
+        return [...auditLog] as T;
+      case "clear_audit_log":
+        auditLog.splice(0, auditLog.length, { timeUnix: Date.now() / 1000, kind: "logCleared", peerName: "", peerCode: "", detail: "" });
+        return undefined as T;
       case "preview_diagnostics":
         return {
           sections: [

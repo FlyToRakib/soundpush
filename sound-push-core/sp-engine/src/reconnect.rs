@@ -61,10 +61,15 @@ impl FlapDetector {
     pub const WINDOW: Duration = Duration::from_secs(120);
     pub const LIMIT: usize = 5;
 
+    /// Record a reconnect. True when there were more than [`Self::LIMIT`] within [`Self::WINDOW`].
     pub fn record(&mut self, now: std::time::Instant) -> bool {
         self.events
             .retain(|t| now.duration_since(*t) < Self::WINDOW);
         self.events.push(now);
+        // Only the newest LIMIT + 1 matter: bounded however fast a connection flaps.
+        if self.events.len() > Self::LIMIT + 1 {
+            self.events.remove(0);
+        }
         self.events.len() > Self::LIMIT
     }
 }
@@ -96,5 +101,11 @@ mod tests {
             assert!(!f.record(t + Duration::from_secs(i)));
         }
         assert!(f.record(t + Duration::from_secs(6)));
+        for i in 0..100 {
+            f.record(t + Duration::from_secs(7) + Duration::from_millis(i));
+        }
+        assert_eq!(f.events.len(), FlapDetector::LIMIT + 1);
+        // Outside the window the count starts again.
+        assert!(!f.record(t + Duration::from_secs(600)));
     }
 }

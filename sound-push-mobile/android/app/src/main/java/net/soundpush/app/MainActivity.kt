@@ -81,6 +81,7 @@ import net.soundpush.engine.RouteRequestPrompt
 import net.soundpush.engine.SoundPush
 import net.soundpush.home.HomeScreen
 import net.soundpush.service.StreamingService
+import net.soundpush.settings.AuditLogScreen
 import net.soundpush.settings.BatteryGuideScreen
 import net.soundpush.settings.PermissionRow
 import net.soundpush.settings.SettingsScreen
@@ -494,7 +495,7 @@ class MainActivity : AppCompatActivity() {
                         onShowMessage = showMessage,
                         banners = banners,
                         peerLabel = { peer ->
-                            val viaUsb = network.usbTethering && peer.connection == "connected" && peer.addresses.any(network::isTetherAddress)
+                            val viaUsb = network.usbTethering && peer.isConnected && peer.addresses.any(network::isTetherAddress)
                             if (viaUsb) usbLabel else null
                         },
                     )
@@ -514,9 +515,11 @@ class MainActivity : AppCompatActivity() {
                         languages = languageChoices,
                         language = AppLanguages.current(),
                         onLanguageChange = ::setLanguage,
+                        onOpenAuditLog = { nav.navigate("audit") },
                     )
                 }
                 composable("audio") { AudioScreen(state) }
+                composable("audit") { AuditLogScreen() }
                 composable("troubleshoot") {
                     TroubleshooterScreen(onOpenTopic = { nav.navigate("troubleshoot/$it") }, onExportDiagnostics = exportDiagnostics)
                 }

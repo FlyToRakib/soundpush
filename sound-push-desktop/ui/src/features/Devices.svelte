@@ -20,6 +20,7 @@
   } from "../lib/engine/types";
   import { t } from "../lib/i18n";
   import { platformIcon } from "../lib/routes";
+  import { isConnected } from "../lib/devices";
   import { store } from "../lib/stores/engine.svelte";
   import { run, toasts } from "../lib/stores/toast.svelte";
   import PairDialog from "./PairDialog.svelte";
@@ -206,7 +207,7 @@
           >
         </div>
         <div class="spacer"></div>
-        {#if selected.connection === "connected"}
+        {#if isConnected(selected.connection)}
           <Button onclick={() => run(engine.disconnect(selected.deviceId))}>{t("devices.disconnect")}</Button>
         {:else}
           <Button variant="primary" onclick={() => run(engine.connect(selected.deviceId))}>{t("devices.connect")}</Button>
@@ -296,7 +297,7 @@
           {:else}
             <Button
               variant="primary"
-              disabled={selected.connection !== "connected"}
+              disabled={!isConnected(selected.connection)}
               onclick={() => run(engine.runNetworkTest(selected.deviceId))}>{t("nettest.run")}</Button
             >
           {/if}

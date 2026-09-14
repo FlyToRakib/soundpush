@@ -335,6 +335,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+    use crate::pipeline::sender::SendFailed;
 
     #[test]
     fn summary_numbers() {
@@ -378,9 +379,9 @@ mod tests {
     }
 
     impl DatagramSink for Reflector {
-        fn send(&self, datagram: Bytes) -> Result<(), ()> {
-            let p = Probe::decode(&datagram).map_err(|_| ())?;
-            let mut n = self.counter.lock().map_err(|_| ())?;
+        fn send(&self, datagram: Bytes) -> Result<(), SendFailed> {
+            let p = Probe::decode(&datagram).map_err(|_| SendFailed)?;
+            let mut n = self.counter.lock().map_err(|_| SendFailed)?;
             *n += 1;
             if self.drop_every > 0 && *n % self.drop_every == 0 {
                 return Ok(());

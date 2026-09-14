@@ -6,6 +6,7 @@
   import Slider from "../lib/components/Slider.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
   import { connectionPath, latencyStages } from "../lib/connection";
+  import { isConnected } from "../lib/devices";
   import { engine } from "../lib/engine/client";
   import type { LinkQuality, RouteView } from "../lib/engine/types";
   import { formatElapsed, formatList, t } from "../lib/i18n";
@@ -96,7 +97,7 @@
             onchange={(v) => updateSettings((x) => (x.capture.muteLocalSpeakers = v))}
           />
         </div>
-      {:else if route.kind === "receiveSystemAudio" && peer?.connection === "connected"}
+      {:else if route.kind === "receiveSystemAudio" && peer && isConnected(peer.connection)}
         <!-- Another computer's sound plays here: mute that computer's speakers. -->
         <div class="row">
           <span class="grow">{t("route.mutePeer", route.peerName)}</span>

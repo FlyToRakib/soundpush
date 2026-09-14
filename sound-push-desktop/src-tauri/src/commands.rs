@@ -282,6 +282,17 @@ pub fn dismiss_notice(state: State<'_, AppState>, id: u64) -> CmdResult<()> {
     Ok(state.engine()?.dismiss_notice(id)?)
 }
 
+/// The local security log, newest first (Settings → Privacy & security).
+#[tauri::command]
+pub async fn get_audit_log(state: State<'_, AppState>) -> CmdResult<Vec<sp_engine::AuditEntry>> {
+    Ok(state.engine()?.audit_log().await?)
+}
+
+#[tauri::command]
+pub async fn clear_audit_log(state: State<'_, AppState>) -> CmdResult<()> {
+    Ok(state.engine()?.clear_audit_log().await?)
+}
+
 /// Why the engine could not start, if it failed; the UI shows it instead of "Starting…".
 #[tauri::command]
 pub fn get_start_error(state: State<'_, AppState>) -> Option<String> {

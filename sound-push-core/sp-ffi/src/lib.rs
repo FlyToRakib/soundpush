@@ -156,7 +156,7 @@ impl SoundPushEngine {
         platform: Arc<dyn MobilePlatform>,
         app_version: String,
     ) -> Result<Arc<Self>, FfiError> {
-        init_logging();
+        init_logging(&PathBuf::from(platform.data_dir()));
         // Rust panics leave a local, redacted report (never uploaded); the engine mentions it once.
         sp_engine::crash::install(&PathBuf::from(platform.data_dir()), &app_version);
         let backend = Arc::new(MobileAudioBackend::new());
@@ -405,6 +405,17 @@ impl SoundPushEngine {
         Ok(self.handle.dismiss_notice(id)?)
     }
 
+    /// The local security log as a JSON array of `AuditEntry`, newest first.
+    pub fn audit_log_json(&self) -> Result<String, FfiError> {
+        let entries = pollster::block_on(self.handle.audit_log())?;
+        Ok(serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into()))
+    }
+
+    /// Delete the security log (a "log cleared" entry remains).
+    pub fn clear_audit_log(&self) -> Result<(), FfiError> {
+        Ok(pollster::block_on(self.handle.clear_audit_log())?)
+    }
+
     pub fn network_changed(&self) -> Result<(), FfiError> {
         Ok(self.handle.network_changed()?)
     }
@@ -414,14 +425,45 @@ impl SoundPushEngine {
     }
 }
 
+/// Write a log line from the app (Kotlin) through the engine logger, so the app's messages land in
+/// the same log files and logcat stream as the engine's (plan §28.1). `level`: `error`, `warn`,
+/// `info` or `debug` (anything else is `info`). Callers must not pass secrets or audio.
+#[uniffi::export]
+pub fn log_message(level: String, tag: String, message: String) {
+    // Bounded: a runaway caller cannot write megabytes per line.
+    let message: String = message.chars().take(4096).collect();
+    let tag: String = tag.chars().take(64).collect();
+    match level.as_str() {
+        "error" => tracing::error!(target: "app", tag = %tag, "{message}"),
+        "warn" => tracing::warn!(target: "app", tag = %tag, "{message}"),
+        "debug" => tracing::debug!(target: "app", tag = %tag, "{message}"),
+        _ => tracing::info!(target: "app", tag = %tag, "{message}"),
+    }
+}
+
+/// Engine log files in `<data dir>/logs` (3 × 2 MB) and logcat. `log` crate records from
+/// dependencies (cpal) go to logcat through `android_logger`.
 #[cfg(target_os = "android")]
-fn init_logging() {
+fn init_logging(data_dir: &std::path::Path) {
+    static GUARD: std::sync::OnceLock<Option<sp_engine::logging::LogGuard>> =
+        std::sync::OnceLock::new();
     android_logger::init_once(
         android_logger::Config::default()
             .with_tag("SoundPush")
-            .with_max_level(log::LevelFilter::Info),
+            .with_max_level(log::LevelFilter::Debug),
     );
+    GUARD.get_or_init(|| {
+        let logcat = tracing_subscriber::fmt::layer()
+            .with_writer(android::Logcat)
+            .with_ansi(false)
+            .without_time()
+            .with_level(false);
+        sp_engine::logging::init(
+            sp_engine::logging::LogConfig::android(data_dir.join("logs")),
+            Some(logcat),
+        )
+    });
 }
 
 #[cfg(not(target_os = "android"))]
-fn init_logging() {}
+fn init_logging(_data_dir: &std::path::Path) {}

@@ -25,7 +25,7 @@ data class EngineState(
     val networkTests: List<NetworkTestView> = emptyList(),
 ) {
     val trustedPeers get() = peers.filter { it.trusted }
-    val connectedPeers get() = trustedPeers.filter { it.connection == "connected" }
+    val connectedPeers get() = trustedPeers.filter { it.isConnected }
     val nearbyUntrusted get() = peers.filter { !it.trusted && it.online }
 }
 
@@ -80,7 +80,10 @@ data class PeerView(
     val transport: String = "",
     /** This phone muted the device's own speakers ("Mute computer speakers") in this session. */
     val speakersMuted: Boolean = false,
-)
+) {
+    /** A session exists: "connected", or "degraded" (connected with high loss or jitter). */
+    val isConnected get() = connection == "connected" || connection == "degraded"
+}
 
 @Serializable
 data class Recommendation(
@@ -156,6 +159,17 @@ data class RouteView(
     val isMic get() = kind.contains("Mic")
     val isSending get() = kind.startsWith("send")
 }
+
+/** One entry of the local security log (sp-engine audit.rs); [kind] and [detail] as documented there. */
+@Serializable
+data class AuditEntry(
+    val timeUnix: Long = 0,
+    val kind: String = "",
+    val peerName: String = "",
+    val peerCode: String = "",
+    val route: String? = null,
+    val detail: String = "",
+)
 
 @Serializable
 data class PairingPrompt(
@@ -233,6 +247,7 @@ data class MicSettings(
     val systemNoiseSuppression: Boolean = true,
     val systemEchoCancellation: Boolean = true,
     val monitor: Boolean = false,
+    val highPass: Boolean = true,
 )
 
 @Serializable
@@ -257,7 +272,7 @@ data class SavedRoute(val peerId: String, val kind: String, val keep: Boolean = 
 
 @Serializable
 data class Settings(
-    val version: Int = 1,
+    val version: Int = 2,
     val deviceName: String = "",
     val theme: String = "system",
     val language: String = "system",
@@ -276,4 +291,7 @@ data class Settings(
     /** Keyed by device id; kept here so settings written from this app don't drop profiles. */
     val deviceProfiles: Map<String, DeviceProfile> = emptyMap(),
     val checkForUpdates: Boolean = true,
+    /** Kept so settings written from this app don't switch debug logging off. */
+    val debugLogging: Boolean = false,
+    val debugLoggingUntilUnix: Long = 0,
 )

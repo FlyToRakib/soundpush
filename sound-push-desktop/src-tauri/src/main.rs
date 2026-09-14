@@ -51,22 +51,10 @@ const ENGINE_WAIT: Duration = Duration::from_millis(1500);
 /// Settings tip id recorded once the "SoundPush keeps running" hint was shown.
 const CLOSE_HINT_TIP: &str = "closeToTray";
 
-fn init_logging(dir: &std::path::Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
-    std::fs::create_dir_all(dir).ok()?;
-    let appender = tracing_appender::rolling::Builder::new()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("soundpush")
-        .filename_suffix("log")
-        .max_log_files(5)
-        .build(dir)
-        .ok()?;
-    let (writer, guard) = tracing_appender::non_blocking(appender);
-    tracing_subscriber::fmt()
-        .with_writer(writer)
-        .with_ansi(false)
-        .with_max_level(tracing::Level::INFO)
-        .init();
-    Some(guard)
+/// Size-rotated log files, 5 × 10 MB (plan §28.1). The engine raises the level to `debug` while
+/// the "Debug logging" setting is on.
+fn init_logging(dir: &std::path::Path) -> Option<sp_engine::logging::LogGuard> {
+    sp_engine::logging::init_files(sp_engine::logging::LogConfig::desktop(dir.to_path_buf()))
 }
 
 /// Show the main window, creating it if it was destroyed when closed.
@@ -262,6 +250,8 @@ fn main() {
             commands::get_start_error,
             commands::export_diagnostics,
             commands::preview_diagnostics,
+            commands::get_audit_log,
+            commands::clear_audit_log,
             commands::open_logs_folder,
             commands::open_url,
             commands::check_update,

@@ -1,5 +1,6 @@
 // Connection details (plan §23.3 "IP addresses, fingerprints, and raw stats live in Connection
 // details", §28.2): how a device is reached, where the latency comes from, and a short history.
+import { isConnected } from "./devices";
 import type { PeerView, RouteStats } from "./engine/types";
 
 /** usb: adb forwarding (TLS over TCP on loopback); usbTethering: the phone's USB network. */
@@ -53,7 +54,7 @@ export function classify(host: string): { family: 4 | 6; kind: "loopback" | "lin
 
 /** How this computer reaches `peer`. `tethered`: the path runs over the phone's USB tethering. */
 export function connectionPath(peer: PeerView | undefined, tethered = false): ConnectionPath {
-  if (!peer || peer.connection !== "connected") return { transport: "", family: null, kind: null };
+  if (!peer || !isConnected(peer.connection)) return { transport: "", family: null, kind: null };
   const host = hostOf(peer.remoteAddress);
   const c = host ? classify(host) : null;
   let kind: PathKind | null = c?.kind ?? null;

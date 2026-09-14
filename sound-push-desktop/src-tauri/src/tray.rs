@@ -8,7 +8,7 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use sp_engine::state::{ConnectionStatus, RouteKind, RouteStatus, RouteView};
+use sp_engine::state::{RouteKind, RouteStatus, RouteView};
 use sp_engine::{EngineState, Severity};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -378,7 +378,7 @@ fn describe(state: &EngineState) -> (Vec<Entry>, IconState, String) {
         state
             .peers
             .iter()
-            .any(|p| p.device_id == id && p.connection == ConnectionStatus::Connected)
+            .any(|p| p.device_id == id && p.connection.is_connected())
     };
     let mut summary = match active {
         0 => {

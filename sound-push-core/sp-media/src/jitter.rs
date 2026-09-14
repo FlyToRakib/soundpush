@@ -27,6 +27,8 @@ pub enum PopStatus {
     Missing,
     /// Not enough audio buffered yet; output is silence.
     Buffering,
+    /// The sender is in DTX (silence); output is silence. Not a loss.
+    Silence,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -36,6 +38,8 @@ pub struct JitterStats {
     pub missing: u64,
     pub late: u64,
     pub underruns: u64,
+    /// Frames of DTX silence played.
+    pub silent: u64,
     pub jitter_ms: f64,
     pub target_ms: f64,
     pub buffered_ms: f64,
@@ -49,6 +53,8 @@ pub struct JitterBuffer {
     /// Highest end timestamp received.
     newest_end_ts: u64,
     buffering: bool,
+    /// A DTX silence marker played and no audio since: missing frames are silence, not loss.
+    silent: bool,
     consecutive_missing: u32,
     target_samples: u64,
     // Jitter estimation (RFC 3550 style, plus a percentile window).
@@ -77,6 +83,7 @@ impl JitterBuffer {
             play_ts: None,
             newest_end_ts: 0,
             buffering: true,
+            silent: false,
             consecutive_missing: 0,
             target_samples: min.max(cfg.frame_samples as u64),
             last_transit: None,
@@ -131,6 +138,13 @@ impl JitterBuffer {
         }
     }
 
+    /// The sender went silent (DTX) at `sender_ts`: from there until its next audio frame, gaps
+    /// play as silence instead of concealment, and never count as loss or underruns. Stored as
+    /// an empty frame, so it is ordered, bounded and dropped like any other.
+    pub fn push_silence(&mut self, sender_ts: u64, arrival_samples: u64) {
+        self.push(sender_ts, Vec::new(), arrival_samples);
+    }
+
     /// True when a frame at `ts` is already buffered or has already been played.
     pub fn has(&self, ts: u64) -> bool {
         self.frames.contains_key(&ts) || self.play_ts.is_some_and(|p| ts < p)
@@ -171,10 +185,12 @@ impl JitterBuffer {
         };
 
         // Drop anything older than the play position.
-        while let Some((&ts, _)) = self.frames.first_key_value() {
+        while let Some((&ts, frame)) = self.frames.first_key_value() {
             if ts < play {
+                if !frame.is_empty() {
+                    self.stats.late += 1;
+                }
                 self.frames.pop_first();
-                self.stats.late += 1;
             } else {
                 break;
             }
@@ -182,6 +198,12 @@ impl JitterBuffer {
 
         let advance = self.cfg.frame_samples as u64;
         if let Some(frame) = self.frames.remove(&play) {
+            if frame.is_empty() {
+                // DTX marker: silence starts here.
+                self.silent = true;
+                return self.play_silence(play, advance, out);
+            }
+            self.silent = false;
             let n = frame.len().min(out.len());
             out[..n].copy_from_slice(&frame[..n]);
             out[n..].fill(0.0);
@@ -190,6 +212,10 @@ impl JitterBuffer {
             self.consecutive_missing = 0;
             self.stats.played += 1;
             return PopStatus::Played;
+        }
+
+        if self.silent {
+            return self.play_silence(play, advance, out);
         }
 
         // Missing frame.
@@ -217,6 +243,14 @@ impl JitterBuffer {
         }
         self.play_ts = Some(play.saturating_add(advance));
         PopStatus::Missing
+    }
+
+    fn play_silence(&mut self, play: u64, advance: u64, out: &mut [f32]) -> PopStatus {
+        out.fill(0.0);
+        self.play_ts = Some(play.saturating_add(advance));
+        self.consecutive_missing = 0;
+        self.stats.silent += 1;
+        PopStatus::Silence
     }
 
     /// Slowly converge the target towards what the measured jitter needs.
@@ -251,6 +285,7 @@ impl JitterBuffer {
         self.play_ts = None;
         self.newest_end_ts = 0;
         self.buffering = true;
+        self.silent = false;
         self.consecutive_missing = 0;
         self.last_transit = None;
     }
@@ -335,10 +370,48 @@ mod tests {
             match jb.pop(&mut out) {
                 PopStatus::Played => seen.push(out[0] as u64),
                 PopStatus::Missing => seen.push(99),
-                PopStatus::Buffering => {}
+                PopStatus::Buffering | PopStatus::Silence => {}
             }
         }
         assert_eq!(seen, vec![0, 1, 2, 3, 99]);
+    }
+
+    #[test]
+    fn dtx_silence_plays_without_loss_or_underruns() {
+        let mut jb = JitterBuffer::new(cfg(20, 80));
+        let mut out = vec![1.0; FRAME];
+        let f = FRAME as u64;
+        let mut statuses = Vec::new();
+        // Audio 0..5, silence marker at 5 (frames 5..40 are not sent), keep-alive at 25,
+        // audio again from 40. Frames arrive in real time; the receiver pops one per tick.
+        for tick in 0..60u64 {
+            let ts = tick * f;
+            match tick {
+                0..5 | 40.. => jb.push(ts, frame(ts), ts),
+                5 | 25 => jb.push_silence(ts, ts),
+                _ => {}
+            }
+            statuses.push(jb.pop(&mut out));
+        }
+        let stats = jb.stats();
+        assert_eq!(stats.underruns, 0);
+        assert_eq!(stats.missing, 0, "silence is not loss");
+        assert!(stats.silent >= 30, "silent frames {}", stats.silent);
+        assert!(statuses.contains(&PopStatus::Silence));
+        assert_eq!(statuses.last(), Some(&PopStatus::Played), "audio resumes");
+        assert!(
+            stats.target_ms <= 25.0,
+            "target did not grow: {}",
+            stats.target_ms
+        );
+        // A later audio frame ends the silence; a gap after it is a loss again.
+        for tick in 60..62u64 {
+            jb.push(tick * f, frame(tick * f), tick * f);
+        }
+        for _ in 0..4 {
+            jb.pop(&mut out);
+        }
+        assert!(jb.stats().missing > 0);
     }
 
     #[test]

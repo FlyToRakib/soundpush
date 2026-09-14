@@ -25,6 +25,8 @@ pub struct SenderControls {
     pub muted: AtomicBool,
     pub gain_db: AtomicF32,
     pub noise_suppression: AtomicBool,
+    /// 80 Hz high-pass ahead of noise suppression (microphone groups).
+    pub high_pass: AtomicBool,
     /// Requested Opus bitrate (bits/s); applied by the encoder thread when it changes.
     pub bitrate: AtomicU32,
     pub expected_loss_pct: AtomicU32,
@@ -45,6 +47,7 @@ impl SenderControls {
             muted: AtomicBool::new(false),
             gain_db: AtomicF32::new(gain_db),
             noise_suppression: AtomicBool::new(noise_suppression),
+            high_pass: AtomicBool::new(false),
             bitrate: AtomicU32::new(bitrate),
             expected_loss_pct: AtomicU32::new(0),
             redundancy: AtomicBool::new(false),

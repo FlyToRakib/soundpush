@@ -65,9 +65,19 @@ pub enum ConnectionStatus {
     Connecting,
     PairingRequired,
     Connected,
+    /// Connected, but loss or jitter stayed above the threshold (plan §19.1, `health.rs`).
+    /// Routes keep running; everything that works while connected works here.
+    Degraded,
     Reconnecting,
     WaitingForDevice,
     Incompatible,
+}
+
+impl ConnectionStatus {
+    /// A session exists (`Connected` or `Degraded`).
+    pub fn is_connected(self) -> bool {
+        matches!(self, Self::Connected | Self::Degraded)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

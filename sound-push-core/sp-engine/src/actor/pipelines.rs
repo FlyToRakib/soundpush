@@ -213,6 +213,7 @@ impl Actor {
                 route.subscription = Some(sender.subscribe(Subscriber {
                     route: route.id,
                     sink: Arc::new(session.conn.clone()),
+                    dtx: Capabilities(session.hello.capabilities).has(Capabilities::FEATURE_DTX),
                     controls,
                 }));
                 Ok(true)
@@ -235,6 +236,9 @@ impl Actor {
                 group
                     .muted
                     .store(is_mic && self.mic_muted, Ordering::Relaxed);
+                group
+                    .high_pass
+                    .store(is_mic && self.settings.mic.high_pass, Ordering::Relaxed);
                 let failed_tx = self.internal_tx.clone();
                 let failed_key = key.clone();
                 let on_error = Box::new(move |e: sp_audio_io::AudioError| {
@@ -312,11 +316,16 @@ impl Actor {
                     else {
                         continue;
                     };
-                    r.subscription = Some(sender.subscribe(Subscriber {
-                        route: id,
-                        sink: Arc::new(session.conn.clone()),
-                        controls,
-                    }));
+                    r.subscription =
+                        Some(
+                            sender.subscribe(Subscriber {
+                                route: id,
+                                sink: Arc::new(session.conn.clone()),
+                                dtx: Capabilities(session.hello.capabilities)
+                                    .has(Capabilities::FEATURE_DTX),
+                                controls,
+                            }),
+                        );
                     ready.push((peer, id));
                 }
                 self.encoders.insert(key, EncoderSlot::Running(sender));
@@ -440,6 +449,9 @@ impl Actor {
                 profile: r.profile.clone(),
             }));
         }
+        // Who started it: this device, or the peer.
+        let starter = if requested_locally { "local" } else { "peer" };
+        self.audit_peer(AuditKind::RouteStarted, &peer, Some(kind), starter);
         if requested_locally && self.settings.resume_routes_on_start {
             let peer_id = peer.to_hex();
             if !self
@@ -558,6 +570,10 @@ impl Actor {
                     .controls
                     .noise_suppression
                     .store(self.settings.mic.noise_suppression, Ordering::Relaxed);
+                sender
+                    .controls
+                    .high_pass
+                    .store(self.settings.mic.high_pass, Ordering::Relaxed);
                 sender
                     .controls
                     .muted

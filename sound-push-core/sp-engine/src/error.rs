@@ -44,6 +44,8 @@ pub enum EngineError {
     PairingRejected,
     #[error("pairing code expired")]
     PairingExpired,
+    #[error("too many pairing attempts; try again in a minute")]
+    PairingRateLimited,
     #[error("device was removed or blocked")]
     Revoked,
     #[error("peer runs an incompatible version")]
@@ -85,6 +87,7 @@ impl EngineError {
             Self::NotPaired => "error.security.notPaired",
             Self::PairingRejected => "error.security.pairingRejected",
             Self::PairingExpired => "error.security.pairingExpired",
+            Self::PairingRateLimited => "error.security.pairingRateLimited",
             Self::Revoked => "error.security.revoked",
             Self::IncompatibleVersion => "error.compat.version",
             Self::PeerDenied => "error.permission.peerDenied",
@@ -107,6 +110,7 @@ impl EngineError {
             Self::DeviceNotFound
             | Self::RouteNotFound
             | Self::InvalidInput(_)
+            | Self::PairingRateLimited
             | Self::Cancelled => Severity::Warning,
             _ => Severity::Error,
         }

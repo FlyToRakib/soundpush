@@ -91,6 +91,9 @@ impl Capabilities {
     pub const FEATURE_ROUTE_RECONFIGURE: u64 = 1 << 29;
     /// Accepts TLS-over-TCP connections on its port (USB via `adb reverse`, protocol 1.1).
     pub const TRANSPORT_TCP: u64 = 1 << 30;
+    /// Handles header-only `DTX` media packets: silence until the route's next audio packet.
+    /// Senders use DTX only towards receivers advertising this bit.
+    pub const FEATURE_DTX: u64 = 1 << 31;
 
     pub const fn has(self, bit: u64) -> bool {
         self.0 & bit == bit

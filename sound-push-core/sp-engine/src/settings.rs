@@ -3,15 +3,21 @@
 //! Stored as JSON with atomic writes. Unknown fields are ignored and missing
 //! fields take defaults, so older and newer versions can read each other's files.
 //! A corrupted file is moved aside and defaults are used.
+//!
+//! `version` records the schema a file was written with. Files from older versions go through
+//! [`migrate`] (one step per version, on the raw JSON) before they are parsed, and are written
+//! back in the current schema. Add a step whenever a change needs more than a serde default.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sp_media::profile::{LatencyProfile, Quality};
 use sp_security::secretbox::write_atomic;
 
-pub const SETTINGS_VERSION: u32 = 1;
+/// 2: `savedRoutes[].keep` is always written; microphone high-pass filter.
+pub const SETTINGS_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -169,6 +175,8 @@ pub struct MicSettings {
     pub system_noise_suppression: bool,
     pub system_echo_cancellation: bool,
     pub monitor: bool,
+    /// 80 Hz high-pass before noise suppression (rumble, handling and wind noise; plan §15.7).
+    pub high_pass: bool,
 }
 
 impl Default for MicSettings {
@@ -182,6 +190,7 @@ impl Default for MicSettings {
             system_noise_suppression: true,
             system_echo_cancellation: true,
             monitor: false,
+            high_pass: true,
         }
     }
 }
@@ -351,6 +360,11 @@ pub struct Settings {
     pub check_for_updates: bool,
     /// Which releases the desktop updater offers (docs/soundpush-final.md §32).
     pub update_channel: UpdateChannel,
+    /// Write debug-level logs for troubleshooting (plan §28.1). Switches itself off after
+    /// [`DEBUG_LOGGING_SECS`].
+    pub debug_logging: bool,
+    /// When debug logging switches itself off (unix seconds; 0 while off). Set by the engine.
+    pub debug_logging_until_unix: u64,
 }
 
 /// Desktop update channel.
@@ -365,6 +379,9 @@ pub enum UpdateChannel {
     #[serde(other)]
     Stable,
 }
+
+/// Debug logging switches itself off after this long.
+pub const DEBUG_LOGGING_SECS: u64 = 24 * 3600;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -388,6 +405,8 @@ impl Default for Settings {
             device_profiles: std::collections::BTreeMap::new(),
             check_for_updates: true,
             update_channel: UpdateChannel::Stable,
+            debug_logging: false,
+            debug_logging_until_unix: 0,
         }
     }
 }
@@ -426,6 +445,28 @@ impl Settings {
         self.version = SETTINGS_VERSION;
     }
 
+    /// Give debug logging its end time: [`DEBUG_LOGGING_SECS`] after it was switched on (never
+    /// later, whatever a client sends). Off clears it. `was_on`: the setting before this change.
+    pub fn schedule_debug_logging(&mut self, was_on: bool, now_unix: u64) {
+        let latest = now_unix.saturating_add(DEBUG_LOGGING_SECS);
+        self.debug_logging_until_unix = match (self.debug_logging, was_on) {
+            (false, _) => 0,
+            (true, false) => latest,
+            (true, true) if self.debug_logging_until_unix == 0 => latest,
+            (true, true) => self.debug_logging_until_unix.min(latest),
+        };
+    }
+
+    /// Switch debug logging off once its time is up. True when it changed.
+    pub fn expire_debug_logging(&mut self, now_unix: u64) -> bool {
+        if self.debug_logging && now_unix >= self.debug_logging_until_unix {
+            self.debug_logging = false;
+            self.debug_logging_until_unix = 0;
+            return true;
+        }
+        false
+    }
+
     /// Stream settings for routes with `peer_id` (hex): the global settings plus the device's profile.
     pub fn stream_for(&self, peer_id: &str) -> StreamSettings {
         match self.device_profiles.get(peer_id) {
@@ -448,19 +489,45 @@ impl SettingsStore {
 
     /// Returns settings and whether a corrupted file was recovered.
     pub fn load(&self) -> (Settings, bool) {
-        match fs::read(&self.path) {
-            Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes) {
-                Ok(mut s) => {
-                    s.sanitize();
-                    (s, false)
-                }
-                Err(_) => {
-                    let _ = fs::rename(&self.path, self.path.with_extension("json.bad"));
-                    (Settings::default(), true)
-                }
-            },
-            Err(_) => (Settings::default(), false),
+        let Ok(bytes) = fs::read(&self.path) else {
+            return (Settings::default(), false);
+        };
+        let doc = serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .filter(Value::is_object);
+        let Some(mut doc) = doc else {
+            return self.recover();
+        };
+        // Files written before the version hook existed all said 1.
+        let from = doc
+            .get("version")
+            .and_then(Value::as_u64)
+            .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX));
+        if from > SETTINGS_VERSION {
+            tracing::warn!(
+                from,
+                current = SETTINGS_VERSION,
+                "settings from a newer version; unknown fields are ignored"
+            );
         }
+        let migrated = migrate(&mut doc, from);
+        match serde_json::from_value::<Settings>(doc) {
+            Ok(mut s) => {
+                s.sanitize();
+                if migrated {
+                    if let Err(e) = self.save(&s) {
+                        tracing::warn!(error = %e, "could not write migrated settings");
+                    }
+                }
+                (s, false)
+            }
+            Err(_) => self.recover(),
+        }
+    }
+
+    fn recover(&self) -> (Settings, bool) {
+        let _ = fs::rename(&self.path, self.path.with_extension("json.bad"));
+        (Settings::default(), true)
     }
 
     pub fn save(&self, settings: &Settings) -> Result<(), crate::EngineError> {
@@ -468,6 +535,31 @@ impl SettingsStore {
             .map_err(|e| crate::EngineError::Storage(e.to_string()))?;
         write_atomic(&self.path, &json).map_err(|e| crate::EngineError::Storage(e.to_string()))
     }
+}
+
+/// Bring a settings document written with schema `from` up to [`SETTINGS_VERSION`].
+/// Returns true when anything changed (the caller then writes the file back).
+/// Documents from newer versions are left alone.
+fn migrate(doc: &mut Value, from: u32) -> bool {
+    let mut version = from.max(1);
+    if version >= SETTINGS_VERSION {
+        return false;
+    }
+    while version < SETTINGS_VERSION {
+        if version == 1 {
+            // 1 → 2: a saved route without `keep` was chosen explicitly ("Keep running").
+            if let Some(routes) = doc.get_mut("savedRoutes").and_then(Value::as_array_mut) {
+                for route in routes.iter_mut().filter_map(Value::as_object_mut) {
+                    route.entry("keep").or_insert(Value::Bool(true));
+                }
+            }
+        }
+        version += 1;
+    }
+    if let Some(obj) = doc.as_object_mut() {
+        obj.insert("version".into(), Value::from(version));
+    }
+    true
 }
 
 #[cfg(test)]
@@ -478,9 +570,11 @@ mod tests {
     fn roundtrip_and_partial_files() {
         let dir = tempfile::tempdir().unwrap();
         let store = SettingsStore::new(dir.path());
-        let mut s = Settings::default();
-        s.device_name = "Desk".into();
-        s.theme = Theme::Dark;
+        let s = Settings {
+            device_name: "Desk".into(),
+            theme: Theme::Dark,
+            ..Settings::default()
+        };
         store.save(&s).unwrap();
         assert_eq!(store.load().0, s);
 
@@ -495,6 +589,58 @@ mod tests {
         assert_eq!(loaded.theme, Theme::System);
         // Files written before the update check existed keep it on.
         assert!(loaded.check_for_updates);
+    }
+
+    #[test]
+    fn older_files_are_migrated_and_written_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            br#"{"version":1,"deviceName":"Old","savedRoutes":[{"peerId":"ab","kind":"sendSystemAudio"},{"peerId":"cd","kind":"sendSystemAudio","keep":false}]}"#,
+        )
+        .unwrap();
+        let (s, recovered) = SettingsStore::new(dir.path()).load();
+        assert!(!recovered);
+        assert_eq!(s.version, SETTINGS_VERSION);
+        assert!(s.saved_routes[0].keep);
+        assert!(!s.saved_routes[1].keep, "explicit values are kept");
+        assert!(s.mic.high_pass, "new fields take their defaults");
+
+        let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written["version"], SETTINGS_VERSION);
+        assert_eq!(written["savedRoutes"][0]["keep"], true);
+
+        // Current and newer files are not rewritten by a load.
+        let mut newer: Value = written.clone();
+        newer["version"] = Value::from(SETTINGS_VERSION + 1);
+        assert!(!migrate(&mut newer, SETTINGS_VERSION + 1));
+        let mut current = written;
+        assert!(!migrate(&mut current, SETTINGS_VERSION));
+    }
+
+    #[test]
+    fn debug_logging_switches_itself_off_after_a_day() {
+        let now = 1_800_000_000;
+        let mut s = Settings {
+            debug_logging: true,
+            ..Settings::default()
+        };
+        s.schedule_debug_logging(false, now);
+        assert_eq!(s.debug_logging_until_unix, now + DEBUG_LOGGING_SECS);
+        // Later changes keep the end; a client cannot push it further out.
+        s.debug_logging_until_unix = u64::MAX;
+        s.schedule_debug_logging(true, now + 60);
+        assert_eq!(s.debug_logging_until_unix, now + 60 + DEBUG_LOGGING_SECS);
+        s.schedule_debug_logging(true, now + 120);
+        assert_eq!(s.debug_logging_until_unix, now + 60 + DEBUG_LOGGING_SECS);
+
+        assert!(!s.expire_debug_logging(now + 3600));
+        assert!(s.expire_debug_logging(now + 60 + DEBUG_LOGGING_SECS));
+        assert!(!s.debug_logging);
+        assert_eq!(s.debug_logging_until_unix, 0);
+        s.schedule_debug_logging(true, now);
+        assert_eq!(s.debug_logging_until_unix, 0, "off stays off");
     }
 
     #[test]

@@ -11,6 +11,10 @@ Supported range: **1.0 – 1.1**. Everything added in 1.1 is gated by a capabili
 - Preferred port **47650/udp**; falls back to an ephemeral port. The real port is advertised by discovery and pairing codes.
 - Both sides present a self-signed certificate whose key is the device's Ed25519 identity key. Trust is decided by the engine after the handshake (see `docs/security/pairing.md`).
 - Keep-alive 1 s, idle timeout 10 s.
+- QoS (plan §16.3): media is marked DSCP EF (46) where the platform allows, best effort. Windows: a qWAVE flow per
+  peer (traffic type Voice, then EF when the process may set it). Linux, Android, macOS: `IP_TOS`/`IPV6_TCLASS` on
+  the sockets; TLS-over-TCP carries it, but QUIC packets do not yet, because quinn-udp 0.5 sets a per-packet TOS
+  holding only ECN bits (`sp-transport/src/qos.rs`).
 - Connection migration is enabled: a peer whose address changes within the idle timeout keeps its connection.
 
 ### TLS over TCP (1.1, `TRANSPORT_TCP`)
@@ -57,7 +61,7 @@ Routes:
 | `RouteUpdate{route, profile}` | either | Live profile change. |
 | `VolumeSet` / `MuteSet` | either | Remote control (`target = RouteStream` or `DeviceSpeakers`); requires the ControlMe permission. |
 | `StatsReport` | receiver → sender, 1 Hz | Loss, jitter, buffer, drift; drives adaptive bitrate. |
-| `Goodbye{reason}` | either | Orderly close. |
+| `Goodbye{reason}` | either | Orderly close. Reason 13 `RateLimited`: too many pairing attempts from this address (5/min, `docs/security/pairing.md`); peers that do not know it treat it as an ordinary close. |
 
 Endpoint ids: sources `system`, `apps`, `mic`; sinks `speaker`, `virtual-mic`.
 
@@ -94,6 +98,7 @@ interruption without asking the user again (see `docs/security/pairing.md`).
 | 28 | `FEATURE_NETWORK_TEST` (1.1) |
 | 29 | `FEATURE_ROUTE_RECONFIGURE` (1.1) |
 | 30 | `TRANSPORT_TCP` (1.1) |
+| 31 | `FEATURE_DTX` (receiver handles header-only DTX packets, see below) |
 
 Each peer rate-limits incoming control messages (100/s average, bursts of 400); excess messages are dropped and a
 peer that keeps flooding is disconnected.
@@ -108,7 +113,7 @@ ver    route  codec  flags  sample_timestamp (u64)  seq (u32)
 ```
 
 - `ver` = 1. `codec`: 1 = PCM s16le, 2 = Opus.
-- `flags`: 0x01 DTX, 0x02 REDUNDANT, 0x04 DISCONTINUITY, 0x08 MARKER.
+- `flags`: 0x01 DTX (header-only silence packet, see below), 0x02 REDUNDANT, 0x04 DISCONTINUITY, 0x08 MARKER.
 - `sample_timestamp`: position of the first sample on the sender's 48 kHz clock.
 - Senders produce payloads of at most **1100 bytes** (1116-byte datagrams): QUIC starts every path at a 1200-byte UDP
   payload, and a short-header packet spends up to ~40 bytes on connection id, packet number, AEAD tag and frame
@@ -116,6 +121,21 @@ ver    route  codec  flags  sample_timestamp (u64)  seq (u32)
   (5 ms stereo, 10 ms mono). Receivers drop malformed packets silently.
 - One encoder may serve several routes (shared encoder groups): the same encoded payload and timeline go to each
   receiver with its own `route` byte. A receiver that was muted at the sender restarts with `DISCONTINUITY`.
+
+### Silence (DTX, `FEATURE_DTX`)
+
+Opus routes only; PCM (lossless) always sends every frame. A sender uses DTX only towards receivers that advertise
+`FEATURE_DTX`; other receivers of the same encoder group keep getting encoded audio.
+
+- The sender's signal after its DSP chain is "silent" when every sample is below −60 dBFS. After **200 ms** of
+  silence (hangover) it stops sending audio.
+- In place of the frame where DTX starts, and the one after it, it sends a **DTX packet**: `flags` = `DTX`, the
+  frame's `sample_timestamp` and `seq`, **empty payload**. While silence lasts it repeats a DTX packet every
+  **400 ms** (keep-alive). `seq` keeps counting frames that were not sent.
+- The first frame with sound is an ordinary audio packet on the same timeline (no `DISCONTINUITY`).
+- A receiver treats a DTX packet as "silent from `sample_timestamp` until the next audio frame": it plays comfort
+  silence, does not run concealment, and counts neither loss nor underruns. Its jitter-buffer target does not grow.
+  A DTX packet older than the play position is dropped like any late packet.
 
 ### Probe datagrams (1.1, `FEATURE_NETWORK_TEST`)
 

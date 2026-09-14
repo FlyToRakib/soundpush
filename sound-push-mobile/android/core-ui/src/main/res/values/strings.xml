@@ -50,6 +50,7 @@
     <string name="quality_poor">Poor</string>
 
     <string name="status_connected">Connected</string>
+    <string name="status_degraded">Weak connection</string>
     <string name="status_connecting">Connecting…</string>
     <string name="status_reconnecting">Reconnecting…</string>
     <string name="status_waitingForDevice">Waiting for device</string>
@@ -216,6 +217,37 @@
     <string name="notice_identity_reset">This phone\'s identity was reset because its stored key was damaged. Pair your devices again.</string>
     <string name="notice_trust_store_recovered">Paired devices were reset because the stored list was damaged.</string>
     <string name="notice_settings_recovered">Settings were reset because the stored file was damaged.</string>
+    <string name="notice_unstable_connection">The connection to %1$s keeps dropping, so its streams use the Stable latency setting for now. A stronger Wi-Fi signal or USB helps.</string>
+    <string name="notice_pairing_rate_limited">Too many pairing attempts from %1$s. Pairing from there is paused for a minute.</string>
+    <string name="error_pairing_rate_limited">Too many pairing attempts. Wait a minute and try again.</string>
+
+    <!-- Security log (Settings → Privacy) -->
+    <string name="settings_audit_log">Security log</string>
+    <string name="settings_audit_log_desc">Pairing, permission and stream events on this phone. Kept for 30 days, never sent anywhere.</string>
+    <string name="audit_title">Security log</string>
+    <string name="audit_desc">What happened on this phone: pairing, permission changes, streams and refused connections. Entries are kept for 30 days and never leave the phone.</string>
+    <string name="audit_loading">Loading…</string>
+    <string name="audit_empty">Nothing recorded yet.</string>
+    <string name="audit_clear">Clear log</string>
+    <string name="audit_clear_confirm">Delete all entries? A note that the log was cleared stays.</string>
+    <string name="audit_unknown_device">Unknown device</string>
+    <string name="audit_pairing_attempt">%1$s tried to pair from %2$s</string>
+    <string name="audit_pairing_succeeded">Paired with %1$s</string>
+    <string name="audit_pairing_rejected_proof">Refused pairing with %1$s: wrong or expired code</string>
+    <string name="audit_pairing_rejected_closed">Refused pairing with %1$s: pairing wasn\'t open</string>
+    <string name="audit_pairing_rejected_local">You declined pairing with %1$s</string>
+    <string name="audit_pairing_rejected_peer">%1$s declined pairing</string>
+    <string name="audit_pairing_rate_limited">Blocked repeated pairing attempts from %1$s</string>
+    <string name="audit_device_forgotten">Removed %1$s</string>
+    <string name="audit_device_blocked">Blocked %1$s</string>
+    <string name="audit_device_unblocked">Unblocked %1$s</string>
+    <string name="audit_permission_changed">%1$s: “%2$s” set to %3$s</string>
+    <string name="audit_route_approved">Allowed: %1$s</string>
+    <string name="audit_route_denied">Refused: %1$s</string>
+    <string name="audit_route_started">Stream started: %1$s</string>
+    <string name="audit_route_stopped">Stream stopped: %1$s</string>
+    <string name="audit_connection_refused">Refused a connection from %1$s</string>
+    <string name="audit_log_cleared">Log cleared</string>
     <string name="notice_mute_speakers_unsupported">Muting the computer\'s speakers isn\'t supported there.</string>
     <string name="notice_generic">SoundPush needs your attention.</string>
 

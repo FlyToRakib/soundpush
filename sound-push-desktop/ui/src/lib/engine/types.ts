@@ -30,6 +30,8 @@ export type ConnectionStatus =
   | "connecting"
   | "pairingRequired"
   | "connected"
+  /** Connected, but loss or jitter is high; streams keep running. */
+  | "degraded"
   | "reconnecting"
   | "waitingForDevice"
   | "incompatible";
@@ -85,6 +87,8 @@ export interface MicSettings {
   systemNoiseSuppression: boolean;
   systemEchoCancellation: boolean;
   monitor: boolean;
+  /** 80 Hz high-pass filter before noise suppression. */
+  highPass: boolean;
 }
 
 export interface CaptureSettings {
@@ -181,8 +185,11 @@ export interface Settings {
   deviceProfiles: Record<string, DeviceProfile>;
   checkForUpdates: boolean;
   updateChannel: UpdateChannel;
-  /** Detailed logging (plan §28.1). Present only when the engine supports it. */
+  /** Detailed logging (plan §28.1). Present only when the engine supports it; the engine switches it
+   *  off again after 24 hours. */
   debugLogging?: boolean;
+  /** When debug logging switches itself off (unix seconds, 0 while off). Set by the engine. */
+  debugLoggingUntilUnix?: number;
 }
 
 /** Desktop update channel (docs/release-signing.md). */
@@ -289,6 +296,33 @@ export interface NoticeView {
   severity: Severity;
   error: ErrorView | null;
   createdUnix: number;
+}
+
+/** Local security log (sp-engine audit.rs). */
+export type AuditKind =
+  | "pairingAttempt"
+  | "pairingSucceeded"
+  | "pairingRejected"
+  | "pairingRateLimited"
+  | "deviceForgotten"
+  | "deviceBlocked"
+  | "deviceUnblocked"
+  | "permissionChanged"
+  | "routeApproved"
+  | "routeDenied"
+  | "routeStarted"
+  | "routeStopped"
+  | "connectionRefused"
+  | "logCleared";
+
+export interface AuditEntry {
+  timeUnix: number;
+  kind: AuditKind;
+  peerName: string;
+  peerCode: string;
+  route?: RouteKind;
+  /** Kind-specific: remote address, `permission=policy`, rejection or stop reason. */
+  detail: string;
 }
 
 export interface AudioDeviceView {

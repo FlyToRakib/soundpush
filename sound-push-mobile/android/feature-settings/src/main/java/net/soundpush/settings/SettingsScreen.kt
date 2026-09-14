@@ -60,6 +60,7 @@ fun SettingsScreen(
     languages: List<Choice> = emptyList(),
     language: String = "system",
     onLanguageChange: (String) -> Unit = {},
+    onOpenAuditLog: () -> Unit = {},
 ) {
     val s = state.settings
     val context = LocalContext.current
@@ -176,6 +177,8 @@ fun SettingsScreen(
                 ),
             ) { v -> SoundPush.updateSettings { it.copy(visibility = v) } }
             Caption(stringResource(R.string.settings_privacy_note))
+            Divider()
+            NavRow(stringResource(R.string.settings_audit_log), stringResource(R.string.settings_audit_log_desc), onOpenAuditLog)
         }
 
         SectionTitle(stringResource(R.string.settings_help))

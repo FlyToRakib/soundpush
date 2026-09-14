@@ -13,8 +13,8 @@ use sp_engine::sp_audio_io::{
     AudioBackend, AudioError, AudioStream, CaptureCallback, CaptureSource, DeviceInfo,
     ErrorCallback, RenderCallback, RenderTarget,
 };
-use sp_engine::state::{ConnectionStatus, RouteStatus};
-use sp_engine::{EngineConfig, EngineHandle, EngineState, PlatformHooks, RouteKind};
+use sp_engine::state::RouteStatus;
+use sp_engine::{AuditKind, EngineConfig, EngineHandle, EngineState, PlatformHooks, RouteKind};
 
 struct TestHooks {
     dir: PathBuf,
@@ -231,7 +231,7 @@ fn wait_for_within(
 fn connected(s: &EngineState, peer: &str) -> bool {
     s.peers
         .iter()
-        .any(|p| p.device_id == peer && p.trusted && p.connection == ConnectionStatus::Connected)
+        .any(|p| p.device_id == peer && p.trusted && p.connection.is_connected())
 }
 
 /// `a` shows a QR code and `b` scans it; returns (a id, b id) once both are connected.
@@ -331,11 +331,83 @@ fn qr_pairing_route_and_audio() {
             .any(|r| r.kind == RouteKind::SendSystemAudio)
     });
 
+    // The phone's security log saw the pairing, the approval and the stream (plan §21).
+    let log = rt.block_on(phone.audit_log()).unwrap();
+    for kind in [
+        AuditKind::PairingSucceeded,
+        AuditKind::RouteApproved,
+        AuditKind::RouteStarted,
+        AuditKind::RouteStopped,
+    ] {
+        assert!(log.iter().any(|e| e.kind == kind), "{kind:?} in {log:#?}");
+    }
+    assert!(
+        log.windows(2).all(|w| w[0].time_unix >= w[1].time_unix),
+        "newest first"
+    );
+
     // Forgetting a device revokes access.
     desk.forget_device(phone_id.clone()).unwrap();
     wait_for(&desk, "phone forgotten", |s| {
         !s.peers.iter().any(|p| p.device_id == phone_id && p.trusted)
     });
+    let log = rt.block_on(desk.audit_log()).unwrap();
+    assert_eq!(log[0].kind, AuditKind::DeviceForgotten, "{log:#?}");
+    rt.block_on(desk.clear_audit_log()).unwrap();
+    let log = rt.block_on(desk.audit_log()).unwrap();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].kind, AuditKind::LogCleared);
+}
+
+#[test]
+fn pairing_attempts_are_rate_limited_per_address() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let other_dir = tempfile::tempdir().unwrap();
+    let desk = start(&desk_dir, "Desk", sine());
+    let other = start(&other_dir, "Stranger", sine());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let address = format!("127.0.0.1:{}", desk.state().local.port);
+    let rate_limited = |s: &EngineState| {
+        s.notices.iter().any(|n| {
+            n.error
+                .as_ref()
+                .is_some_and(|e| e.key == "error.security.pairingRateLimited")
+        })
+    };
+
+    // Pairing is not open on the desk: the first five attempts are refused as usual, the sixth
+    // within the minute is refused for the rate limit before any pairing work.
+    for i in 0..6 {
+        rt.block_on(other.pair_with_address(address.clone()))
+            .unwrap();
+        if i < 5 {
+            wait_for(&other, &format!("attempt {i} refused"), |s| {
+                s.notices
+                    .iter()
+                    .filter(|n| n.key == "error.security.pairingRejected")
+                    .count()
+                    > i
+            });
+        }
+    }
+    wait_for(&other, "rate limit reported to the dialer", rate_limited);
+    wait_for(&desk, "rate limit notice on the desk", |s| {
+        s.notices
+            .iter()
+            .any(|n| n.key == "notice.pairingRateLimited")
+    });
+    let log = rt.block_on(desk.audit_log()).unwrap();
+    assert!(
+        log.iter()
+            .any(|e| e.kind == AuditKind::PairingRateLimited && e.detail == "127.0.0.1"),
+        "{log:#?}"
+    );
+    assert_eq!(
+        log.iter()
+            .filter(|e| e.kind == AuditKind::PairingAttempt)
+            .count(),
+        5
+    );
 }
 
 #[test]
@@ -626,11 +698,9 @@ fn usb_tcp_transport_pairs_streams_and_measures() {
     phone.simulate_connection_loss(desk_id.clone()).unwrap();
     std::thread::sleep(Duration::from_millis(200));
     wait_for_within(&phone, "reconnect over TCP", Duration::from_secs(20), |s| {
-        s.peers.iter().any(|p| {
-            p.device_id == desk_id
-                && p.connection == ConnectionStatus::Connected
-                && p.transport == "tcp"
-        })
+        s.peers
+            .iter()
+            .any(|p| p.device_id == desk_id && p.connection.is_connected() && p.transport == "tcp")
     });
 }
 
@@ -676,4 +746,45 @@ fn routes_resume_after_restart_when_enabled() {
     settings.resume_routes_on_start = false;
     let saved = rt.block_on(phone.update_settings(settings)).unwrap();
     assert!(saved.saved_routes.is_empty());
+}
+
+#[test]
+fn flapping_connection_falls_back_to_stable() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let desk = start(&desk_dir, "Desk", sine());
+    let phone = start(&phone_dir, "Phone", recorder().0);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (desk_id, phone_id) = pair(&rt, &desk, &phone);
+    rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+        .unwrap();
+
+    // More than five drops within two minutes (plan §20).
+    for i in 0..6 {
+        desk.simulate_connection_loss(phone_id.clone()).unwrap();
+        wait_for(&phone, &format!("drop {i} noticed"), |s| {
+            !connected(s, &desk_id)
+        });
+        wait_for(&phone, &format!("reconnected after drop {i}"), |s| {
+            connected(s, &desk_id)
+        });
+    }
+    wait_for(&phone, "unstable connection notice", |s| {
+        s.notices
+            .iter()
+            .any(|n| n.key == "notice.unstableConnection")
+    });
+    // The resumed route buffers like Stable (at least 60 ms) instead of Balanced (20 ms).
+    wait_for_within(
+        &phone,
+        "route resumed with the Stable buffer",
+        Duration::from_secs(15),
+        |s| {
+            s.routes.iter().any(|r| {
+                r.kind == RouteKind::ReceiveSystemAudio
+                    && r.status == RouteStatus::Active
+                    && r.stats.buffer_ms >= 50.0
+            })
+        },
+    );
 }

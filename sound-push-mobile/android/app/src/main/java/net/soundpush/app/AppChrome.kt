@@ -46,7 +46,7 @@ private val TABS = listOf(
 )
 
 /** Settings sub-screens: they show a back arrow and keep the Settings tab selected. */
-internal val SETTINGS_SUBSCREENS = setOf("audio", "troubleshoot", "troubleshoot/{topic}", "battery", "licenses")
+internal val SETTINGS_SUBSCREENS = setOf("audio", "troubleshoot", "troubleshoot/{topic}", "battery", "licenses", "audit")
 
 /** Bottom navigation. Sub-screens (e.g. Audio) keep their parent tab selected. */
 @Composable
@@ -121,6 +121,7 @@ internal fun titleFor(route: String): Int = when (route) {
     "troubleshoot", "troubleshoot/{topic}" -> R.string.trouble_title
     "battery" -> R.string.settings_battery
     "licenses" -> R.string.settings_licenses
+    "audit" -> R.string.audit_title
     else -> R.string.app_name
 }
 
