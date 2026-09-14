@@ -8,6 +8,9 @@ export const LINKS = {
   license: `${REPO}/blob/HEAD/LICENSE`,
   reportBug: `${REPO}/issues/new/choose`,
   releases: `${REPO}/releases`,
+  /** Where the Android app is downloaded (onboarding QR code). */
+  androidApp: `${REPO}/releases/latest`,
+  translate: `${REPO}/blob/HEAD/docs/translating.md`,
 } as const;
 
 /** Release notes page for a version ("0.2.0"). */

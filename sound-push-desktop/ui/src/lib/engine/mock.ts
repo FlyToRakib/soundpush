@@ -220,6 +220,15 @@ export const mockEngine = {
         return undefined as T;
       case "export_diagnostics":
         return "/tmp/soundpush-diagnostics.zip" as T;
+      case "preview_diagnostics":
+        return {
+          sections: [
+            { id: "system", count: 0, redacted: [] },
+            { id: "state", count: state.peers.length, redacted: ["addresses", "deviceIds", "pairingCode"] },
+            { id: "log", count: 2, redacted: ["addresses", "deviceIds"] },
+          ],
+          text: "SoundPush 0.1.0 diagnostics\nOS: windows x86_64\n\n== State ==\n{}\n\n== Recent log ==\nINFO SoundPush starting\nINFO listening on <address>\n",
+        } as T;
       case "set_device_profile": {
         const profiles = { ...state.settings.deviceProfiles };
         const profile = args?.profile as DeviceProfile | null;

@@ -180,6 +180,8 @@ export interface Settings {
   /** Keyed by device id. */
   deviceProfiles: Record<string, DeviceProfile>;
   checkForUpdates: boolean;
+  /** Detailed logging (plan §28.1). Present only when the engine supports it. */
+  debugLogging?: boolean;
 }
 
 export interface LocalDevice {
@@ -356,6 +358,19 @@ export interface HotkeyStatus {
 export interface AudioApps {
   supported: boolean;
   apps: { process: string; active: boolean }[];
+}
+
+/** What a diagnostics export contains (src-tauri commands.rs `preview_diagnostics`). */
+export interface DiagnosticsSection {
+  id: "system" | "state" | "crashes" | "log";
+  count: number;
+  redacted: ("addresses" | "deviceIds" | "pairingCode")[];
+}
+
+export interface DiagnosticsPreview {
+  sections: DiagnosticsSection[];
+  /** Exactly the text an export writes. */
+  text: string;
 }
 
 export type SettingsTopic = "microphone" | "systemAudio" | "network" | "optionalFeatures" | "sound" | "startup";

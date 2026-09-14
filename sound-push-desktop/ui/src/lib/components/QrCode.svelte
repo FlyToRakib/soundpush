@@ -1,7 +1,7 @@
 <script lang="ts">
   import QRCode from "qrcode";
 
-  let { value, label }: { value: string; label: string } = $props();
+  let { value, label, size = 220 }: { value: string; label: string; size?: number } = $props();
   let svg = $state("");
 
   $effect(() => {
@@ -12,14 +12,13 @@
   });
 </script>
 
-<div class="qr" role="img" aria-label={label}>
+<div class="qr" role="img" aria-label={label} style:width="{size}px" style:height="{size}px">
   {@html svg}
 </div>
 
 <style>
   .qr {
-    width: 220px;
-    height: 220px;
+    flex-shrink: 0;
     margin: 0 auto;
     padding: 8px;
     background: #ffffff;

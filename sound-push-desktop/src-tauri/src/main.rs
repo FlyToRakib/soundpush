@@ -257,6 +257,7 @@ fn main() {
             commands::dismiss_notice,
             commands::get_start_error,
             commands::export_diagnostics,
+            commands::preview_diagnostics,
             commands::open_logs_folder,
             commands::open_url,
             commands::virtual_mic_status,

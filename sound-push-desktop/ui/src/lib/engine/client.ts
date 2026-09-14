@@ -3,6 +3,7 @@
 import type {
   AudioApps,
   DeviceProfile,
+  DiagnosticsPreview,
   EngineState,
   HotkeyKind,
   HotkeyStatus,
@@ -136,6 +137,7 @@ export const engine = {
   updateSettings: (settings: Settings) => call<Settings>("update_settings", { settings }),
   dismissNotice: (id: number) => call<void>("dismiss_notice", { id }),
   exportDiagnostics: () => call<string>("export_diagnostics"),
+  previewDiagnostics: () => call<DiagnosticsPreview>("preview_diagnostics"),
   openLogsFolder: () => call<void>("open_logs_folder"),
   openUrl: (url: string) => call<void>("open_url", { url }),
   closeMainWindow: () => call<void>("close_main_window"),
