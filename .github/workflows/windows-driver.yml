@@ -30,7 +30,7 @@ jobs:
       # WDK targets only resolve tool paths (stampinf etc.) when Processor_Architecture is AMD64;
       # setup-msbuild's default x86 MSBuild fails with TRK0005 "Failed to locate: stampinf.exe".
       # Directory.Build.props also sets InfToolPath explicitly as a fallback.
-      - uses: microsoft/setup-msbuild@v2
+      - uses: microsoft/setup-msbuild@v3
         with:
           msbuild-architecture: x64
 
