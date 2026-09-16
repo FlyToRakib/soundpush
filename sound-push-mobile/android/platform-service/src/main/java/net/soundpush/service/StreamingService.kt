@@ -77,6 +77,9 @@ class StreamingService : Service() {
     private var playbackLegacy = false
     private var session: MediaSessionCompat? = null
     private var sessionKey: Any? = null
+
+    /** What the streaming notification last said, so an unchanged one is not posted again. */
+    private var notificationShown: List<String>? = null
     private var modeListener: Any? = null
     private var mutedByCall = false
 
@@ -277,7 +280,10 @@ class StreamingService : Service() {
         }
         updateMediaSession(SoundPush.state.value)
         try {
-            ServiceCompat.startForeground(this, Notifications.ID_STREAMING, buildNotification(), serviceTypes)
+            val notification = buildNotification()
+            // Posted here, so `updateNotification` knows what is already on screen.
+            notificationShown = notificationKey(notification)
+            ServiceCompat.startForeground(this, Notifications.ID_STREAMING, notification, serviceTypes)
         } catch (e: Exception) {
             // Background start restrictions (Android 12+ / while-in-use mic): ask the user to open the
             // app. ServiceDelegate re-sends the request when the app comes to the front.
@@ -337,8 +343,27 @@ class StreamingService : Service() {
 
     private fun updateNotification() {
         if (!streaming && !types.stayAvailable && !types.listenStarting) return
+        val notification = buildNotification()
+        // The engine publishes a snapshot up to twenty times a second, and nearly all of them
+        // change only numbers the notification never shows — levels, buffer, round-trip time.
+        // Posting each one is a binder call, a row in the system's notification log and work for
+        // the shade, for a notification that reads exactly the same. Post only what changes.
+        val key = notificationKey(notification)
+        if (key == notificationShown) return
+        notificationShown = key
         val nm = getSystemService(android.app.NotificationManager::class.java)
-        runCatching { nm.notify(Notifications.ID_STREAMING, buildNotification()) }
+        runCatching { nm.notify(Notifications.ID_STREAMING, notification) }
+    }
+
+    /** Everything the streaming notification actually shows, compared piece by piece. */
+    private fun notificationKey(n: android.app.Notification): List<String> {
+        val extras = n.extras
+        val text = { k: String -> extras.getCharSequence(k)?.toString().orEmpty() }
+        return listOf(
+            text(android.app.Notification.EXTRA_TITLE),
+            text(android.app.Notification.EXTRA_TEXT),
+            text(android.app.Notification.EXTRA_SUB_TEXT),
+        ) + n.actions.orEmpty().map { it.title?.toString().orEmpty() }
     }
 
     // ------------------------------------------------------------------ media session
