@@ -189,19 +189,19 @@ fun SettingsScreen(
                 stringResource(R.string.settings_transport),
                 s.transport,
                 listOf(
-                    Choice("auto", stringResource(R.string.transport_auto)),
-                    Choice("quic", stringResource(R.string.transport_quic)),
-                    Choice("tcp", stringResource(R.string.transport_tcp)),
-                    Choice("usb", stringResource(R.string.transport_usb)),
+                    Choice("auto", stringResource(R.string.transport_pin_auto)),
+                    Choice("quic", stringResource(R.string.transport_pin_quic)),
+                    Choice("tcp", stringResource(R.string.transport_pin_tcp)),
+                    Choice("usb", stringResource(R.string.transport_pin_usb)),
                 ),
             ) { v -> SoundPush.updateSettings { it.copy(transport = v) } }
             Caption(
                 stringResource(
                     when (s.transport) {
-                        "quic" -> R.string.transport_quic_desc
-                        "tcp" -> R.string.transport_tcp_desc
-                        "usb" -> R.string.transport_usb_desc
-                        else -> R.string.transport_auto_desc
+                        "quic" -> R.string.transport_pin_quic_desc
+                        "tcp" -> R.string.transport_pin_tcp_desc
+                        "usb" -> R.string.transport_pin_usb_desc
+                        else -> R.string.transport_pin_auto_desc
                     },
                 ),
             )

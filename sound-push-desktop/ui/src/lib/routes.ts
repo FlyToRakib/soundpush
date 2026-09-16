@@ -54,7 +54,7 @@ export function routeTitle(route: RouteView): string {
 }
 
 export function routeIcon(kind: RouteKind): IconName {
-  if (kind.includes("Mic")) return "mic";
+  if (kind.includes("Mic") || kind.includes("Mixed")) return "mic";
   if (kind.includes("App")) return "apps";
   return "speaker";
 }

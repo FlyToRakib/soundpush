@@ -162,14 +162,16 @@
     <string name="settings_privacy_note">Audio never leaves your devices. No accounts, ads or tracking.</string>
     <string name="settings_advanced">Advanced</string>
     <string name="settings_transport">Connection type</string>
-    <string name="transport_auto">Automatic</string>
-    <string name="transport_auto_desc">Use Wi-Fi when it works, and the USB cable when it doesn\'t. Recommended.</string>
-    <string name="transport_quic">Wi-Fi only</string>
-    <string name="transport_quic_desc">Never connect over the USB cable.</string>
-    <string name="transport_tcp">TCP only</string>
-    <string name="transport_tcp_desc">For networks that block the fast protocol. Slightly higher latency; the computer needs the same setting.</string>
-    <string name="transport_usb">USB only</string>
-    <string name="transport_usb_desc">Only the USB cable, set up with adb on the computer. Nothing is sent over Wi-Fi.</string>
+    <!-- The pinned transport (Settings → Advanced). `transport_network` and `transport_usb` below
+         name the transport a connection actually uses, in the connection details. -->
+    <string name="transport_pin_auto">Automatic</string>
+    <string name="transport_pin_auto_desc">Use Wi-Fi when it works, and the USB cable when it doesn\'t. Recommended.</string>
+    <string name="transport_pin_quic">Wi-Fi only</string>
+    <string name="transport_pin_quic_desc">Never connect over the USB cable.</string>
+    <string name="transport_pin_tcp">TCP only</string>
+    <string name="transport_pin_tcp_desc">For networks that block the fast protocol. Slightly higher latency; the computer needs the same setting.</string>
+    <string name="transport_pin_usb">USB only</string>
+    <string name="transport_pin_usb_desc">Only the USB cable, set up with adb on the computer. Nothing is sent over Wi-Fi.</string>
     <string name="settings_max_receivers">Maximum devices per stream</string>
     <string name="settings_streaming_load">%1$d of %2$d devices listening · about %3$s Mb/s and %4$d %% of one CPU core.</string>
     <string name="settings_streaming_load_warn">Another device would add about %1$s Mb/s and %2$d %% CPU, which this network may not carry without drop-outs.</string>

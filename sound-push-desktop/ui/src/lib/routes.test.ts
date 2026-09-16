@@ -46,6 +46,7 @@ describe("home tasks", () => {
 describe("icons", () => {
   it("maps route kinds and platforms", () => {
     expect(routeIcon("receiveMicToVirtualMic")).toBe("mic");
+    expect(routeIcon("sendMixed")).toBe("mic");
     expect(routeIcon("receiveAppAudio")).toBe("apps");
     expect(routeIcon("sendSystemAudio")).toBe("speaker");
     expect(platformIcon("android")).toBe("phone");
