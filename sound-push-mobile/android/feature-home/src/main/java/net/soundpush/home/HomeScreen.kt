@@ -3,6 +3,7 @@ package net.soundpush.home
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -28,7 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -68,6 +71,7 @@ import net.soundpush.ui.components.WidthClass
 import net.soundpush.ui.components.formatElapsed
 import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.rememberFormat
+import net.soundpush.ui.components.rememberLive
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.Tokens
 import kotlin.math.roundToInt
@@ -166,35 +170,37 @@ fun HomeScreen(
     fun LazyListScope.statusItems() {
         if (offlinePeer != null) {
             item(key = "banner") {
-                val reconnecting = offlinePeer.connection == "connecting" || offlinePeer.connection == "reconnecting"
-                StatusBanner(
-                    title = stringResource(
-                        if (reconnecting) R.string.home_banner_reconnecting else R.string.home_banner_offline,
-                        offlinePeer.name,
-                    ),
-                    message = stringResource(R.string.home_banner_hint),
-                    actionLabel = stringResource(R.string.common_retry),
-                    onAction = { SoundPush.command { connect(offlinePeer.deviceId) } },
-                )
+                Animated {
+                    val reconnecting = offlinePeer.connection == "connecting" || offlinePeer.connection == "reconnecting"
+                    StatusBanner(
+                        title = stringResource(
+                            if (reconnecting) R.string.home_banner_reconnecting else R.string.home_banner_offline,
+                            offlinePeer.name,
+                        ),
+                        message = stringResource(R.string.home_banner_hint),
+                        actionLabel = stringResource(R.string.common_retry),
+                        onAction = { SoundPush.command { connect(offlinePeer.deviceId) } },
+                    )
+                }
             }
         }
 
-        items(banners, key = { "banner-${it.key}" }) { banner -> StatusBanner(banner) }
+        items(banners, key = { "banner-${it.key}" }) { banner -> Animated { StatusBanner(banner) } }
     }
 
     /** What is streaming now. */
     fun LazyListScope.routeItems() {
         if (state.routes.isNotEmpty()) {
-            item(key = "active-title") { SectionTitle(stringResource(R.string.home_active)) }
+            item(key = "active-title") { Animated { SectionTitle(stringResource(R.string.home_active)) } }
             items(state.routes, key = { it.routeId }) { route ->
-                RouteCard(route, state.peers.firstOrNull { it.deviceId == route.peerId })
+                Animated { RouteCard(route, state.peers.firstOrNull { it.deviceId == route.peerId }) }
             }
         }
     }
 
     /** "What do you want to do?" task cards. */
     fun LazyListScope.taskItems() {
-        item(key = "tasks-title") { SectionTitle(stringResource(R.string.home_title)) }
+        item(key = "tasks-title") { Animated { SectionTitle(stringResource(R.string.home_title)) } }
         items(TASKS, key = { it.titleRes }) { task ->
             val appsUnsupported = task.kinds.contains("sendAppAudio") && !state.capabilities.appAudio
             val capable = connected.filter(task.supports)
@@ -208,24 +214,26 @@ fun HomeScreen(
             val activeWith = activePeers(task)
             val activeNames = activeWith.joinToString { it.name }
             val activeHint = if (activeWith.isEmpty()) null else stringResource(R.string.home_task_active_hint, activeNames)
-            TaskCard(
-                title = stringResource(task.titleRes),
-                description = when {
-                    activeWith.isNotEmpty() -> stringResource(R.string.home_task_active, activeNames)
-                    else -> reason ?: stringResource(task.descRes)
-                },
-                icon = task.icon,
-                enabled = reason == null,
-                active = activeWith.isNotEmpty(),
-            ) {
-                when {
-                    // Already running with the only device there is: nothing to start, point at Stop.
-                    activeHint != null && connected.size <= 1 -> onShowMessage(activeHint)
-                    reason != null -> onShowMessage(reason)
-                    // With one connected device there is nothing to choose.
-                    connected.size == 1 -> onStartRoutes(capable[0].deviceId, task.kinds)
-                    // With several, always ask, so audio never goes to a device the user didn't pick.
-                    else -> pickingRes = task.titleRes
+            Animated {
+                TaskCard(
+                    title = stringResource(task.titleRes),
+                    description = when {
+                        activeWith.isNotEmpty() -> stringResource(R.string.home_task_active, activeNames)
+                        else -> reason ?: stringResource(task.descRes)
+                    },
+                    icon = task.icon,
+                    enabled = reason == null,
+                    active = activeWith.isNotEmpty(),
+                ) {
+                    when {
+                        // Already running with the only device there is: nothing to start, point at Stop.
+                        activeHint != null && connected.size <= 1 -> onShowMessage(activeHint)
+                        reason != null -> onShowMessage(reason)
+                        // With one connected device there is nothing to choose.
+                        connected.size == 1 -> onStartRoutes(capable[0].deviceId, task.kinds)
+                        // With several, always ask, so audio never goes to a device the user didn't pick.
+                        else -> pickingRes = task.titleRes
+                    }
                 }
             }
         }
@@ -233,8 +241,8 @@ fun HomeScreen(
 
     /** Paired devices and their connection state. */
     fun LazyListScope.peerItems() {
-        item(key = "peers-title") { SectionTitle(stringResource(R.string.devices_paired)) }
-        items(state.trustedPeers, key = { "peer-${it.deviceId}" }) { peer -> PeerRow(peer, peerLabel(peer), onOpenDevices) }
+        item(key = "peers-title") { Animated { SectionTitle(stringResource(R.string.devices_paired)) } }
+        items(state.trustedPeers, key = { "peer-${it.deviceId}" }) { peer -> Animated { PeerRow(peer, peerLabel(peer), onOpenDevices) } }
     }
 
     if (LocalWidthClass.current == WidthClass.Expanded) {
@@ -306,19 +314,23 @@ fun HomeScreen(
  * [revealKeys] identifies what is streaming in this column. A lazy list keeps whatever was at its
  * top in place when items are inserted above it, so a stream that starts — its card is added above
  * the tasks the user just tapped — would land outside the visible list, cut off under the title.
- * When a new key appears the list scrolls back to the top, so the new stream and its Stop button
- * are in view.
+ *
+ * When a new key appears, the list is asked to stay at its first item in the same layout pass that
+ * adds the card ([LazyListState.requestScrollToItem] during composition). Nothing jumps and then
+ * scrolls back: the card fades in at the top and the items below slide down to make room
+ * (`Modifier.animateItem` on the items). Streams that were already running when the screen opened
+ * are not news and do not move the list.
  */
 @Composable
 private fun HomeColumn(modifier: Modifier, revealKeys: List<String> = emptyList(), content: LazyListScope.() -> Unit) {
     val listState = rememberLazyListState()
-    // What was already streaming when the screen opened is not news: only later additions scroll.
-    var shown by remember { mutableStateOf(revealKeys.toSet()) }
-    LaunchedEffect(revealKeys) {
-        val added = revealKeys.any { it !in shown }
-        shown = revealKeys.toSet()
-        if (added) listState.animateScrollToItem(0)
+    val shown = remember { ShownKeys(revealKeys.toSet()) }
+    if (revealKeys.any { it !in shown.keys }) {
+        // Idempotent, so a composition that runs again or is discarded does no harm.
+        listState.requestScrollToItem(0)
     }
+    // Recorded once the composition is applied, not while it may still be thrown away.
+    SideEffect { shown.keys = revealKeys.toSet() }
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxHeight(),
@@ -326,6 +338,19 @@ private fun HomeColumn(modifier: Modifier, revealKeys: List<String> = emptyList(
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
         content = content,
     )
+}
+
+/** The streams a [HomeColumn] has already shown; plain, not state, because nothing draws from it. */
+private class ShownKeys(var keys: Set<String>)
+
+/**
+ * A Home list item that fades in when added and slides when the items around it change, instead
+ * of snapping to its new place. Placement animations run in the layout phase, off the recomposition
+ * path, so they stay smooth while the engine keeps publishing state.
+ */
+@Composable
+private fun LazyItemScope.Animated(content: @Composable () -> Unit) {
+    Box(Modifier.animateItem()) { content() }
 }
 
 @Composable
@@ -370,6 +395,23 @@ private fun RouteControls(route: RouteView) {
     }
 }
 
+/**
+ * An active stream's running time and latency. Both are live numbers, left out of the state a
+ * screen is built from, and read here so each tick redraws this line and nothing else.
+ */
+@Composable
+private fun LiveRouteStatus(route: RouteView, quality: String, qualityLabel: String, color: Color) {
+    val elapsed = rememberLive(route.routeId, route.elapsedSecs) { s -> s.routes.firstOrNull { it.routeId == route.routeId }?.elapsedSecs }
+    val latencyMs = rememberLive(route.routeId, route.stats.latencyMs) { s ->
+        s.routes.firstOrNull { it.routeId == route.routeId }?.stats?.latencyMs
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(formatElapsed(elapsed), style = MaterialTheme.typography.bodySmall, color = color)
+        Spacer(Modifier.width(Tokens.Space.sm))
+        QualityBadge(quality, qualityLabel, latencyMs)
+    }
+}
+
 @Composable
 private fun RouteCard(route: RouteView, peer: PeerView?) {
     var expanded by rememberSaveable(route.routeId) { mutableStateOf(false) }
@@ -410,11 +452,7 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
                     )
                     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
                     when (route.status) {
-                        "active" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(formatElapsed(route.elapsedSecs), style = MaterialTheme.typography.bodySmall, color = secondary)
-                            Spacer(Modifier.width(Tokens.Space.sm))
-                            QualityBadge(quality, qualityLabel, route.stats.latencyMs)
-                        }
+                        "active" -> LiveRouteStatus(route, quality, qualityLabel, secondary)
                         "paused" -> Text(stringResource(R.string.route_reconnecting), style = MaterialTheme.typography.bodySmall, color = secondary)
                         "starting" -> Text(stringResource(R.string.route_starting), style = MaterialTheme.typography.bodySmall, color = secondary)
                         else -> Text(stringResource(R.string.route_waiting, route.peerName), style = MaterialTheme.typography.bodySmall, color = secondary)
@@ -449,7 +487,11 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
                 // Collected only while the details are open.
                 val output by DeviceStatus.output.collectAsState()
                 val outputLatencyMs by DeviceStatus.outputLatencyMs.collectAsState()
-                ConnectionDetails(route, peer, output, outputLatencyMs)
+                // The statistics and round trip are live numbers: read here, so they redraw the
+                // open details and nothing else (see SoundPush.structure).
+                val liveRoute = rememberLive(route.routeId, route) { s -> s.routes.firstOrNull { it.routeId == route.routeId } }
+                val livePeer = rememberLive(route.peerId, peer) { s -> s.peers.firstOrNull { it.deviceId == route.peerId } }
+                ConnectionDetails(liveRoute, livePeer, output, outputLatencyMs)
             }
         }
     }

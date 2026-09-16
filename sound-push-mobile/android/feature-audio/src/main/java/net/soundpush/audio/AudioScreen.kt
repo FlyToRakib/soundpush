@@ -31,6 +31,7 @@ import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.rememberFormat
+import net.soundpush.ui.components.rememberLive
 import net.soundpush.ui.theme.Tokens
 import kotlin.math.roundToInt
 
@@ -213,9 +214,7 @@ fun AudioScreen(state: EngineState) {
             ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(gainDb = v.roundToInt().toFloat())) } }
             // The live level while the microphone is streaming or being monitored, with the clip
             // indicator the volume boost needs (plan §8.3).
-            if (state.micLevelDb > -119f) {
-                LevelMeter(stringResource(R.string.audio_mic_level), state.micLevelDb, state.micClipping)
-            }
+            MicLevel(state.micLevelDb, state.micClipping)
             SettingSwitch(
                 stringResource(R.string.audio_high_pass),
                 s.mic.highPass,
@@ -371,4 +370,14 @@ private fun micModeLabel(mode: String): String = when (mode) {
     "camcorder" -> stringResource(R.string.mic_camcorder)
     "mic" -> stringResource(R.string.mic_mic)
     else -> stringResource(R.string.mic_voiceCommunication)
+}
+
+/** The microphone level, read live so that its movement redraws the meter and nothing else. */
+@Composable
+private fun MicLevel(fallbackDb: Float, fallbackClipping: Boolean) {
+    val levelDb = rememberLive("micLevelDb", fallbackDb) { it.micLevelDb }
+    val clipping = rememberLive("micClipping", fallbackClipping) { it.micClipping }
+    if (levelDb > -119f) {
+        LevelMeter(stringResource(R.string.audio_mic_level), levelDb, clipping)
+    }
 }

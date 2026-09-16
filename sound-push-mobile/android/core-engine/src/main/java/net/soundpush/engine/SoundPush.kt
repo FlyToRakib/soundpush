@@ -13,9 +13,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -45,6 +49,26 @@ object SoundPush {
     private val _startError = MutableStateFlow<String?>(null)
 
     val state: StateFlow<EngineState?> = _state
+
+    /**
+     * [state] without its live numbers — stream timers and statistics, round-trip times, the
+     * microphone level and the publication counter — so it changes only when something a screen
+     * is built from changes: a stream starts or stops, a device connects, a setting moves.
+     *
+     * Screens follow this, not [state]. The engine publishes a new snapshot many times a second
+     * while streaming and every one differs from the last (the counter alone sees to that), so a
+     * screen that read [state] rebuilt and laid itself out again on every timer tick: 7 ms of
+     * recomposition and 3 ms of layout out of a 16.7 ms frame on a Redmi Note 9 Pro, leaving no
+     * room for an animation. The few places that show a live number read it from [state]
+     * themselves (`rememberLive` in core-ui), so a tick redraws that text and nothing else.
+     *
+     * The live numbers are zero here, not stale: a screen that shows one by mistake shows 0.
+     */
+    val structure: StateFlow<EngineState?> = _state
+        .map { it?.let(StateUpdates::settled) }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
     val errors: SharedFlow<ErrorView> = _errors
 
     /** Set when the engine could not start; the UI shows it instead of a blank screen. */

@@ -201,7 +201,7 @@ class MainActivity : AppCompatActivity() {
         DeviceStatus.start(this)
         pending = savedInstanceState?.let { BundleCompat.getSerializable(it, KEY_PENDING, Pending::class.java) }
         setContent {
-            val state by SoundPush.state.collectAsState()
+            val state by SoundPush.structure.collectAsState()
             val startError by SoundPush.startError.collectAsState()
             val theme = state?.settings?.theme ?: "system"
             val dark = when (theme) {

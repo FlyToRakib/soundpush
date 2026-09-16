@@ -22,6 +22,8 @@ class StateUpdatesTest {
         val next = state.copy(
             revision = 8,
             micLevelDb = -18f,
+            // The clip light moves with the level meter it belongs to.
+            micClipping = true,
             routes = listOf(route.copy(elapsedSecs = 13, stats = route.stats.copy(latencyMs = 44.0, levelDb = -14f))),
             peers = listOf(peer.copy(rttMs = 9.5)),
         )

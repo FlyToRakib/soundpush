@@ -20,7 +20,7 @@ class StreamTileService : TileService() {
     override fun onStartListening() {
         // Follow the engine while the panel is open, so the tile never shows a stale on/off.
         follow?.cancel()
-        follow = scope.launch { SoundPush.state.collect { refresh() } }
+        follow = scope.launch { SoundPush.structure.collect { refresh() } }
     }
 
     override fun onStopListening() {

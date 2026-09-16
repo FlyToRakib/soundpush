@@ -16,6 +16,7 @@ internal object StateUpdates {
         // The revision counts publications, not changes.
         revision = 0,
         micLevelDb = 0f,
+        micClipping = false,
         routes = state.routes.map { it.copy(elapsedSecs = 0, stats = RouteStats()) },
         peers = state.peers.map { it.copy(rttMs = 0.0) },
     )

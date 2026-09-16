@@ -99,7 +99,7 @@ class StreamingService : Service() {
         )
         // Network changes reach the engine through its own process-level watcher (NetworkWatcher).
         scope.launch {
-            SoundPush.state.collectLatest { state ->
+            SoundPush.structure.collectLatest { state ->
                 if (state == null) return@collectLatest
                 updateMediaSession(state)
                 updateNotification()
