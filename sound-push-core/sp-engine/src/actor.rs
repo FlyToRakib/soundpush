@@ -45,6 +45,7 @@ use crate::pipeline::sender::{Sender, SenderConfig, Subscriber, Subscription};
 use crate::pipeline::{EchoReference, ReceiverControls, SenderControls};
 use crate::platform::{KeepAlive, PlatformHooks};
 use crate::reconnect::{Backoff, FlapDetector};
+use crate::refused::RefusedHandshakes;
 use crate::resume::ResumeTokens;
 use crate::session::{self, Established, SessionCmd, SessionEvent};
 use crate::settings::{
@@ -221,6 +222,9 @@ pub(crate) enum Command {
 enum Internal {
     Discovery(DiscoveryEvent),
     Incoming(SecureConnection),
+    /// A device reached this one but the TLS handshake did not finish, so there is no telling
+    /// which device it was — only where it came from.
+    HandshakeRefused(SocketAddr),
     DialFailed {
         conn_id: u64,
         target: Option<DeviceId>,
@@ -445,6 +449,8 @@ pub(crate) struct Actor {
     pairing_limiter: PairingLimiter,
     /// When a refused connection from each device was last written to the security log.
     refused_audited: HashMap<DeviceId, Instant>,
+    /// Inbound handshakes that never finished, per address.
+    refused_handshakes: RefusedHandshakes,
 }
 
 pub(crate) async fn spawn(
@@ -557,6 +563,7 @@ pub(crate) async fn spawn(
         audit: AuditLog::open(&data_dir, now_unix()),
         pairing_limiter: PairingLimiter::default(),
         refused_audited: HashMap::new(),
+        refused_handshakes: RefusedHandshakes::default(),
     };
     actor.refresh_local_addresses();
     if identity_reset {
@@ -593,8 +600,14 @@ pub(crate) async fn spawn(
                 // Each handshake on its own task: one stalled peer must not hold up the others.
                 let tx = tx.clone();
                 tokio::spawn(async move {
-                    if let Ok(conn) = handshake.finish().await {
-                        let _ = tx.send(Internal::Incoming(conn));
+                    let remote = handshake.remote_address();
+                    match handshake.finish().await {
+                        Ok(conn) => {
+                            let _ = tx.send(Internal::Incoming(conn));
+                        }
+                        Err(_) => {
+                            let _ = tx.send(Internal::HandshakeRefused(remote));
+                        }
                     }
                 });
             }
@@ -719,8 +732,14 @@ fn spawn_tcp_accept(tcp: Arc<TcpEndpoint>, tx: mpsc::UnboundedSender<Internal>) 
             // Each handshake on its own task: one stalled peer must not hold up the others.
             let tx = tx.clone();
             tokio::spawn(async move {
-                if let Ok(conn) = handshake.finish().await {
-                    let _ = tx.send(Internal::Incoming(conn));
+                let remote = handshake.remote_address();
+                match handshake.finish().await {
+                    Ok(conn) => {
+                        let _ = tx.send(Internal::Incoming(conn));
+                    }
+                    Err(_) => {
+                        let _ = tx.send(Internal::HandshakeRefused(remote));
+                    }
                 }
             });
         }
@@ -1706,6 +1725,7 @@ impl Actor {
                     self.session_tx.clone(),
                 ));
             }
+            Internal::HandshakeRefused(remote) => self.on_handshake_refused(remote),
             Internal::Dialed {
                 conn_id,
                 conn,
@@ -1935,6 +1955,30 @@ impl Actor {
             entry = entry.route(route);
         }
         self.audit.record(entry);
+    }
+
+    /// A device reached this one but the handshake did not finish, so it is not known which
+    /// device it was. The usual cause is a device that no longer recognises this computer's key —
+    /// it was paired against an installation whose identity is gone — and from the user's side
+    /// the phone simply never connects, with nothing anywhere saying why. After a few tries from
+    /// the same address it goes in the security log and the user is told, with the one thing that
+    /// fixes it: pair the device again.
+    fn on_handshake_refused(&mut self, remote: SocketAddr) {
+        if !self.refused_handshakes.record(remote.ip(), Instant::now()) {
+            return;
+        }
+        let address = remote.ip().to_canonical().to_string();
+        self.audit.record(
+            AuditEntry::new(now_unix(), AuditKind::ConnectionRefused)
+                .peer(&address, String::new())
+                .detail("handshake"),
+        );
+        self.notice(
+            "notice.deviceCannotConnect",
+            vec![address],
+            Severity::Warning,
+            None,
+        );
     }
 
     fn audit_permission(&mut self, peer: &DeviceId, kind: PermissionKind, policy: Policy) {

@@ -18,6 +18,7 @@ mod pairing_limit;
 pub mod pipeline;
 pub mod platform;
 pub mod reconnect;
+mod refused;
 mod resume;
 mod session;
 pub mod settings;

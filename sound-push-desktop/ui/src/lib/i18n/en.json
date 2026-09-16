@@ -473,6 +473,7 @@
   "notice.settingsRecovered": "Settings were reset because the settings file was damaged.",
   "notice.muteSpeakersUnsupported": "This device can't mute its speakers remotely.",
   "notice.unstableConnection": "The connection to {0} keeps dropping, so its streams use the Stable latency setting for now. A stronger Wi-Fi signal or USB helps.",
+  "notice.deviceCannotConnect": "A device at {0} keeps trying to connect but doesn't recognise this computer. If it's your phone, pair it again from Devices.",
   "notice.autoMicStarted": "An app is using the virtual microphone, so {0}'s microphone was started.",
   "notice.denoiseSuspended": "Noise suppression turned itself off because this computer couldn't keep up with it. It comes back on by itself once things settle down.",
   "notice.micFeedback": "Your microphone is picking up this computer's speakers and starting to whistle. Use headphones, or turn on “Reduce echo on speakers” in Audio.",

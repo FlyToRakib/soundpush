@@ -243,6 +243,7 @@
     <string name="notice_trust_store_recovered">Paired devices were reset because the stored list was damaged.</string>
     <string name="notice_settings_recovered">Settings were reset because the stored file was damaged.</string>
     <string name="notice_unstable_connection">The connection to %1$s keeps dropping, so its streams use the Stable latency setting for now. A stronger Wi-Fi signal or USB helps.</string>
+    <string name="notice_device_cannot_connect">A device at %1$s keeps trying to connect but doesn\'t recognise this phone. If it\'s your computer, pair it again from Devices.</string>
     <string name="notice_pairing_rate_limited">Too many pairing attempts from %1$s. Pairing from there is paused for a minute.</string>
     <string name="notice_quality_fallback">The connection to %1$s is losing audio, so lossless switched to Opus at 256 kb/s. It goes back on its own once the link is stable.</string>
     <string name="notice_quality_restored">The connection to %1$s is stable again, so lossless audio is back.</string>

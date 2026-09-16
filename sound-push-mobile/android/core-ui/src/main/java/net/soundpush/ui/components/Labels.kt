@@ -72,6 +72,7 @@ object Labels {
         "notice.muteSpeakersUnsupported" -> R.string.notice_mute_speakers_unsupported
         "notice.crashReport" -> R.string.notice_crash_report
         "notice.unstableConnection" -> R.string.notice_unstable_connection
+        "notice.deviceCannotConnect" -> R.string.notice_device_cannot_connect
         "notice.pairingRateLimited" -> R.string.notice_pairing_rate_limited
         "notice.denoiseSuspended" -> R.string.notice_denoise_suspended
         "notice.micFeedback" -> R.string.notice_mic_feedback
