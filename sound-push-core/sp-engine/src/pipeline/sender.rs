@@ -221,27 +221,49 @@ impl Drop for Sender {
     }
 }
 
-/// Take one frame from a mixed source's second capture, zero-padding what it has not produced
-/// yet and dropping any backlog beyond [`MIX_MAX_BACKLOG_FRAMES`], so that part cannot drift
-/// behind the first capture (the two run on their own clocks).
-fn take_frame(input: &mut rtrb::Consumer<f32>, out: &mut [f32]) {
-    let keep = out.len() * MIX_MAX_BACKLOG_FRAMES;
-    if input.slots() > keep {
-        let stale = input.slots() - keep;
-        if let Ok(chunk) = input.read_chunk(stale) {
-            chunk.commit_all();
+/// Reads a mixed source's second capture a frame at a time.
+///
+/// The two captures run on their own clocks, and their callbacks reach the encode thread with
+/// ordinary scheduling jitter: at the moment the first capture's frame is ready, the second is
+/// often a few samples short. Taking whatever happens to be there and padding the rest with
+/// zeros turns that jitter into a gap in the voice every few frames. Instead the reader keeps
+/// [`MIX_PREFILL_FRAMES`] in hand before it starts — about 20 ms, on the microphone half only —
+/// and only ever takes whole frames. If the capture does run dry (it stalled, or its clock is
+/// genuinely slower) it plays one silent frame and fills the cushion again, rather than clicking
+/// on every late callback. Backlog beyond [`MIX_MAX_BACKLOG_FRAMES`] is dropped, so a faster clock
+/// cannot make the microphone drift behind the system audio either.
+#[derive(Debug, Default)]
+struct MixReader {
+    primed: bool,
+}
+
+impl MixReader {
+    fn take(&mut self, input: &mut rtrb::Consumer<f32>, out: &mut [f32]) {
+        let frame = out.len();
+        let keep = frame * MIX_MAX_BACKLOG_FRAMES;
+        if input.slots() > keep {
+            let stale = input.slots() - keep;
+            if let Ok(chunk) = input.read_chunk(stale) {
+                chunk.commit_all();
+            }
+        }
+        let available = input.slots();
+        if (!self.primed && available < frame * MIX_PREFILL_FRAMES) || available < frame {
+            self.primed = false;
+            out.fill(0.0);
+            return;
+        }
+        self.primed = true;
+        match input.read_chunk(frame) {
+            Ok(chunk) => {
+                let (a, b) = chunk.as_slices();
+                out[..a.len()].copy_from_slice(a);
+                out[a.len()..].copy_from_slice(b);
+                chunk.commit_all();
+            }
+            Err(_) => out.fill(0.0),
         }
     }
-    let wanted = out.len().min(input.slots());
-    let mut taken = 0;
-    if let Ok(chunk) = input.read_chunk(wanted) {
-        let (a, b) = chunk.as_slices();
-        out[..a.len()].copy_from_slice(a);
-        out[a.len()..a.len() + b.len()].copy_from_slice(b);
-        chunk.commit_all();
-        taken = wanted;
-    }
-    out[taken..].fill(0.0);
 }
 
 /// A capture callback that writes into `producer`, counting what a full ring had to drop.
@@ -299,6 +321,9 @@ fn refresh_targets(fanout: &Fanout, targets: &mut Vec<Target>) {
 /// A mixed source's second capture may not be exactly in step with the first. More than this
 /// much waiting audio is dropped, so the microphone part cannot drift behind the system audio.
 const MIX_MAX_BACKLOG_FRAMES: usize = 4;
+/// Frames of the second capture held back before the mix takes from it, and again after it has
+/// run dry: enough to ride out the ordinary scheduling jitter between two capture clocks.
+const MIX_PREFILL_FRAMES: usize = 2;
 
 #[allow(clippy::too_many_arguments)]
 fn encode_loop(
@@ -314,6 +339,7 @@ fn encode_loop(
     echo: Option<&EchoReference>,
 ) {
     let mut mix_buf = vec![0.0f32; frame * channels];
+    let mut mix_reader = MixReader::default();
     let mut mix_gain = Gain::new(db_to_gain(controls.mix_gain_db.get()));
     let mut system_gain = Gain::new(db_to_gain(controls.system_gain_db.get()));
     let mut buf = vec![0.0f32; frame * channels];
@@ -379,7 +405,7 @@ fn encode_loop(
 
         // A mixed source (plan §5.1) takes one frame of microphone alongside the system audio.
         let mixing = if let Some(mic) = mix_input.as_mut() {
-            take_frame(mic, &mut mix_buf);
+            mix_reader.take(mic, &mut mix_buf);
             true
         } else {
             false
@@ -689,15 +715,111 @@ mod tests {
         }
     }
 
-    /// Peak of the newest packet, decoded from lossless PCM.
-    fn last_level(c: &Collect) -> f32 {
-        let packet = packets(c).pop().expect("a packet was sent");
+    const FRAME: usize = 480;
+
+    /// A mix ring with room for plenty of frames, and a producer standing in for the capture.
+    fn mix_ring() -> (rtrb::Producer<f32>, rtrb::Consumer<f32>) {
+        rtrb::RingBuffer::new(FRAME * 16)
+    }
+
+    fn push_frames(p: &mut rtrb::Producer<f32>, frames: usize, value: f32) {
+        for _ in 0..frames * FRAME {
+            p.push(value).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_mix_waits_for_a_cushion_and_never_pads_a_frame() {
+        let (mut p, mut c) = mix_ring();
+        let mut reader = MixReader::default();
+        let mut out = vec![1.0f32; FRAME];
+
+        // One frame in hand is not enough to start: silence, and nothing is taken.
+        push_frames(&mut p, 1, 0.5);
+        reader.take(&mut c, &mut out);
+        assert!(out.iter().all(|s| *s == 0.0));
+        assert_eq!(c.slots(), FRAME);
+
+        // With the cushion, whole frames come out.
+        push_frames(&mut p, 1, 0.5);
+        reader.take(&mut c, &mut out);
+        assert!(out.iter().all(|s| *s == 0.5));
+
+        // A partial frame is never mixed with zeros: half a frame short plays a whole silent
+        // frame and leaves the samples for later.
+        let queued = c.slots();
+        let _ = c.read_chunk(queued).map(|chunk| chunk.commit_all());
+        for _ in 0..FRAME / 2 {
+            p.push(0.5).unwrap();
+        }
+        reader.take(&mut c, &mut out);
+        assert!(out.iter().all(|s| *s == 0.0));
+        assert_eq!(c.slots(), FRAME / 2);
+    }
+
+    #[test]
+    fn a_capture_whose_callbacks_do_not_line_up_with_frames_leaves_no_gaps() {
+        let (mut p, mut c) = mix_ring();
+        let mut reader = MixReader::default();
+        let mut out = vec![0.0f32; FRAME];
+        // A real capture delivers the same rate in its own buffer size — 512 samples here against
+        // 480-sample frames — so at the moment a frame is wanted it is often a few samples short.
+        // Starting from an empty ring, as a capture does.
+        const CALLBACK: usize = 512;
+        let mut pushed = 0;
+        let mut gaps = 0;
+        // Scheduling jitter, reproducibly: now and then the capture thread runs a tick late and
+        // delivers what it owes on the next one (never two late ticks running — that is a stall,
+        // not jitter).
+        let mut rng = 0x2545_F491_4F6C_DD1D_u64;
+        let mut was_late = false;
+        for tick in 0..1_000 {
+            rng = rng
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let late = !was_late && (rng >> 33) % 4 == 0;
+            was_late = late;
+            // A callback arrives once its whole buffer has been captured, so the capture is
+            // always up to one callback behind the frames the encoder has asked for.
+            while !late && pushed + CALLBACK <= (tick + 1) * FRAME {
+                for _ in 0..CALLBACK {
+                    p.push(0.5).unwrap();
+                }
+                pushed += CALLBACK;
+            }
+            reader.take(&mut c, &mut out);
+            // The first ticks build the cushion; after that no frame may contain a hole.
+            if tick >= MIX_PREFILL_FRAMES * 2 && out.contains(&0.0) {
+                gaps += 1;
+            }
+        }
+        assert_eq!(gaps, 0, "{gaps} of 1000 frames had a gap");
+    }
+
+    #[test]
+    fn a_faster_capture_clock_cannot_drift_the_mix_behind() {
+        let (mut p, mut c) = mix_ring();
+        let mut reader = MixReader::default();
+        let mut out = vec![0.0f32; FRAME];
+        // Three frames arrive for every one the encode thread takes.
+        for _ in 0..20 {
+            push_frames(&mut p, 3, 0.5);
+            reader.take(&mut c, &mut out);
+            assert!(c.slots() <= FRAME * MIX_MAX_BACKLOG_FRAMES);
+        }
+    }
+
+    /// Peak of the newest packet, decoded from lossless PCM; `None` before the first one.
+    fn last_level(c: &Collect) -> Option<f32> {
+        let packet = packets(c).pop()?;
         assert_eq!(packet.header.codec, Codec::PcmS16Le);
-        packet
-            .payload
-            .chunks_exact(2)
-            .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32_768.0)
-            .fold(0.0f32, |m, s| m.max(s.abs()))
+        Some(
+            packet
+                .payload
+                .chunks_exact(2)
+                .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32_768.0)
+                .fold(0.0f32, |m, s| m.max(s.abs())),
+        )
     }
 
     #[test]
@@ -726,40 +848,47 @@ mod tests {
         });
 
         // Both parts at unity: 0.4 of system audio plus 0.2 of microphone.
-        std::thread::sleep(Duration::from_millis(400));
-        assert!(
-            (last_level(&out) - 0.6).abs() < 0.02,
-            "{}",
-            last_level(&out)
-        );
+        settles_at(&out, 0.6, "both parts at unity");
 
         // −6 dB on the system half alone: about 0.2 + 0.2.
         group_controls.system_gain_db.set(-6.0);
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            (last_level(&out) - 0.4).abs() < 0.02,
-            "{}",
-            last_level(&out)
-        );
+        settles_at(&out, 0.4, "system audio at −6 dB");
 
         // The microphone mute silences its half; the system audio keeps playing.
         group_controls.mix_muted.store(true, Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            (last_level(&out) - 0.2).abs() < 0.02,
-            "{}",
-            last_level(&out)
-        );
+        settles_at(&out, 0.2, "microphone muted");
 
         group_controls.mix_muted.store(false, Ordering::Relaxed);
         group_controls.system_gain_db.set(0.0);
         group_controls.mix_gain_db.set(-20.0);
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            (last_level(&out) - 0.42).abs() < 0.02,
-            "{}",
-            last_level(&out)
-        );
+        settles_at(&out, 0.42, "microphone at −20 dB");
+    }
+
+    /// Wait until the newest packets carry `expected`, then check they keep doing so.
+    ///
+    /// The capture threads here are real threads, so how soon a change reaches a packet depends on
+    /// the machine; a single sample after a fixed sleep fails on a slow CI runner for no reason.
+    /// What must hold is that the level gets there and then stays there: a mix with gaps would
+    /// keep dropping back to the system audio alone, which the second check catches.
+    fn settles_at(out: &Collect, expected: f32, what: &str) {
+        let close = |level: Option<f32>| level.is_some_and(|l| (l - expected).abs() < 0.02);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !close(last_level(out)) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{what}: level never reached {expected}, last {:?}",
+                last_level(out)
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let mut off = 0;
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(10));
+            if !close(last_level(out)) {
+                off += 1;
+            }
+        }
+        assert!(off <= 1, "{what}: {off} of 20 samples left {expected}");
     }
 
     fn packets(c: &Collect) -> Vec<MediaPacket> {
