@@ -2987,7 +2987,18 @@ impl Actor {
                     if let Some(reply) = r.reply.take() {
                         let _ = reply.send(Err(EngineError::Unreachable));
                     }
-                    r.status = RouteStatus::Stopped;
+                    // Requesting or starting when the session went down. One this device asked
+                    // for is paused rather than lost: `resume_routes` asks again on the next
+                    // reconnect, so a link that drops while a stream is still being set up — the
+                    // ordinary case on weak Wi-Fi, where reconnects and route starts overlap —
+                    // still ends with the stream running. A route the peer asked for is its own
+                    // to ask for again.
+                    if r.requested_locally {
+                        r.status = RouteStatus::Paused;
+                        r.paused_at = Some(Instant::now());
+                    } else {
+                        r.status = RouteStatus::Stopped;
+                    }
                 }
             }
         }
@@ -3010,15 +3021,16 @@ impl Actor {
     /// Re-request routes after a reconnect (only the side that originally requested does this),
     /// and routes saved to run again after a restart.
     fn resume_routes(&mut self, peer: DeviceId) {
-        let mut kinds: Vec<RouteKind> = self
-            .routes
-            .iter()
-            .filter(|r| r.peer == peer && r.status == RouteStatus::Paused && r.requested_locally)
-            .map(|r| r.kind)
-            .collect();
-        self.routes.retain(|r| {
-            !(r.peer == peer && r.status == RouteStatus::Paused && r.requested_locally)
-        });
+        // The paused entries are taken out first, or `start_route` would find them and treat the
+        // resume as a no-op. They are kept, though: a start that cannot go through — the peer has
+        // dropped again already, which is exactly what a flapping connection does — puts its
+        // route back as paused, so the next reconnect resumes it instead of losing it.
+        let (paused, rest): (Vec<Route>, Vec<Route>) =
+            std::mem::take(&mut self.routes).into_iter().partition(|r| {
+                r.peer == peer && r.status == RouteStatus::Paused && r.requested_locally
+            });
+        self.routes = rest;
+        let mut kinds: Vec<RouteKind> = paused.iter().map(|r| r.kind).collect();
         let peer_hex = peer.to_hex();
         let resume_all = self.settings.resume_routes_on_start;
         for saved in &self.settings.saved_routes {
@@ -3029,6 +3041,7 @@ impl Actor {
                 kinds.push(saved.kind);
             }
         }
+        let mut paused = paused;
         for kind in kinds {
             let (tx, _rx) = oneshot::channel();
             // Restoring a saved route never takes the virtual microphone from a live one.
@@ -3044,6 +3057,9 @@ impl Actor {
                     .saved_routes
                     .iter()
                     .any(|s| s.matches(&peer_hex, kind) && s.keep);
+            } else if let Some(i) = paused.iter().position(|r| r.kind == kind) {
+                // It could not be started; keep it paused for the next reconnect.
+                self.routes.push(paused.remove(i));
             }
         }
     }

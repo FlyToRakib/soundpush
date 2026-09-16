@@ -62,6 +62,15 @@ impl Actor {
             return;
         };
         let (peer, id, kind, requested_locally) = (r.peer, r.id, r.kind, r.requested_locally);
+        // A route whose session is down is paused, and `resume_routes` starts it again from the
+        // settings as they are then — so the new profile reaches it anyway. Changing it here
+        // would at best talk to a session that cannot hear it, and at worst (a codec change,
+        // which restarts the route) stop a route that cannot be started again until the peer is
+        // back, losing it entirely. This happens in ordinary use: the anti-flap switch to the
+        // Stable profile lands exactly when a connection has just dropped.
+        if !self.sessions.contains_key(&peer) {
+            return;
+        }
         let fallback = r.quality_fallback.is_active();
         let Some(current) = r.profile.clone() else {
             return;
@@ -184,6 +193,10 @@ impl Actor {
         let Some(r) = self.routes.iter().find(|r| r.key() == key) else {
             return;
         };
+        // Stopping a route we cannot start again would lose it; see `reconfigure_route`.
+        if !self.sessions.contains_key(&r.peer) {
+            return;
+        }
         let (peer, kind, keep, requested_locally) =
             (r.peer, r.kind, r.keep_running, r.requested_locally);
         // The quality fallback survives the restart: a new route would ask for lossless again and

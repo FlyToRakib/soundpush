@@ -661,6 +661,81 @@ fn lost_connection_resumes_routes_without_asking_again() {
     wait_for_audio(&recorded, "mic audio after resuming");
 }
 
+/// A connection that drops while a route is still being set up must not lose the route: the
+/// reconnect asks for it again. On weak Wi-Fi a drop lands mid-request often enough that losing
+/// the stream there means never getting it back (plan §8.1, §27.2).
+#[test]
+fn a_route_that_is_still_starting_survives_a_connection_loss() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let (desk_backend, recorded) = recorder();
+    let desk = start(&desk_dir, "Desk", desk_backend);
+    let phone = start(&phone_dir, "Phone", sine());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (desk_id, phone_id) = pair(&rt, &desk, &phone);
+
+    // "Ask" holds the route in WaitingForApproval, which is a moment of setting up that a test
+    // can aim at; a drop during Requesting or Starting is the same code path, but those last
+    // milliseconds.
+    phone
+        .set_permission(
+            desk_id.clone(),
+            sp_engine::PermissionKind::ReceiveMyAudio,
+            sp_engine::Policy::Ask,
+        )
+        .unwrap();
+    let starting = std::thread::spawn({
+        let desk = desk.clone();
+        let phone_id = phone_id.clone();
+        move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(desk.start_route(phone_id, RouteKind::ReceiveSystemAudio, false))
+        }
+    });
+    // The phone asking is proof the desk's route exists and is not running yet.
+    let asked = wait_for(&phone, "the phone is asked", |s| !s.requests.is_empty());
+    let first_request = asked.requests[0].request_id;
+    wait_for(&desk, "the desk is waiting for an answer", |s| {
+        s.routes
+            .iter()
+            .any(|r| r.kind == RouteKind::ReceiveSystemAudio && r.status != RouteStatus::Active)
+    });
+
+    // The connection dies before anyone answers.
+    desk.simulate_connection_loss(phone_id.clone()).unwrap();
+    // The call itself fails — the session went away while it was in flight.
+    let _ = starting.join().unwrap();
+
+    // The desk asks again by itself once the devices are back: the route was not lost. This time
+    // the phone's user says yes, and audio flows.
+    let prompt = wait_for_within(
+        &phone,
+        "the phone is asked again after reconnecting",
+        Duration::from_secs(20),
+        |s| s.requests.iter().any(|r| r.request_id != first_request),
+    );
+    let asked_again = prompt
+        .requests
+        .iter()
+        .find(|r| r.request_id != first_request)
+        .expect("the request the reconnect made");
+    phone
+        .respond_route_request(asked_again.request_id, true, false)
+        .unwrap();
+    wait_for_within(
+        &desk,
+        "the resumed route is running",
+        Duration::from_secs(20),
+        |s| {
+            s.routes
+                .iter()
+                .any(|r| r.kind == RouteKind::ReceiveSystemAudio && r.status == RouteStatus::Active)
+        },
+    );
+    recorded.lock().unwrap().clear();
+    wait_for_audio(&recorded, "audio after the resumed route");
+}
+
 #[test]
 fn one_capture_serves_two_receivers() {
     let dirs: Vec<_> = (0..3).map(|_| tempfile::tempdir().unwrap()).collect();

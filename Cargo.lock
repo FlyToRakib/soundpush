@@ -5221,6 +5221,7 @@ dependencies = [
  "libc",
  "minidump-writer",
  "objc2",
+ "objc2-core-foundation",
  "objc2-foundation",
  "rand 0.8.8",
  "serde",
