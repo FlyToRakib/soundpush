@@ -192,7 +192,7 @@ fn on_menu(app: &AppHandle, id: &str) {
                         RouteKind::ReceiveMicToVirtualMic
                     };
                     tauri::async_runtime::spawn(async move {
-                        if let Err(e) = engine.start_route(target, kind).await {
+                        if let Err(e) = engine.start_route(target, kind, false).await {
                             warn!(error = %e, "could not start a stream from the tray");
                         }
                     });

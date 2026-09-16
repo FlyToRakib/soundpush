@@ -106,7 +106,10 @@ export const engine = {
   usbConnect: (serial: string) => call<void>("usb_connect", { serial }),
 
   // routes
-  startRoute: (deviceId: string, kind: RouteKind) => call<string>("start_route", { deviceId, kind }),
+  /** `replace` takes the virtual microphone from the device feeding it now (plan §8.2); without
+   *  it a second microphone route fails with `error.audio.virtualMicBusy`. */
+  startRoute: (deviceId: string, kind: RouteKind, replace = false) =>
+    call<string>("start_route", { deviceId, kind, replace }),
   stopRoute: (routeId: string) => call<void>("stop_route", { routeId }),
   setRouteVolume: (routeId: string, volume: number) => call<void>("set_route_volume", { routeId, volume }),
   setRouteMuted: (routeId: string, muted: boolean) => call<void>("set_route_muted", { routeId, muted }),
@@ -120,6 +123,8 @@ export const engine = {
   setMicMuted: (muted: boolean) => call<void>("set_mic_muted", { muted }),
   setMicMonitor: (enabled: boolean) => call<void>("set_mic_monitor", { enabled }),
   refreshAudioDevices: () => call<void>("refresh_audio_devices"),
+  /** Play a short tone on the chosen output, to check it is the right device (plan §5.1). */
+  playTestTone: () => call<void>("play_test_tone"),
   virtualMicStatus: () => call<VirtualMicStatus>("virtual_mic_status"),
   installVirtualMic: () => call<void>("install_virtual_mic"),
   uninstallVirtualMic: () => call<void>("uninstall_virtual_mic"),

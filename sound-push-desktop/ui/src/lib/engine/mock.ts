@@ -8,12 +8,12 @@ const auditLog: AuditEntry[] = [
 ];
 
 const settings: Settings = {
-  version: 2,
+  version: 3,
   deviceName: "My PC",
   theme: "system",
   language: "system",
   visibility: "trustedOnly",
-  stream: { latency: "balanced", customMinMs: 30, customMaxMs: 120, quality: "auto", opusBitrate: 128000, redundancy: false },
+  stream: { latency: "balanced", customMinMs: 30, customMaxMs: 120, quality: "auto", opusBitrate: 128000, redundancy: "auto" },
   output: {
     device: null,
     volume: 1,
@@ -29,12 +29,14 @@ const settings: Settings = {
     device: null,
     gainDb: 0,
     noiseSuppression: false,
+    noiseSuppressionAt: "sender",
     mode: "voiceCommunication",
     systemAgc: false,
     systemNoiseSuppression: true,
     systemEchoCancellation: true,
     monitor: false,
     highPass: true,
+    echoDucking: false,
   },
   capture: { systemDevice: null, muteLocalSpeakers: false, app: null, excludeApp: false },
   desktop: {
@@ -117,6 +119,9 @@ let state: EngineState = {
     { id: "Microphone", name: "Microphone", isInput: true, isDefault: true, virtualCable: false },
   ],
   micLevelDb: -120,
+  micClipping: false,
+  micFeedback: false,
+  noiseSuppressionSuspended: false,
   micMuted: false,
   networkTests: [],
 };
@@ -209,6 +214,7 @@ export const mockEngine = {
                 underruns: 0,
                 driftPpm: 12,
                 levelDb: -18,
+                clipping: false,
                 captureMs: 10,
                 encodeMs: 10,
                 networkMs: 2,

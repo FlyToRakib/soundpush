@@ -245,6 +245,7 @@ fn main() {
             commands::set_mic_muted,
             commands::set_mic_monitor,
             commands::refresh_audio_devices,
+            commands::play_test_tone,
             commands::update_settings,
             commands::dismiss_notice,
             commands::get_start_error,

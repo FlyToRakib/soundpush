@@ -197,12 +197,18 @@ pub async fn usb_connect(state: State<'_, AppState>, serial: String) -> CmdResul
 }
 
 #[tauri::command]
+/// `replace` takes the virtual microphone away from the device feeding it now; without it a
+/// second microphone route fails with `error.audio.virtualMicBusy` so the UI can ask first.
 pub async fn start_route(
     state: State<'_, AppState>,
     device_id: String,
     kind: RouteKind,
+    replace: Option<bool>,
 ) -> CmdResult<String> {
-    Ok(state.engine()?.start_route(device_id, kind).await?)
+    Ok(state
+        .engine()?
+        .start_route(device_id, kind, replace.unwrap_or(false))
+        .await?)
 }
 
 #[tauri::command]
@@ -267,6 +273,19 @@ pub fn set_mic_monitor(state: State<'_, AppState>, enabled: bool) -> CmdResult<(
 #[tauri::command]
 pub fn refresh_audio_devices(state: State<'_, AppState>) -> CmdResult<()> {
     Ok(state.engine()?.refresh_audio_devices()?)
+}
+
+/// "Test tone" on the Audio page (plan §5.1): a short chime on the output streams play through,
+/// so the user can tell whether they picked the right device. Uses the same tone generator as the
+/// accessibility cues.
+#[tauri::command]
+pub fn play_test_tone(state: State<'_, AppState>) -> CmdResult<()> {
+    let target = match state.engine()?.state().settings.output.device.clone() {
+        Some(device) => sp_engine::sp_audio_io::RenderTarget::Output(device),
+        None => sp_engine::sp_audio_io::RenderTarget::DefaultOutput,
+    };
+    crate::cues::play_on(state.hooks.backend(), vec![crate::cues::Cue::Test], target);
+    Ok(())
 }
 
 #[tauri::command]

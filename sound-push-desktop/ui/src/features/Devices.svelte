@@ -17,6 +17,7 @@
     Policy,
     QualityMode,
     Recommendation,
+    RedundancyMode,
   } from "../lib/engine/types";
   import { t } from "../lib/i18n";
   import { platformIcon } from "../lib/routes";
@@ -59,9 +60,8 @@
     label: `${b / 1000} kb/s`,
   }));
   const redundancyOptions = $derived([
-    { value: "", label: defaultLabel(t(stream?.redundancy ? "devices.profile.on" : "devices.profile.off")) },
-    { value: "on", label: t("devices.profile.on") },
-    { value: "off", label: t("devices.profile.off") },
+    { value: "", label: defaultLabel(stream ? t(`audio.redundancy.${stream.redundancy}`) : "") },
+    ...(["auto", "on", "off"] as RedundancyMode[]).map((v) => ({ value: v, label: t(`audio.redundancy.${v}`) })),
   ]);
 
   function setProfile(patch: Partial<DeviceProfile>) {
@@ -88,7 +88,9 @@
       latency: rec.latency,
       quality: rec.quality,
       opusBitrate: rec.quality === "opus" ? rec.opusBitrate : undefined,
-      redundancy: rec.redundancy,
+      // The test says whether this link needs redundancy from the start; otherwise leave it
+      // to the automatic behaviour.
+      redundancy: rec.redundancy ? "on" : "auto",
     });
   }
 
@@ -280,10 +282,10 @@
         {/if}
         <SettingRow label={t("devices.profile.redundancy")}>
           <Select
-            value={profile.redundancy === undefined ? "" : profile.redundancy ? "on" : "off"}
+            value={profile.redundancy ?? ""}
             options={redundancyOptions}
             label={t("devices.profile.redundancy")}
-            onchange={(v) => setProfile({ redundancy: v === "" ? undefined : v === "on" })}
+            onchange={(v) => setProfile({ redundancy: v === "" ? undefined : (v as RedundancyMode) })}
           />
         </SettingRow>
       </Card>
