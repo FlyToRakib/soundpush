@@ -29,8 +29,11 @@ class AppAudioCapture private constructor(private val projection: MediaProjectio
         record.startRecording()
         while (running) {
             val n = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-            if (n > 0) SoundPush.direct { pushAppAudioPcm16(if (n == buffer.size) buffer else buffer.copyOf(n)) }
-            else if (n < 0) break
+            if (n > 0) {
+                SoundPush.direct { pushAppAudioPcm16(if (n == buffer.size) buffer else buffer.copyOf(n)) }
+            } else if (n < 0) {
+                break
+            }
         }
         runCatching { record.stop() }
         record.release()
@@ -55,14 +58,17 @@ class AppAudioCapture private constructor(private val projection: MediaProjectio
             val projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull() ?: return null
             var capture: AppAudioCapture? = null
             // Android 14+: the projection may be stopped by the system ("Stop sharing").
-            projection.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    capture?.running = false
-                    SoundPush.state.value?.routes?.filter { it.kind == "sendAppAudio" }?.forEach { r ->
-                        SoundPush.command { stopRoute(r.routeId) }
+            projection.registerCallback(
+                object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        capture?.running = false
+                        SoundPush.state.value?.routes?.filter { it.kind == "sendAppAudio" }?.forEach { r ->
+                            SoundPush.command { stopRoute(r.routeId) }
+                        }
                     }
-                }
-            }, Handler(Looper.getMainLooper()))
+                },
+                Handler(Looper.getMainLooper()),
+            )
 
             val config = AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)

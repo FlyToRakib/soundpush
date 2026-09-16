@@ -2,10 +2,8 @@ package net.soundpush.settings
 
 import android.content.ComponentName
 import android.content.Intent
-import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -42,6 +40,7 @@ import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.theme.Tokens
+import android.provider.Settings as AndroidSettings
 
 /** One runtime permission in Settings → Permissions. [onClick] asks again or leads to app settings. */
 data class PermissionRow(val label: String, val status: String, val needsAction: Boolean, val onClick: () -> Unit)

@@ -49,13 +49,12 @@ object Notifications {
         return PendingIntent.getActivity(context, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    fun serviceAction(context: Context, action: String, code: Int): PendingIntent =
-        PendingIntent.getService(
-            context,
-            code,
-            Intent(context, StreamingService::class.java).setAction(action),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+    fun serviceAction(context: Context, action: String, code: Int): PendingIntent = PendingIntent.getService(
+        context,
+        code,
+        Intent(context, StreamingService::class.java).setAction(action),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     /**
      * The foreground-service notification. While this phone plays audio it is a media notification

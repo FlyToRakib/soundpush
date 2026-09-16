@@ -29,8 +29,13 @@ desktop-build:
     cd sound-push-desktop && ./ui/node_modules/.bin/tauri build
 
 desktop-check:
+    npm --prefix sound-push-desktop/ui run lint
     npm --prefix sound-push-desktop/ui run check
     npm --prefix sound-push-desktop/ui run build
+
+# Rewrite the formatting differences `desktop-check` reports.
+desktop-format:
+    npm --prefix sound-push-desktop/ui run format
 
 # Mobile -------------------------------------------------------------------
 
@@ -47,6 +52,24 @@ mobile-build: mobile-bindings mobile-native
 
 mobile-install: mobile-build
     adb install -r sound-push-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+
+# The Android quality gate CI runs: build, App Bundle, unit tests, Android lint, Kotlin style.
+mobile-check:
+    cd sound-push-mobile/android && ./gradlew assembleDebug bundleDebug testDebugUnitTest lint ktlintCheck --console=plain
+
+# Fix the Kotlin style violations ktlint can fix by itself.
+mobile-format:
+    cd sound-push-mobile/android && ./gradlew ktlintFormat
+
+# Rewrite gradle/verification-metadata.xml after a dependency changes (§31). Afterwards, add back the
+# aapt2 entries for the operating systems this machine is not: AGP picks aapt2 by OS, so a file
+# generated on one machine misses the others. The entries in the file say where they came from.
+mobile-verification:
+    cd sound-push-mobile/android && ./gradlew --write-verification-metadata sha256 assembleDebug bundleDebug assembleRelease bundleRelease testDebugUnitTest lint ktlintCheck :benchmark:assembleBenchmark
+
+# Startup and jank measurements against a connected phone (adb devices) or a running emulator.
+mobile-benchmark:
+    cd sound-push-mobile/android && ./gradlew :benchmark:connectedBenchmarkAndroidTest --console=plain
 
 # Tools --------------------------------------------------------------------
 

@@ -18,6 +18,14 @@ androidxTestExt = "1.2.1"
 media = "1.7.0"
 appcompat = "1.7.1"
 aboutlibraries = "12.2.4"
+# Kotlin style gate (plan §29.3): ktlintPlugin is the Gradle wrapper, ktlint the engine it drives.
+ktlintPlugin = "13.1.0"
+ktlint = "1.5.0"
+# Startup Macrobenchmark (plan §29.1 "Android UI"), run on a device or emulator.
+benchmark = "1.4.1"
+espresso = "3.6.1"
+testRunner = "1.6.2"
+uiautomator = "2.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -51,11 +59,17 @@ compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-mani
 # Accessibility Test Framework checks for Compose UI tests (enableAccessibilityChecks).
 compose-ui-test-junit4-accessibility = { group = "androidx.compose.ui", name = "ui-test-junit4-accessibility" }
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExt" }
+benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "testRunner" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
+android-test = { id = "com.android.test", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 aboutlibraries = { id = "com.mikepenz.aboutlibraries.plugin", version.ref = "aboutlibraries" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintPlugin" }

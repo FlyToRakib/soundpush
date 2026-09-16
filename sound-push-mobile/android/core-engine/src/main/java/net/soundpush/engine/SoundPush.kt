@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.provider.Settings as AndroidSettings
 import android.util.Log
 import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.core.content.ContextCompat
@@ -23,6 +22,7 @@ import uniffi.soundpush_ffi.FfiException
 import uniffi.soundpush_ffi.MobilePlatform
 import uniffi.soundpush_ffi.SoundPushEngine
 import uniffi.soundpush_ffi.StateListener
+import android.provider.Settings as AndroidSettings
 
 /** Callbacks the app shell provides (foreground service, attention notifications). */
 interface PlatformDelegate {
@@ -38,24 +38,29 @@ object SoundPush {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow<EngineState?>(null)
     private val _errors = MutableSharedFlow<ErrorView>(extraBufferCapacity = 8)
+
     @Volatile private var delegate: PlatformDelegate? = null
 
     private val _startError = MutableStateFlow<String?>(null)
 
     val state: StateFlow<EngineState?> = _state
     val errors: SharedFlow<ErrorView> = _errors
+
     /** Set when the engine could not start; the UI shows it instead of a blank screen. */
     val startError: StateFlow<String?> = _startError
     val isStarted get() = ::engine.isInitialized
 
     @Volatile private var appVersion: String = ""
+
     /** Last playback path handed to the native backend (null until the first state). */
     @Volatile private var platformOutput: Boolean? = null
 
     /** False while nothing can see the UI: the app is in the background, or the screen is off. */
-    private val _uiLive = MutableStateFlow(true)
+    private val uiLive = MutableStateFlow(true)
+
     /** The newest snapshot from the engine, still as JSON. Conflated: only the latest is decoded. */
     private val rawState = MutableStateFlow<String?>(null)
+
     /** A stats-only snapshot held back while the UI was hidden; published when it comes back. */
     @Volatile private var held: EngineState? = null
 
@@ -81,7 +86,8 @@ object SoundPush {
      */
     @Synchronized
     private fun applyPlatformOutput(state: EngineState) {
-        val wanted = state.settings.output.compatibilityOutput || state.settings.output.outputEffects ||
+        val wanted = state.settings.output.compatibilityOutput ||
+            state.settings.output.outputEffects ||
             OutputPreference.target.value != OutputPreference.Target.Automatic
         if (platformOutput == wanted) return
         platformOutput = wanted
@@ -148,14 +154,14 @@ object SoundPush {
                 .onSuccess(::publish)
                 .onFailure { log(LogLevel.Error, TAG, "could not decode engine state", it) }
             // [rawState] keeps only the newest snapshot, so the wait costs nothing but the wait.
-            if (!_uiLive.value) withTimeoutOrNull(BACKGROUND_INTERVAL_MS) { _uiLive.first { it } }
+            if (!uiLive.value) withTimeoutOrNull(BACKGROUND_INTERVAL_MS) { uiLive.first { it } }
         }
     }
 
     @Synchronized
     private fun publish(next: EngineState) {
         val last = _state.value
-        if (!_uiLive.value && last != null && StateUpdates.onlyLiveNumbersChanged(last, next)) {
+        if (!uiLive.value && last != null && StateUpdates.onlyLiveNumbersChanged(last, next)) {
             held = next
             return
         }
@@ -169,8 +175,8 @@ object SoundPush {
      * goes to the back, and when the screen turns on or off.
      */
     fun setUiLive(live: Boolean) {
-        if (_uiLive.value == live) return
-        _uiLive.value = live
+        if (uiLive.value == live) return
+        uiLive.value = live
         // Whatever was held back while the screen was off is worth showing again.
         if (live) scope.launch { held?.let(::publish) }
     }
@@ -213,8 +219,7 @@ object SoundPush {
     fun <T> direct(block: SoundPushEngine.() -> T): T? = if (isStarted) runCatching { engine.block() }.getOrNull() else null
 
     /** The local security log, newest first. Blocking: call off the main thread. Null if the engine isn't running. */
-    fun securityLog(): List<AuditEntry>? =
-        direct { auditLogJson() }?.let { json -> runCatching { EngineJson.decodeFromString<List<AuditEntry>>(json) }.getOrNull() }
+    fun securityLog(): List<AuditEntry>? = direct { auditLogJson() }?.let { json -> runCatching { EngineJson.decodeFromString<List<AuditEntry>>(json) }.getOrNull() }
 
     /** Delete the security log (a "log cleared" entry remains). Blocking: call off the main thread. */
     fun clearSecurityLog(): Boolean = direct { clearAuditLog() } != null
@@ -230,14 +235,12 @@ object SoundPush {
 
         override fun storageKey(): ByteArray = StorageKey.get(context)
 
-        override fun deviceName(): String =
-            AndroidSettings.Global.getString(context.contentResolver, AndroidSettings.Global.DEVICE_NAME)
-                ?.takeIf { it.isNotBlank() }
-                ?: "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
+        override fun deviceName(): String = AndroidSettings.Global.getString(context.contentResolver, AndroidSettings.Global.DEVICE_NAME)
+            ?.takeIf { it.isNotBlank() }
+            ?: "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
 
-        override fun microphonePermitted(): Boolean =
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
+        override fun microphonePermitted(): Boolean = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
 
         @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.Q)
         override fun appAudioSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q

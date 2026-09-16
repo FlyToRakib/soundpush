@@ -7,14 +7,14 @@ import android.net.Uri
 import android.os.Build
 import android.os.Process
 import androidx.core.content.FileProvider
-import java.io.File
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineJson
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.SoundPush
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * Diagnostics bundle, like the desktop's export: app/OS/device info, the engine state with remote

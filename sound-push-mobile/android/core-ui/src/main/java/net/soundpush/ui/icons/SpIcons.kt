@@ -40,6 +40,7 @@ object SpIcons {
             "M9.5 21v-5a2.5 2.5 0 0 1 5 0v5",
         )
     }
+
     /** A computer screen with a phone in front of it. */
     val Devices by lazy {
         icon(

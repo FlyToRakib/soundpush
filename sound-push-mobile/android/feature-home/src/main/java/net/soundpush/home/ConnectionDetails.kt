@@ -13,13 +13,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlin.math.roundToInt
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.PeerView
 import net.soundpush.engine.RouteView
 import net.soundpush.ui.R
 import net.soundpush.ui.components.Labels
 import net.soundpush.ui.theme.Tokens
+import kotlin.math.roundToInt
 
 /**
  * "Connection details" (plan §23.3): the same numbers as the desktop's route card (codec, latency,

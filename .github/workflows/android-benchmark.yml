@@ -1,0 +1,90 @@
+# Startup and jank measurements (docs/soundpush-final.md §29.1 "Android UI", §22.1 budgets).
+#
+# Not part of the pull-request gate: a Macrobenchmark needs a booted device, and an emulator on a
+# shared runner takes about fifteen minutes and produces numbers too noisy to gate on. It runs
+# nightly and on demand instead, and the numbers it prints are compared over time rather than to a
+# threshold. See docs/testing-guide.md for how to run it against a real phone, which is the number
+# that counts.
+name: Android benchmark
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 03:20 UTC, after the nightly fuzzing run.
+    - cron: "20 3 * * *"
+
+concurrency:
+  group: android-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  startup:
+    name: Startup (API ${{ matrix.api }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest version the app supports and a current one.
+        api: [26, 34]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-benchmark
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager "ndk;27.2.12479018"
+      - run: cargo install cargo-ndk --locked
+      - name: Host audio libraries for the binding build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+      - name: Kotlin bindings and native library
+        run: |
+          cargo build -p sp-ffi
+          rm -rf sound-push-mobile/android/core-engine/src/main/java/uniffi
+          cargo run -q -p sp-ffi --bin uniffi-bindgen -- generate --library target/debug/libsoundpush_ffi.so --language kotlin --out-dir sound-push-mobile/android/core-engine/src/main/java --no-format
+          ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018 cargo ndk -t x86_64 --platform 26 -o sound-push-mobile/android/core-engine/src/main/jniLibs build -p sp-ffi --release
+      # KVM makes the emulator usable; without it the run times out.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the benchmark
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          working-directory: sound-push-mobile/android
+          # An emulator is not a phone: the measurements are indicative, so the usual refusal to
+          # benchmark on one is suppressed and the numbers are read as a trend, not a verdict.
+          script: >
+            ./gradlew :benchmark:connectedBenchmarkAndroidTest --console=plain
+            -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR,LOW-BATTERY,UNLOCKED
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-api-${{ matrix.api }}
+          path: sound-push-mobile/android/benchmark/build/outputs/connected_android_test_additional_output
+          if-no-files-found: ignore

@@ -3,7 +3,6 @@ package net.soundpush.audio
 import android.media.AudioManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -17,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import kotlin.math.roundToInt
 import net.soundpush.engine.AudioEffects
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
@@ -33,6 +31,7 @@ import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.rememberFormat
 import net.soundpush.ui.theme.Tokens
+import kotlin.math.roundToInt
 
 @Composable
 fun AudioScreen(state: EngineState) {

@@ -1,13 +1,13 @@
 package net.soundpush.settings
 
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import net.soundpush.engine.Caches
+import java.net.HttpURLConnection
+import java.net.URL
 
 /** Public project pages the app links to (opened in the browser). */
 internal object ProjectLinks {

@@ -19,14 +19,14 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 /**
  * What the phone's audio output, network, screen and power look like right now, for hints
@@ -72,19 +72,25 @@ object DeviceStatus {
     private val _onPower = MutableStateFlow(false)
     private val _micSilenced = MutableStateFlow(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /** Always the application context (set in [start]), which lives as long as the process: no leak. */
     @SuppressLint("StaticFieldLeak")
-    @Volatile private var app: Context? = null
+    @Volatile
+    private var app: Context? = null
 
     /** Where media audio plays now. */
     val output: StateFlow<Output> = _output
     val network: StateFlow<NetworkInfo> = _network
+
     /** Output latency measured by the platform player (compatibility output); 0 when unknown. */
     val outputLatencyMs: StateFlow<Int> = _outputLatencyMs
+
     /** Whether the screen is on. True until [start] has run, so nothing is throttled by mistake. */
     val screenOn: StateFlow<Boolean> = _screenOn
+
     /** Whether the phone is charging (a charger, or the computer's USB port). */
     val onPower: StateFlow<Boolean> = _onPower
+
     /**
      * Whether Android is giving this app silence because another app holds the microphone
      * (a call, a voice assistant). Android 10+ only; always false below that, where capture is
@@ -104,10 +110,13 @@ object DeviceStatus {
         app = ctx
         val main = Handler(Looper.getMainLooper())
         ctx.getSystemService(AudioManager::class.java)?.let { am ->
-            am.registerAudioDeviceCallback(object : AudioDeviceCallback() {
-                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refreshOutput(am)
-                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = refreshOutput(am)
-            }, main)
+            am.registerAudioDeviceCallback(
+                object : AudioDeviceCallback() {
+                    override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refreshOutput(am)
+                    override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = refreshOutput(am)
+                },
+                main,
+            )
             refreshOutput(am)
             watchRecording(am, main)
         }

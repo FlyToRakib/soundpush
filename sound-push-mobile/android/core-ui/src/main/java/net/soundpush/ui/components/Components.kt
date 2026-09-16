@@ -130,14 +130,7 @@ fun IconTile(icon: ImageVector, active: Boolean = true, filled: Boolean = false)
  * "Active" badge in place of the chevron, so the running task is obvious in the list.
  */
 @Composable
-fun TaskCard(
-    title: String,
-    description: String,
-    icon: ImageVector,
-    enabled: Boolean,
-    active: Boolean = false,
-    onClick: () -> Unit,
-) {
+fun TaskCard(title: String, description: String, icon: ImageVector, enabled: Boolean, active: Boolean = false, onClick: () -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     val muted = !enabled && !active
     val stateText = when {
@@ -214,13 +207,7 @@ fun spSwitchColors() = SwitchDefaults.colors(
 
 /** A full-row switch: the whole row is the touch target and is announced as one switch. */
 @Composable
-fun SettingSwitch(
-    label: String,
-    checked: Boolean,
-    description: String? = null,
-    enabled: Boolean = true,
-    onChange: (Boolean) -> Unit,
-) {
+fun SettingSwitch(label: String, checked: Boolean, description: String? = null, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()

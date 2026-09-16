@@ -22,8 +22,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
-import java.text.DateFormat
-import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,6 +30,8 @@ import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
 import net.soundpush.ui.components.Labels
 import net.soundpush.ui.theme.Tokens
+import java.text.DateFormat
+import java.util.Date
 
 /** The local security log (pairing, permission changes, streams, refused connections), newest first. */
 @Composable

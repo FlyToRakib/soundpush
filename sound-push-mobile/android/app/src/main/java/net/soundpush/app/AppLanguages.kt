@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
-import java.util.Locale
 import org.xmlpull.v1.XmlPullParser
+import java.util.Locale
 
 /**
  * In-app language (plan §4.6: "System language" by default, plus the translations this build has).
@@ -28,16 +28,15 @@ internal object AppLanguages {
         return (tags + if (debuggable) PSEUDO else emptyList()).distinct()
     }
 
-    private fun parseLocaleConfig(context: Context): List<String> =
-        context.resources.getXml(R.xml._generated_res_locale_config).use { parser ->
-            buildList {
-                while (parser.next() != XmlPullParser.END_DOCUMENT) {
-                    if (parser.eventType == XmlPullParser.START_TAG && parser.name == "locale") {
-                        parser.getAttributeValue(ANDROID_NS, "name")?.let(::add)
-                    }
+    private fun parseLocaleConfig(context: Context): List<String> = context.resources.getXml(R.xml._generated_res_locale_config).use { parser ->
+        buildList {
+            while (parser.next() != XmlPullParser.END_DOCUMENT) {
+                if (parser.eventType == XmlPullParser.START_TAG && parser.name == "locale") {
+                    parser.getAttributeValue(ANDROID_NS, "name")?.let(::add)
                 }
             }
         }
+    }
 
     /** The language in use: a BCP-47 tag, or [SYSTEM] while the app follows the phone. */
     fun current(): String = AppCompatDelegate.getApplicationLocales().toLanguageTags().ifEmpty { SYSTEM }

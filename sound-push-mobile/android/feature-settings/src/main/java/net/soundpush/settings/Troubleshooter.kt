@@ -7,7 +7,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.os.Build
-import android.provider.Settings as AndroidSettings
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -52,13 +51,15 @@ import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.LocalSpColors
 import net.soundpush.ui.theme.Tokens
+import android.provider.Settings as AndroidSettings
 
 /** The problems the guided troubleshooter covers; [key] is the navigation argument. */
 enum class TroubleTopic(val key: String, @param:StringRes val title: Int) {
     FindComputer("find", R.string.trouble_find),
     NoAudio("audio", R.string.trouble_no_audio),
     Microphone("mic", R.string.trouble_mic),
-    Disconnects("background", R.string.trouble_disconnects);
+    Disconnects("background", R.string.trouble_disconnects),
+    ;
 
     companion object {
         fun from(key: String?) = entries.firstOrNull { it.key == key }

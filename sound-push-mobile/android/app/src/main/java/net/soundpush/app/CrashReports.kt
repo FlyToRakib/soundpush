@@ -75,8 +75,7 @@ object CrashReports {
         }
     }
 
-    private fun exitRecords(context: Context): List<Pair<Long, String>> =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) exitRecordsR(context) else emptyList()
+    private fun exitRecords(context: Context): List<Pair<Long, String>> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) exitRecordsR(context) else emptyList()
 
     @RequiresApi(Build.VERSION_CODES.R)
     private fun exitRecordsR(context: Context): List<Pair<Long, String>> {

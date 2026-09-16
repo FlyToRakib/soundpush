@@ -41,5 +41,4 @@ val ReadableWidth = 720.dp
  * Fills the space but lays the content out in a centred column no wider than [ReadableWidth].
  * On phones the window is narrower than that, so nothing changes.
  */
-fun Modifier.readableWidth(): Modifier =
-    fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = ReadableWidth)
+fun Modifier.readableWidth(): Modifier = fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = ReadableWidth)

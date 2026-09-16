@@ -25,8 +25,11 @@ class MicCapture private constructor(private val record: AudioRecord, private va
         record.startRecording()
         while (running) {
             val n = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-            if (n > 0) SoundPush.direct { pushMicPcm16(if (n == buffer.size) buffer else buffer.copyOf(n)) }
-            else if (n < 0) break
+            if (n > 0) {
+                SoundPush.direct { pushMicPcm16(if (n == buffer.size) buffer else buffer.copyOf(n)) }
+            } else if (n < 0) {
+                break
+            }
         }
         runCatching { record.stop() }
         effects.forEach { runCatching { it.release() } }
@@ -61,13 +64,22 @@ class MicCapture private constructor(private val record: AudioRecord, private va
             val session = record.audioSessionId
             val effects = buildList {
                 if (AcousticEchoCanceler.isAvailable()) {
-                    AcousticEchoCanceler.create(session)?.also { it.enabled = settings.systemEchoCancellation; add(it) }
+                    AcousticEchoCanceler.create(session)?.also {
+                        it.enabled = settings.systemEchoCancellation
+                        add(it)
+                    }
                 }
                 if (NoiseSuppressor.isAvailable()) {
-                    NoiseSuppressor.create(session)?.also { it.enabled = settings.systemNoiseSuppression; add(it) }
+                    NoiseSuppressor.create(session)?.also {
+                        it.enabled = settings.systemNoiseSuppression
+                        add(it)
+                    }
                 }
                 if (AutomaticGainControl.isAvailable()) {
-                    AutomaticGainControl.create(session)?.also { it.enabled = settings.systemAgc; add(it) }
+                    AutomaticGainControl.create(session)?.also {
+                        it.enabled = settings.systemAgc
+                        add(it)
+                    }
                 }
             }
             return MicCapture(record, effects)

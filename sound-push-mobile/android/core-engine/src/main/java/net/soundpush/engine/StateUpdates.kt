@@ -9,8 +9,7 @@ package net.soundpush.engine
  */
 internal object StateUpdates {
     /** True when [next] differs from [last] only in numbers nobody can currently see. */
-    fun onlyLiveNumbersChanged(last: EngineState, next: EngineState): Boolean =
-        last != next && settled(last) == settled(next)
+    fun onlyLiveNumbersChanged(last: EngineState, next: EngineState): Boolean = last != next && settled(last) == settled(next)
 
     /** [state] with those numbers reset, so two snapshots can be compared on everything else. */
     fun settled(state: EngineState): EngineState = state.copy(

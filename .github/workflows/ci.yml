@@ -55,6 +55,7 @@ jobs:
       - run: cargo test --workspace --exclude sound-push-desktop
       # sp-audio-io/tests/pulse_server.rs: speaker muting, per-app capture and device events against a real
       # PulseAudio server. The tests are #[ignore]d without a server and share it, so run them one at a time.
+      # The same tests run against PipeWire in the "Audio backend" job.
       - name: PulseAudio server tests
         if: runner.os == 'Linux'
         run: |
@@ -64,6 +65,49 @@ jobs:
           pactl info
           cargo test -p sp-audio-io --features pulse --test pulse_server -- --ignored --test-threads=1
 
+  # Backend integration (docs/soundpush-final.md §29.1): the audio backends against the real sound
+  # system, not the null backend. PulseAudio has its own step in the Core job above.
+  backends:
+    name: Audio backend (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, backend: PipeWire }
+          - { os: windows-latest, backend: WASAPI }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: backends-${{ matrix.backend }}
+      # PipeWire is what every current desktop Linux ships; SoundPush reaches it through its
+      # PulseAudio server, so the PulseAudio tests are the right ones to run against it. Runners have
+      # no session, so the daemons are started by hand with a runtime directory and a session bus.
+      - name: PipeWire server tests
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libpulse-dev pkg-config dbus-x11 \
+            pipewire pipewire-pulse wireplumber pulseaudio-utils
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          eval "$(dbus-launch --sh-syntax)"
+          pipewire & pipewire-pulse & wireplumber &
+          for _ in $(seq 60); do pactl info >/dev/null 2>&1 && break; sleep 0.5; done
+          pactl info | tee "$RUNNER_TEMP/pactl.txt"
+          grep -qi pipewire "$RUNNER_TEMP/pactl.txt"
+          cargo test -p sp-audio-io --features pulse --test pulse_server -- --ignored --test-threads=1
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}/xdg
+      # WASAPI enumeration, render and system-audio loopback. A Windows Server runner has no audio
+      # endpoint, so the tests that need one say why they stopped and pass; the rest still run.
+      - name: WASAPI smoke test
+        if: runner.os == 'Windows'
+        run: cargo test -p sp-audio-io --test wasapi_smoke -- --nocapture --test-threads=1
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -72,8 +116,8 @@ jobs:
       # Code that only runs against real hardware or a real network (cpal devices, mDNS sockets) is excluded
       # from the gate; the engine and FFI are reported but not gated yet.
       CORE_MIN_LINES: 80
-      CORE_IGNORE: "sp-engine/|sp-ffi/|sp-audio-io/|tools/|sp-discovery/src/(mdns|service)\\.rs"
-      ENGINE_IGNORE: "sp-(protocol|security|media|transport|discovery|ffi|audio-io)/|tools/"
+      CORE_IGNORE: "sp-engine/|sp-ffi/|sp-audio-io/|sp-testkit/|tools/|sp-discovery/src/(mdns|service)\\.rs"
+      ENGINE_IGNORE: "sp-(protocol|security|media|transport|discovery|ffi|audio-io|testkit)/|tools/"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -90,7 +134,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libpulse-dev pkg-config
       - name: Tests with coverage
-        run: cargo llvm-cov --workspace --exclude sound-push-desktop --exclude soundpush-soak --no-report
+        run: |
+          cargo llvm-cov --workspace --no-report \
+            --exclude sound-push-desktop --exclude soundpush-soak \
+            --exclude soundpush-netsim --exclude soundpush-latency-probe
       - name: Reports (lcov, HTML, job summary)
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
@@ -179,6 +226,8 @@ jobs:
           cache-dependency-path: sound-push-desktop/ui/package-lock.json
       - run: node design/scripts/generate.mjs
       - run: npm --prefix sound-push-desktop/ui ci
+      # §29.3: eslint and prettier alongside svelte-check. `npm run format` fixes what it reports.
+      - run: npm --prefix sound-push-desktop/ui run lint
       - run: npm --prefix sound-push-desktop/ui run check
       - run: npm --prefix sound-push-desktop/ui test
       - run: npm --prefix sound-push-desktop/ui run build
@@ -223,5 +272,17 @@ jobs:
           cargo build -p sp-ffi
           cargo run -q -p sp-ffi --bin uniffi-bindgen -- generate --library target/debug/libsoundpush_ffi.so --language kotlin --out-dir sound-push-mobile/android/core-engine/src/main/java --no-format
           ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 26 -o sound-push-mobile/android/core-engine/src/main/jniLibs build -p sp-ffi --release
-      - run: ./gradlew assembleDebug testDebugUnitTest lint --console=plain
+      # §29.3: ktlint alongside the Android lint and the unit tests. `bundleDebug` proves the App
+      # Bundle the release workflow ships still builds. Gradle verifies every dependency against
+      # gradle/verification-metadata.xml on the way (§31); `just mobile-verification` regenerates it.
+      - name: Build, test and lint
         working-directory: sound-push-mobile/android
+        run: ./gradlew assembleDebug bundleDebug testDebugUnitTest lint ktlintCheck --console=plain
+      - name: Reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            sound-push-mobile/android/*/build/reports
+          if-no-files-found: ignore
