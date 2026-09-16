@@ -40,7 +40,8 @@
   );
   const isMac = $derived(app.local.platform === "macos");
   const bluetoothOutput = $derived(
-    platform.system !== null && isBluetoothOutput(s.output.device, platform.system.defaultOutput, platform.system.bluetoothOutputs),
+    platform.system !== null &&
+      isBluetoothOutput(s.output.device, platform.system.defaultOutput, platform.system.bluetoothOutputs),
   );
   const micPermission = $derived(platform.system?.microphone ?? "unknown");
 
@@ -158,17 +159,34 @@
     <Segmented
       value={s.stream.latency}
       label={t("audio.latency")}
-      options={(["lowLatency", "balanced", "stable", "custom"] as LatencyMode[]).map((v) => ({ value: v, label: t(`latency.${v}`) }))}
+      options={(["lowLatency", "balanced", "stable", "custom"] as LatencyMode[]).map((v) => ({
+        value: v,
+        label: t(`latency.${v}`),
+      }))}
       onchange={(v) => updateSettings((x) => (x.stream.latency = v))}
     />
     {#if s.stream.latency === "custom"}
       <SettingRow label={t("latency.min")}>
-        <Slider value={s.stream.customMinMs} min={5} max={500} step={5} label={t("latency.min")} format={(v) => `${v} ms`}
-          onchange={(v) => updateSettings((x) => (x.stream.customMinMs = v))} />
+        <Slider
+          value={s.stream.customMinMs}
+          min={5}
+          max={500}
+          step={5}
+          label={t("latency.min")}
+          format={(v) => `${v} ms`}
+          onchange={(v) => updateSettings((x) => (x.stream.customMinMs = v))}
+        />
       </SettingRow>
       <SettingRow label={t("latency.max")}>
-        <Slider value={s.stream.customMaxMs} min={s.stream.customMinMs} max={1000} step={5} label={t("latency.max")} format={(v) => `${v} ms`}
-          onchange={(v) => updateSettings((x) => (x.stream.customMaxMs = v))} />
+        <Slider
+          value={s.stream.customMaxMs}
+          min={s.stream.customMinMs}
+          max={1000}
+          step={5}
+          label={t("latency.max")}
+          format={(v) => `${v} ms`}
+          onchange={(v) => updateSettings((x) => (x.stream.customMaxMs = v))}
+        />
       </SettingRow>
     {/if}
     <SettingRow label={t("audio.quality")}>
@@ -181,8 +199,12 @@
     </SettingRow>
     {#if s.stream.quality === "opus"}
       <SettingRow label={t("quality.bitrate")}>
-        <Select value={String(s.stream.opusBitrate)} label={t("quality.bitrate")} options={bitrates}
-          onchange={(v) => updateSettings((x) => (x.stream.opusBitrate = Number(v)))} />
+        <Select
+          value={String(s.stream.opusBitrate)}
+          label={t("quality.bitrate")}
+          options={bitrates}
+          onchange={(v) => updateSettings((x) => (x.stream.opusBitrate = Number(v)))}
+        />
       </SettingRow>
     {/if}
   </Card>
@@ -191,7 +213,10 @@
     {#if ignoredVm}
       <Banner
         severity="warning"
-        message={t(app.audioDevices.some((d) => d.id === ignoredVm) ? "audio.virtualMic.notCable" : "audio.virtualMic.notFound", ignoredVm)}
+        message={t(
+          app.audioDevices.some((d) => d.id === ignoredVm) ? "audio.virtualMic.notCable" : "audio.virtualMic.notFound",
+          ignoredVm,
+        )}
         actionLabel={t("audio.virtualMic.useAuto")}
         onaction={() => updateSettings((x) => (x.desktop.virtualMicDevice = null))}
       />
@@ -231,7 +256,8 @@
       <div class="vm-setup">
         <p class="muted">{t("audio.virtualMic.missing", cable.name)}</p>
         <div class="row">
-          <Button variant="primary" onclick={() => run(engine.openUrl(cable.url))}>{t("audio.virtualMic.get", cable.name)}</Button>
+          <Button variant="primary" onclick={() => run(engine.openUrl(cable.url))}>{t("audio.virtualMic.get", cable.name)}</Button
+          >
           <Button onclick={() => run(engine.refreshAudioDevices())}>{t("audio.virtualMic.recheck")}</Button>
         </div>
       </div>
@@ -245,8 +271,11 @@
       />
     </SettingRow>
     <SettingRow label={t("audio.virtualMic.autoStart")} description={t("audio.virtualMic.autoStart.desc")}>
-      <Toggle checked={s.desktop.autoStartMic} label={t("audio.virtualMic.autoStart")}
-        onchange={(v) => updateSettings((x) => (x.desktop.autoStartMic = v))} />
+      <Toggle
+        checked={s.desktop.autoStartMic}
+        label={t("audio.virtualMic.autoStart")}
+        onchange={(v) => updateSettings((x) => (x.desktop.autoStartMic = v))}
+      />
     </SettingRow>
   </Card>
 
@@ -254,8 +283,12 @@
     {#if apps?.supported}
       <SettingRow label={t("audio.apps")} description={t("audio.apps.desc")}>
         <Button variant="ghost" onclick={loadApps}>{t("audio.apps.refresh")}</Button>
-        <Select value={s.capture.app ?? ALL_APPS} label={t("audio.apps")} options={appOptions}
-          onchange={(v) => updateSettings((x) => (x.capture.app = v === ALL_APPS ? null : v))} />
+        <Select
+          value={s.capture.app ?? ALL_APPS}
+          label={t("audio.apps")}
+          options={appOptions}
+          onchange={(v) => updateSettings((x) => (x.capture.app = v === ALL_APPS ? null : v))}
+        />
       </SettingRow>
       {#if s.capture.app}
         <SettingRow label={t("audio.apps.mode")}>
@@ -273,13 +306,20 @@
     {/if}
     {#if !s.capture.app}
       <SettingRow label={t("audio.systemSource")}>
-        <Select value={s.capture.systemDevice ?? DEFAULT} label={t("audio.systemSource")} options={sourceOptions}
-          onchange={(v) => updateSettings((x) => (x.capture.systemDevice = fromSelect(v)))} />
+        <Select
+          value={s.capture.systemDevice ?? DEFAULT}
+          label={t("audio.systemSource")}
+          options={sourceOptions}
+          onchange={(v) => updateSettings((x) => (x.capture.systemDevice = fromSelect(v)))}
+        />
       </SettingRow>
     {/if}
     <SettingRow label={t("audio.muteLocal")}>
-      <Toggle checked={s.capture.muteLocalSpeakers} label={t("audio.muteLocal")}
-        onchange={(v) => updateSettings((x) => (x.capture.muteLocalSpeakers = v))} />
+      <Toggle
+        checked={s.capture.muteLocalSpeakers}
+        label={t("audio.muteLocal")}
+        onchange={(v) => updateSettings((x) => (x.capture.muteLocalSpeakers = v))}
+      />
     </SettingRow>
   </Card>
 
@@ -303,20 +343,37 @@
       />
     {/if}
     <SettingRow label={t("audio.micDevice")}>
-      <Select value={s.mic.device ?? DEFAULT} label={t("audio.micDevice")} options={inputs}
-        onchange={(v) => updateSettings((x) => (x.mic.device = fromSelect(v)))} />
+      <Select
+        value={s.mic.device ?? DEFAULT}
+        label={t("audio.micDevice")}
+        options={inputs}
+        onchange={(v) => updateSettings((x) => (x.mic.device = fromSelect(v)))}
+      />
     </SettingRow>
     <SettingRow label={t("audio.gain")}>
-      <Slider value={s.mic.gainDb} min={0} max={20} step={1} label={t("audio.gain")} format={(v) => `+${v} dB`}
-        onchange={(v) => updateSettings((x) => (x.mic.gainDb = v))} />
+      <Slider
+        value={s.mic.gainDb}
+        min={0}
+        max={20}
+        step={1}
+        label={t("audio.gain")}
+        format={(v) => `+${v} dB`}
+        onchange={(v) => updateSettings((x) => (x.mic.gainDb = v))}
+      />
     </SettingRow>
     <SettingRow label={t("audio.highPass")} description={t("audio.highPass.desc")}>
-      <Toggle checked={s.mic.highPass} label={t("audio.highPass")}
-        onchange={(v) => updateSettings((x) => (x.mic.highPass = v))} />
+      <Toggle
+        checked={s.mic.highPass}
+        label={t("audio.highPass")}
+        onchange={(v) => updateSettings((x) => (x.mic.highPass = v))}
+      />
     </SettingRow>
     <SettingRow label={t("audio.noiseSuppression")} description={t("audio.noiseSuppression.desc")}>
-      <Toggle checked={s.mic.noiseSuppression} label={t("audio.noiseSuppression")}
-        onchange={(v) => updateSettings((x) => (x.mic.noiseSuppression = v))} />
+      <Toggle
+        checked={s.mic.noiseSuppression}
+        label={t("audio.noiseSuppression")}
+        onchange={(v) => updateSettings((x) => (x.mic.noiseSuppression = v))}
+      />
     </SettingRow>
     <SettingRow label={t("audio.monitor")} description={t("audio.monitor.desc")}>
       {#if s.mic.monitor}<LevelMeter db={app.micLevelDb} label={t("audio.mic")} />{/if}
@@ -334,8 +391,12 @@
 
   <Card title={t("audio.playback")}>
     <SettingRow label={t("audio.output")}>
-      <Select value={s.output.device ?? DEFAULT} label={t("audio.output")} options={outputOptions}
-        onchange={(v) => updateSettings((x) => (x.output.device = fromSelect(v)))} />
+      <Select
+        value={s.output.device ?? DEFAULT}
+        label={t("audio.output")}
+        options={outputOptions}
+        onchange={(v) => updateSettings((x) => (x.output.device = fromSelect(v)))}
+      />
     </SettingRow>
     {#if bluetoothOutput}
       <Banner
@@ -346,22 +407,43 @@
       />
     {/if}
     <SettingRow label={t("audio.volume")}>
-      <Slider value={Math.round(s.output.volume * 100)} min={0} max={200} step={5} label={t("audio.volume")} format={(v) => `${v}%`}
-        onchange={(v) => updateSettings((x) => (x.output.volume = v / 100))} />
+      <Slider
+        value={Math.round(s.output.volume * 100)}
+        min={0}
+        max={200}
+        step={5}
+        label={t("audio.volume")}
+        format={(v) => `${v}%`}
+        onchange={(v) => updateSettings((x) => (x.output.volume = v / 100))}
+      />
     </SettingRow>
     <button class="disclosure" aria-expanded={advanced} onclick={() => (advanced = !advanced)}>{t("common.advanced")}</button>
     {#if advanced}
       <SettingRow label={t("audio.balance")}>
-        <Slider value={Math.round(s.output.balance * 100)} min={-100} max={100} step={5} label={t("audio.balance")}
-          format={(v) => (v === 0 ? t("audio.balance.center") : v < 0 ? t("audio.balance.left", -v) : t("audio.balance.right", v))}
-          onchange={(v) => updateSettings((x) => (x.output.balance = v / 100))} />
+        <Slider
+          value={Math.round(s.output.balance * 100)}
+          min={-100}
+          max={100}
+          step={5}
+          label={t("audio.balance")}
+          format={(v) =>
+            v === 0 ? t("audio.balance.center") : v < 0 ? t("audio.balance.left", -v) : t("audio.balance.right", v)}
+          onchange={(v) => updateSettings((x) => (x.output.balance = v / 100))}
+        />
       </SettingRow>
       <SettingRow label={t("audio.mono")}>
         <Toggle checked={s.output.mono} label={t("audio.mono")} onchange={(v) => updateSettings((x) => (x.output.mono = v))} />
       </SettingRow>
       <SettingRow label={t("audio.avOffset")}>
-        <Slider value={s.output.avOffsetMs} min={0} max={500} step={10} label={t("audio.avOffset")} format={(v) => `${v} ms`}
-          onchange={(v) => updateSettings((x) => (x.output.avOffsetMs = v))} />
+        <Slider
+          value={s.output.avOffsetMs}
+          min={0}
+          max={500}
+          step={10}
+          label={t("audio.avOffset")}
+          format={(v) => `${v} ms`}
+          onchange={(v) => updateSettings((x) => (x.output.avOffsetMs = v))}
+        />
       </SettingRow>
     {/if}
   </Card>

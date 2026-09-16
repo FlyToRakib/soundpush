@@ -98,8 +98,7 @@ export const engine = {
   setAutoConnect: (deviceId: string, enabled: boolean) => call<void>("set_auto_connect", { deviceId, enabled }),
   setPermission: (deviceId: string, kind: PermissionKind, policy: Policy) =>
     call<void>("set_permission", { deviceId, kind, policy }),
-  setDeviceProfile: (deviceId: string, profile: DeviceProfile | null) =>
-    call<void>("set_device_profile", { deviceId, profile }),
+  setDeviceProfile: (deviceId: string, profile: DeviceProfile | null) => call<void>("set_device_profile", { deviceId, profile }),
   runNetworkTest: (deviceId: string) => call<NetworkReport>("run_network_test", { deviceId }),
   cancelNetworkTest: (deviceId: string) => call<void>("cancel_network_test", { deviceId }),
   usbStatus: () => call<UsbStatus>("usb_status"),
@@ -111,8 +110,7 @@ export const engine = {
   setRouteVolume: (routeId: string, volume: number) => call<void>("set_route_volume", { routeId, volume }),
   setRouteMuted: (routeId: string, muted: boolean) => call<void>("set_route_muted", { routeId, muted }),
   setRouteKeepRunning: (routeId: string, keep: boolean) => call<void>("set_route_keep_running", { routeId, keep }),
-  setPeerSpeakersMuted: (deviceId: string, muted: boolean) =>
-    call<void>("set_peer_speakers_muted", { deviceId, muted }),
+  setPeerSpeakersMuted: (deviceId: string, muted: boolean) => call<void>("set_peer_speakers_muted", { deviceId, muted }),
   respondRouteRequest: (requestId: number, accept: boolean, remember: boolean) =>
     call<void>("respond_route_request", { requestId, accept, remember }),
 

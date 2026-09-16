@@ -42,13 +42,22 @@ describe("troubleshooter", () => {
 
   it("explains a missing virtual microphone and a pending restart", async () => {
     const state = await baseState();
-    expect(diagnose("micApps", { state, network, system, virtualMicInstalled: false })[0]?.key).toBe("trouble.check.virtualMicMissing");
-    expect(diagnose("micApps", { state, network, system, virtualMicInstalled: true })[0]?.key).toBe("trouble.check.virtualMicRestart");
+    expect(diagnose("micApps", { state, network, system, virtualMicInstalled: false })[0]?.key).toBe(
+      "trouble.check.virtualMicMissing",
+    );
+    expect(diagnose("micApps", { state, network, system, virtualMicInstalled: true })[0]?.key).toBe(
+      "trouble.check.virtualMicRestart",
+    );
   });
 
   it("points out Bluetooth output delay", async () => {
     const state = await baseState();
-    const steps = diagnose("crackles", { state, network, system: { ...system, bluetoothOutputs: ["Speakers"] }, virtualMicInstalled: null });
+    const steps = diagnose("crackles", {
+      state,
+      network,
+      system: { ...system, bluetoothOutputs: ["Speakers"] },
+      virtualMicInstalled: null,
+    });
     expect(steps.some((s) => s.key === "trouble.check.bluetooth")).toBe(true);
   });
 

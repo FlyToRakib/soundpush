@@ -27,10 +27,7 @@ const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
 export async function checkForUpdate({ channel, installId, manual }: CheckOptions): Promise<AvailableUpdate | null> {
   if (!inTauri) return null;
-  const [{ invoke }, { Update }] = await Promise.all([
-    import("@tauri-apps/api/core"),
-    import("@tauri-apps/plugin-updater"),
-  ]);
+  const [{ invoke }, { Update }] = await Promise.all([import("@tauri-apps/api/core"), import("@tauri-apps/plugin-updater")]);
   const metadata = await invoke<ConstructorParameters<typeof Update>[0] | null>("check_update", {
     channel,
     timeoutMs: 30_000,

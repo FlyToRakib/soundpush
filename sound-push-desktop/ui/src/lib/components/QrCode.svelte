@@ -13,6 +13,8 @@
 </script>
 
 <div class="qr" role="img" aria-label={label} style:width="{size}px" style:height="{size}px">
+  <!-- SVG this component generated from `value` a moment ago; no remote or user markup reaches here. -->
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
   {@html svg}
 </div>
 

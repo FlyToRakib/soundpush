@@ -29,9 +29,10 @@
   // Pseudo-locales appear in development builds, or once chosen (e.g. set by a tester).
   const languages = $derived([
     { value: "system", label: t("theme.system") },
-    ...availableLanguages(import.meta.env.DEV || s.language === PSEUDO_LONG || s.language === PSEUDO_RTL).map(
-      (tag) => ({ value: tag, label: languageName(tag) }),
-    ),
+    ...availableLanguages(import.meta.env.DEV || s.language === PSEUDO_LONG || s.language === PSEUDO_RTL).map((tag) => ({
+      value: tag,
+      label: languageName(tag),
+    })),
   ]);
 
   const updateText = $derived.by(() => {
@@ -105,20 +106,32 @@
       {#if startupBlocked}
         <Button variant="ghost" onclick={() => run(engine.openSystemSettings("startup"))}>{t("common.openSettings")}</Button>
       {/if}
-      <Toggle checked={s.desktop.launchAtLogin} label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
-        onchange={(v) => updateSettings((x) => (x.desktop.launchAtLogin = v))} />
+      <Toggle
+        checked={s.desktop.launchAtLogin}
+        label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
+        onchange={(v) => updateSettings((x) => (x.desktop.launchAtLogin = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.startMinimized")}>
-      <Toggle checked={s.desktop.startMinimized} label={t("settings.startMinimized")}
-        onchange={(v) => updateSettings((x) => (x.desktop.startMinimized = v))} />
+      <Toggle
+        checked={s.desktop.startMinimized}
+        label={t("settings.startMinimized")}
+        onchange={(v) => updateSettings((x) => (x.desktop.startMinimized = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.closeToTray")}>
-      <Toggle checked={s.desktop.closeToTray} label={t("settings.closeToTray")}
-        onchange={(v) => updateSettings((x) => (x.desktop.closeToTray = v))} />
+      <Toggle
+        checked={s.desktop.closeToTray}
+        label={t("settings.closeToTray")}
+        onchange={(v) => updateSettings((x) => (x.desktop.closeToTray = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.preventSleep")}>
-      <Toggle checked={s.desktop.preventSleepWhileStreaming} label={t("settings.preventSleep")}
-        onchange={(v) => updateSettings((x) => (x.desktop.preventSleepWhileStreaming = v))} />
+      <Toggle
+        checked={s.desktop.preventSleepWhileStreaming}
+        label={t("settings.preventSleep")}
+        onchange={(v) => updateSettings((x) => (x.desktop.preventSleepWhileStreaming = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.audioCues")} description={t("settings.audioCues.desc")}>
       <Toggle checked={s.audioCues} label={t("settings.audioCues")} onchange={(v) => updateSettings((x) => (x.audioCues = v))} />
@@ -135,8 +148,11 @@
       />
     </SettingRow>
     <SettingRow label={t("settings.autoConnect")}>
-      <Toggle checked={s.autoConnectTrusted} label={t("settings.autoConnect")}
-        onchange={(v) => updateSettings((x) => (x.autoConnectTrusted = v))} />
+      <Toggle
+        checked={s.autoConnectTrusted}
+        label={t("settings.autoConnect")}
+        onchange={(v) => updateSettings((x) => (x.autoConnectTrusted = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.auditLog")} description={t("settings.auditLog.desc")}>
       <Button onclick={() => (showAuditLog = true)}>{t("audit.view")}</Button>
@@ -150,8 +166,11 @@
     <Troubleshooter />
     {#if debugLoggingSupported}
       <SettingRow label={t("settings.debugLogging")} description={t("settings.debugLogging.desc")}>
-        <Toggle checked={s.debugLogging === true} label={t("settings.debugLogging")}
-          onchange={(v) => updateSettings((x) => (x.debugLogging = v))} />
+        <Toggle
+          checked={s.debugLogging === true}
+          label={t("settings.debugLogging")}
+          onchange={(v) => updateSettings((x) => (x.debugLogging = v))}
+        />
       </SettingRow>
     {/if}
     <div class="row wrap">
@@ -170,8 +189,11 @@
     <p class="caption">{t("settings.version", app.local.appVersion)} · {t("settings.license")}</p>
 
     <SettingRow label={t("update.auto")} description={t("update.auto.desc")}>
-      <Toggle checked={s.checkForUpdates} label={t("update.auto")}
-        onchange={(v) => updateSettings((x) => (x.checkForUpdates = v))} />
+      <Toggle
+        checked={s.checkForUpdates}
+        label={t("update.auto")}
+        onchange={(v) => updateSettings((x) => (x.checkForUpdates = v))}
+      />
     </SettingRow>
     <SettingRow label={t("update.channel")} description={t("update.channel.desc")} id="update-channel">
       <Select
@@ -182,7 +204,8 @@
           { value: "stable", label: t("update.channel.stable") },
           { value: "beta", label: t("update.channel.beta") },
         ]}
-        onchange={(v) => updateSettings((x) => (x.updateChannel = v as UpdateChannel))} />
+        onchange={(v) => updateSettings((x) => (x.updateChannel = v as UpdateChannel))}
+      />
     </SettingRow>
     <div class="row wrap">
       <p class="caption grow" role="status">{updateText}</p>

@@ -5,14 +5,7 @@ export type Visibility = "everyone" | "trustedOnly" | "hidden";
 export type LatencyMode = "lowLatency" | "balanced" | "stable" | "custom";
 export type QualityMode = "auto" | "opus" | "lossless";
 export type AudioFocusMode = "pause" | "duck" | "mix" | "mixDuringCalls";
-export type MicMode =
-  | "default"
-  | "voiceCommunication"
-  | "raw"
-  | "voicePerformance"
-  | "voiceRecognition"
-  | "camcorder"
-  | "mic";
+export type MicMode = "default" | "voiceCommunication" | "raw" | "voicePerformance" | "voiceRecognition" | "camcorder" | "mic";
 
 export type RouteKind =
   | "sendSystemAudio"

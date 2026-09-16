@@ -97,7 +97,11 @@ describe("UpdaterStore", () => {
   it("checks in the background at most once a day", async () => {
     let now = 1_000_000_000_000;
     const checker = vi.fn(() => Promise.resolve(null));
-    const store = new UpdaterStore(checker, async () => {}, () => now);
+    const store = new UpdaterStore(
+      checker,
+      async () => {},
+      () => now,
+    );
     await store.checkIfDue();
     await store.checkIfDue();
     expect(checker).toHaveBeenCalledTimes(1);
@@ -109,7 +113,11 @@ describe("UpdaterStore", () => {
   it("does not retry a failed background check until the interval has passed", async () => {
     let now = 1_000_000_000_000;
     const checker = vi.fn(() => Promise.reject(new Error("no update feed yet")));
-    const store = new UpdaterStore(checker, async () => {}, () => now);
+    const store = new UpdaterStore(
+      checker,
+      async () => {},
+      () => now,
+    );
     await store.checkIfDue();
     await store.checkIfDue();
     await store.checkIfDue();

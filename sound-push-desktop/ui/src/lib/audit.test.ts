@@ -23,6 +23,8 @@ describe("security log text", () => {
     expect(auditText({ ...entry, kind: "pairingRateLimited", detail: "192.168.1.9" }, t)).toBe(
       "audit.pairingRateLimited|192.168.1.9",
     );
-    expect(auditText({ ...entry, kind: "logCleared", peerName: "", peerCode: "" }, t)).toBe("audit.logCleared|audit.unknownDevice");
+    expect(auditText({ ...entry, kind: "logCleared", peerName: "", peerCode: "" }, t)).toBe(
+      "audit.logCleared|audit.unknownDevice",
+    );
   });
 });

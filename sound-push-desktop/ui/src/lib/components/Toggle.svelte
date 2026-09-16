@@ -42,7 +42,9 @@
     height: 16px;
     border-radius: 50%;
     background: var(--color-text-secondary);
-    transition: transform var(--motion-fast), background var(--motion-fast);
+    transition:
+      transform var(--motion-fast),
+      background var(--motion-fast);
   }
   .toggle[aria-checked="true"] {
     background: var(--color-accent);

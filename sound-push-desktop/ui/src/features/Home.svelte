@@ -47,7 +47,11 @@
       (p) =>
         runs(task, p.deviceId) &&
         !TASKS.some(
-          (o) => o !== task && o.kinds.length > task.kinds.length && task.kinds.every((k) => o.kinds.includes(k)) && runs(o, p.deviceId),
+          (o) =>
+            o !== task &&
+            o.kinds.length > task.kinds.length &&
+            task.kinds.every((k) => o.kinds.includes(k)) &&
+            runs(o, p.deviceId),
         ),
     );
   }
