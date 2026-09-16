@@ -25,6 +25,14 @@ First public preview. Nothing has been released yet; everything below is new.
   notification controls, Quick Settings tile, microphone modes and effects, app-audio capture (Android 10+),
   audio focus handling.
 - **Multi-device streaming**: always asks which device to use when more than one is connected; live capability updates.
+  A source feeds up to eight devices at once (one to sixteen in Settings → Advanced), with an estimate of the bandwidth
+  and CPU another listener would cost.
+- **Audio + microphone in one stream**: send this computer's sound together with your voice, each with its own level —
+  commentary over a game or a film.
+- **Connection type** in Settings → Advanced: automatic (the default), Wi-Fi/Ethernet only, TCP only for networks that
+  block the fast protocol, or USB only.
+- **Error codes**: every message carries a stable code such as `SP-NET-004`, listed with its fix on the new
+  [error codes](docs/error-codes.md) page and included in diagnostics exports and logs.
 - **Virtual microphone**: built-in "SoundPush Microphone" driver on macOS; one-click VB-CABLE install from the Audio page
   on Windows; only real virtual cables are used, never a speaker.
 - **Automatic updates on desktop**: signed update manifests (minisign key, no paid certificate), "Check for updates"
@@ -56,6 +64,10 @@ First public preview. Nothing has been released yet; everything below is new.
 
 - Windows virtual microphone plan: bundled VB-CABLE first, SoundPush's own signed driver later (ADR-0003, ADR-0007).
 - Engine notices close by themselves; messages stay open while hovered or focused.
+- Connecting now tries a device's addresses at the same time, 250 ms apart, instead of one after another: a device
+  that answers on its second address no longer waits out the first one's timeout.
+- Lossless audio drops to Opus 256 kb/s by itself when the connection keeps losing packets, and goes back to lossless
+  once it is stable again. Both changes are announced.
 - Android debug builds share one signing key so builds from any machine update each other.
 
 ### Fixed
