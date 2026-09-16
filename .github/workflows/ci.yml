@@ -95,7 +95,10 @@ jobs:
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           eval "$(dbus-launch --sh-syntax)"
-          pipewire & pipewire-pulse & wireplumber &
+          pipewire &
+          sleep 2
+          pipewire-pulse &
+          wireplumber &
           for _ in $(seq 60); do pactl info >/dev/null 2>&1 && break; sleep 0.5; done
           pactl info | tee "$RUNNER_TEMP/pactl.txt"
           grep -qi pipewire "$RUNNER_TEMP/pactl.txt"

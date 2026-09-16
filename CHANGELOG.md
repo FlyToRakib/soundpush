@@ -47,16 +47,29 @@ First public preview. Nothing has been released yet; everything below is new.
 - **Documentation site** (MkDocs Material on GitHub Pages) with the user guide, troubleshooting, virtual microphone,
   privacy, translating and release pages; the app's help links open it, or GitHub when it can't be reached.
 - **Translations on Weblate**: component setup for the desktop and Android strings (`docs/translating.md`).
-- **Quality gates in CI**: clippy with warnings as errors, line coverage report with an 80 % gate on the core
-  crates, nightly fuzzing of every fuzz target, and a hook for desktop end-to-end tests.
-- **Documentation**: user guide, privacy policy, threat model, release-signing guide, ADRs 0006–0019, issue and pull
-  request templates.
+- **Resume streams after restart**: the streams that were running start themselves again once the device is back.
+  Off by default; Settings → Privacy & security on the computer, Settings → Background on the phone.
+- **"Another app is using the microphone"**: while Android hands SoundPush silence because a call or an assistant has
+  taken the microphone, the phone says so on Home and in the notification, and clears it when they let go.
+- **Quality gates in CI**: clippy with warnings as errors, ktlint for the Android modules and ESLint with Prettier for
+  the desktop UI, a line coverage report with an 80 % gate on the core crates, SHA-256 verification of every Android
+  dependency, the audio backends against PipeWire and WASAPI, nightly fuzzing of every fuzz target, an Android startup
+  benchmark that runs nightly and on demand, and a hook for desktop end-to-end tests.
+- **Developer tools**: `tools/netsim` applies the impairment profiles the simulation tests use to a real network
+  interface, and `tools/latency-probe` measures end-to-end pipeline latency from a chirp. Both build on the new
+  `sp-testkit` crate.
+- **Documentation**: user guide, privacy policy, threat model, release-signing guide, UX flows and copy rules,
+  ADRs 0006–0019, issue and pull request templates.
 
 ### Changed
 
 - Windows virtual microphone plan: bundled VB-CABLE first, SoundPush's own signed driver later (ADR-0003, ADR-0007).
 - Engine notices close by themselves; messages stay open while hovered or focused.
-- Android debug builds share one signing key so builds from any machine update each other.
+- Android debug builds share one signing key so builds from any machine update each other. Release builds are signed
+  by Gradle from the release keystore when CI has one, and produce a Play App Bundle alongside the APK.
+- Android battery: with the app in the background or the screen off, stream statistics and level meters stop being
+  decoded and drawn. Streams, the notification and reconnection are unaffected.
+- "Auto" quality on the phone now means uncompressed audio on a charger over a good link, and Opus on battery.
 
 ### Fixed
 
