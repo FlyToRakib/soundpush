@@ -36,9 +36,14 @@
       .length,
   );
   const advancedChanged = $derived(changedCount > 0);
-  // Something changed from the default must not stay hidden.
+  // Something left off its default must not stay hidden — but only the first time, so "Hide
+  // advanced settings" still works while an override is on.
+  let revealed = false;
   $effect(() => {
-    if (advancedChanged) showAdvanced = true;
+    if (advancedChanged && !revealed) {
+      revealed = true;
+      showAdvanced = true;
+    }
   });
   const resetAdvanced = () => updateSettings((x) => (x.advanced = { ...ADVANCED_DEFAULTS }));
   const isMac = $derived(app.local.platform === "macos");
@@ -197,12 +202,12 @@
       {#if advancedChanged}
         <Button variant="ghost" onclick={resetAdvanced}>{t("settings.advanced.reset")}</Button>
       {/if}
-      <Button variant="ghost" expanded={showAdvanced} controls="advanced-settings" onclick={() => (showAdvanced = !showAdvanced)}>
+      <!-- No aria-controls: the section it opens does not exist while it is closed. -->
+      <Button variant="ghost" expanded={showAdvanced} onclick={() => (showAdvanced = !showAdvanced)}>
         {t(showAdvanced ? "settings.advanced.hide" : "settings.advanced.show")}
       </Button>
     </SettingRow>
     {#if showAdvanced}
-      <div id="advanced-settings">
       <p class="caption">{t("settings.advanced.desc")}</p>
       <SettingRow label={t("settings.continuousCapture")} description={t("settings.continuousCapture.desc")}>
         <Toggle checked={advanced.continuousCapture} label={t("settings.continuousCapture")}
@@ -218,7 +223,6 @@
       </SettingRow>
       <div class="row wrap">
         <Button variant="ghost" onclick={() => openDocs("advanced")}>{t("settings.advanced.guide")}</Button>
-      </div>
       </div>
     {/if}
   </Card>
