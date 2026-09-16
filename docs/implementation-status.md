@@ -1,147 +1,223 @@
 # Implementation status
 
-Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-16.
+Where SoundPush stands against [the plan](soundpush-final.md). Every line below was checked against the
+code in this repository on 16 September 2026, and names the file that proves it. Nothing here is taken
+from the commit history or from an earlier version of this page.
 
-Legend: ✅ done and tested · 🟡 implemented, needs real-device verification · ⏳ not started · ⛔ blocked on something outside the repo
+**How to read the statuses**
 
-## Phase 0 — Foundations
-
-| Item | Status | Notes |
-|---|---|---|
-| Monorepo, Cargo/npm/Gradle workspaces, `justfile`, CI workflow | ✅ | `.github/workflows/ci.yml` (not yet run on GitHub) |
-| Design tokens → CSS + Compose, WCAG contrast check | ✅ | `design/scripts/generate.mjs` |
-| Wire protocol spec, pairing/security doc, threat model, ADRs 0001–0019 | ✅ | `docs/protocol`, `docs/security`, `docs/adr` (index maps the plan's ADR numbers) |
-| Open-source files (full GPL-3.0 LICENSE, CONTRIBUTING, CoC, SECURITY, PRIVACY, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot) | ✅ | |
-| CI quality gates: fmt, clippy `-D warnings`, tests, svelte-check, vitest, `cargo deny`, `npm audit --audit-level=high`, Android unit tests + lint, coverage, release-tool tests, desktop e2e hook | 🟡 | `ci.yml`; Android job fixed (host `libasound2-dev` for the binding build). Coverage (`cargo-llvm-cov`): core crates 92 % lines, gated at 80 %; sp-engine 74 %, reported only. e2e job runs `npm run test:e2e` once it exists. Needs a green run on GitHub |
-| Kotlin style gate (§29.3) | ✅ | ktlint through the Gradle plugin on every module, rules in `sound-push-mobile/android/.editorconfig` (IntelliJ "official" style, 165 columns, Composables exempt from the naming rule); generated bindings and the generated Compose theme excluded. `just mobile-check` / `just mobile-format` |
-| JS/TS style gate (§29.3) | ✅ | ESLint flat config (js + typescript-eslint + eslint-plugin-svelte, Prettier-compatible) and Prettier over `sound-push-desktop/ui`; `npm run lint` in `ci.yml`, `npm run format` to fix |
-| Gradle dependency verification (§31) | ✅ | `sound-push-mobile/android/gradle/verification-metadata.xml`, SHA-256 for 855 components including `aapt2` for all three host platforms; regenerate with `just mobile-verification`, which downloads into an empty Gradle home so the file covers the POM and `.module` files a warm cache would hide. Verified by building the CI task list against an empty dependency cache |
-| Backend integration jobs (§29.1) | 🟡 | `ci.yml` "Audio backend": the PulseAudio suite against PipeWire on Ubuntu, and `sp-audio-io/tests/wasapi_smoke.rs` (enumeration, render, system loopback) on Windows, which reports and passes where the runner has no audio endpoint. Verified on a Windows machine; the PipeWire leg needs a green run on GitHub |
-| Android Macrobenchmark (§29.1) | 🟡 | `sound-push-mobile/android/benchmark` (cold and warm startup, frame timing) against the app's profileable `benchmark` build type; nightly and on-demand `android-benchmark.yml` on an emulator, `just mobile-benchmark` against a phone. Builds and packages; the measurements need a device |
-| Fuzz targets (media, control, framing, QR, beacon) + nightly fuzzing | ✅ | `fuzz/` — `cargo +nightly fuzz run <target>`; `fuzz.yml` runs each target 30 min nightly, corpus cached, crashes uploaded |
-| Documentation site (MkDocs Material, GitHub Pages) | 🟡 | `mkdocs.yml`, `docs.yml`; builds with `--strict`. Needs Pages enabled (Settings → Pages → GitHub Actions) and a push to `main` |
-| Documentation deliverables (§36.3) | ✅ | the last two were the UX ones: `docs/ux/flows.md` (every flow as implemented, both apps) and `docs/ux/copy.md` (the wording rules the strings already follow). Contributor docs, so excluded from the site like the ADRs |
-| Community translation (Weblate) | 🟡 | component settings in `docs/translating.md`, `.weblate`; needs the Hosted Weblate project created |
-
-## Phase 1 — Core engine + "Listen to PC on phone"
-
-| Item | Status | Notes |
-|---|---|---|
-| `sp-protocol` (messages, media header, framing, versions) | ✅ | protocol 1.0–1.1 (capability-gated session tickets, network-test probes, TCP stream frames); 20 tests |
-| `sp-security` (identity, QR proof, SAS, encrypted trust store) | ✅ | 16 tests |
-| `sp-transport` (QUIC, TLS over TCP, mutual TLS, pinning, datagrams, exporter, migration) | ✅ | real QUIC and TCP tests, including a client address change mid-session |
-| `sp-discovery` (mDNS, signed beacons, registry, ranking) | 🟡 | unit-tested; multicast needs real-network check |
-| `sp-media` (Opus/PCM, adaptive jitter buffer, drift, DSP, RNNoise) | ✅ | 19 tests incl. 1-hour drift simulation |
-| `sp-audio-io` (trait, cpal backend, null backend, converters) | 🟡 | unit-tested; device paths need hardware |
-| `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | unit tests plus two-engine tests: pairing → audio → prompt → stop → forget, restart-reconnect, resume without a second prompt, shared encoder, live codec switch, USB (TCP) + network test, resume after restart, anti-flap fallback to Stable, security log, pairing rate limit. Audio devices open off the actor. `#![forbid(unsafe_code)]` |
-| Connection `Degraded` state (§19.1) and anti-flap (§20) | ✅ | `health.rs`: loss > 3 % or jitter > 30 ms for 3 s, back after 5 s below 1 % / 15 ms; > 5 drops in 2 min holds the device on Stable for 10 min with a notice |
-| DTX during silence (§15.2) | ✅ | Opus only, `FEATURE_DTX` capability bit 31; header-only DTX packets after 200 ms hangover, keep-alive every 400 ms; receiver plays comfort silence without loss or underruns |
-| DSCP EF marking (§16.3) | 🟡 | `sp-transport/src/qos.rs`: qWAVE flows on Windows; `IP_TOS`/`IPV6_TCLASS` elsewhere (TCP carries it; QUIC packets not yet, quinn-udp 0.5.15 sends ECN-only TOS per packet — re-checked, still no per-packet or per-socket DSCP). A test pins that version and fails when the dependency moves, so it is re-examined. Needs a packet capture on real networks |
-| Candidate racing (§17.3) | ✅ | `net.rs` `race_candidates`: ranked candidates race with a 250 ms stagger, first authenticated handshake wins, losers cancelled; USB keeps its 2 s head start. Unit tests plus a two-engine test where black-hole candidates rank first |
-| Lossless quality fallback (§8.1, §15.6) | ✅ | `health.rs` `QualityFallback` + `actor/profiles.rs`: PCM → Opus 256 kb/s after 5 s above 2 % loss, back after 15 s below 0.5 %, with a notice both ways; carried across the restart a 1.0 peer needs |
-| Transport pinning (§16.1) | ✅ / 🟡 | `settings.transport`: Auto (default), QUIC, TCP, USB; TCP also moves the TLS-over-TCP listener from loopback to every interface while pinned. Desktop and Android Advanced settings. Needs a real UDP-blocked network to verify |
-| Multi-device limits (§19.2) | ✅ | `settings.maxReceivers` (default 8, 1–16) enforced per source for local and peer-requested routes (`SP-CFG-003`, `DeviceBusy`); `EngineState.streaming` carries the bandwidth/CPU estimate both UIs show before the limit is reached |
-| Mixed source: system audio + microphone (§5.1, §9.2) | ✅ / 🟡 | `SOURCE_MIXED` capability bit and the `mixed` endpoint; sender pipeline mixes a second capture with an independent gain per part, microphone DSP on its half, microphone mute silencing only it. Desktop and Android home task, gains on the desktop Audio page. Pipeline and two-engine tests; needs real hardware for the two capture clocks |
-| Stable public error codes (§36.4) | ✅ | `error.rs` `code()` and `stop_reason_code()`, in state snapshots, the FFI error, both UIs, diagnostics and logs; documented in [error-codes.md](error-codes.md) |
-| Security log (§21.1, §28.2) and pairing rate limit (5/min per address) | ✅ | `audit.rs` (1000 entries / 30 days, local only), `pairing_limit.rs`, `StopReason::RateLimited`; viewers in desktop and Android Settings |
-| Logging (§28.1) | ✅ / 🟡 | `logging.rs`: size rotation 5 × 10 MB desktop, 3 × 2 MB Android; "Detailed logs" setting raises the level to debug and switches off after 24 h; Kotlin logs go through `log_message` FFI into the same files and logcat; Android diagnostics include the log files |
-| Performance benches (§22.2) | ✅ | `cargo bench -p sp-media`: Opus encode 10 ms stereo 128 kb/s ≈ 101 µs (budget 300), decode ≈ 26 µs, RNNoise ≈ 94 µs (200), mic DSP chain ≈ 6 µs, jitter push+pop ≈ 0.15 µs, drift resample ≈ 4 µs (x64 dev PC). Budgets in `benches/media.rs` |
-| Simulated network (§29.1) and `sp-testkit` (§12.1) | ✅ | `sound-push-core/sp-testkit`: seeded impairment link (loss, jitter, reordering, duplication, blackouts) with named profiles, a signal backend, chirp generation and cross-correlation; 12 tests. `sp-engine/tests/sim_network.rs` is now its four scenarios: loss + redundancy, 40 ms jitter/reordering, duplication, 800 ms blackout; ~4 s |
-| Developer tools (§11.1) | ✅ | `tools/netsim` lists and applies the impairment profiles (`tc netem` on Linux, clumsy options elsewhere); `tools/latency-probe` measures end-to-end pipeline latency from a chirp's cross-correlation with percentiles, JSON output and a `--max-ms` budget. `just netsim`, `just latency` |
-| Settings schema migrations (§29.1) | ✅ | `settings.rs` `migrate` (raw JSON, one step per version, written back); version 2 |
-| Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, Vitest units, Playwright e2e against the mock engine in light and dark with axe WCAG 2.1 AA checks (`npm run test:e2e`) |
-| Desktop window lifecycle (plan §13.1, §24) | 🟡 | `window_state.rs`: size, position and maximized state restored onto a connected monitor; the window waits up to 1.5 s for the engine; autostart opens it only when "Start in the background" is off or onboarding is unfinished; one-time "SoundPush keeps running" hint on the first close to the tray. "Keep window in memory for instant reopen" (`desktop.keepWindowInMemory`, off): on, closing hides the window instead of releasing the webview, and state snapshots stop while it is hidden; `show_main_window` catches the webview up on the way back |
-| WebView2 detection (plan §10.3 mitigation, G9) | 🟡 | `src-tauri/src/webview2.rs`: the Evergreen runtime version from `EdgeUpdate\Clients`, read before the window is built. Missing or damaged → a plain message box offering Microsoft's bootstrapper (the download the installer already uses) while the engine and tray keep running, instead of a white screen. The version is in `SystemStatus` for diagnostics. Needs a test on a machine without the runtime |
-| Desktop tray (plan §13.2, §23.1) | 🟡 | `tray.rs`: per-route Mute/Stop, microphone mute with shortcut, recent devices (connect, listen, use as microphone), status badge (streaming, microphone live, attention, error); Linux without a StatusNotifier host minimizes instead of hiding |
-| OS network change, sleep/resume and session end → engine | 🟡 | `os_events.rs`: Windows `NotifyIpInterfaceChange` + hidden window (`WM_POWERBROADCAST`, `WM_ENDSESSION`) + `RegisterApplicationRestart` (Restart Manager); macOS IOKit power + SystemConfiguration keys (not yet compiled on macOS); Linux rtnetlink + logind `PrepareForSleep`. Needs a real sleep/Wi-Fi-switch check on each OS |
-| Linux desktop: devices and system audio (output monitors) through PipeWire/PulseAudio, deb/rpm/AppImage | 🟡 | `sp-audio-io` `pulse` feature, tested against PulseAudio in a container; packages build (`linux-build.yml`). "Mute PC speakers": PipeWire mutes the default sink; PulseAudio (whose monitors follow the sink mute) moves playback to a temporary "SoundPush Speakers" null sink and restores the previous default on unmute or the next start. Real-server tests in `sp-audio-io/tests/pulse_server.rs` (PulseAudio 16 in a container: captured peak 0.5 while the speakers' monitor is silent) |
-| Android app (engine FFI, service, notifications, tile, QR scan, screens) | 🟡 | debug APK builds (arm64); needs a real phone to test. Notification Stop / Mute / Output (system output switcher per Android version), widget Mute, denied/blocked permission states with Open settings, process-level network watcher, per-app language picker (generated locale list, pseudo-locales in debug), custom latency, output device choice (platform player), connection details, OSS licences (AboutLibraries), share app, tablet/foldable layouts (rail, list-detail Devices, two-column Home). Robolectric flow tests with ATF accessibility checks and Light/Dark/RTL/en-XA/tablet screenshots |
-
-## Phase 2 — Microphone & headset
-
-| Item | Status | Notes |
-|---|---|---|
-| Phone mic → PC virtual mic (compatibility mode: VB-CABLE/BlackHole/Voicemeeter) | 🟡 | ADR-0003 |
-| Android mic presets (7 modes) + platform AEC/NS/AGC with availability | 🟡 | Kotlin `MicCapture` |
-| Gain 0–20 dB, soft limiter, RNNoise, level meter, mic monitor | ✅ | The limiter's clip indicator is on the meter on both platforms, announced as well as coloured (§8.3) |
-| "Ask" permission prompt for microphone | ✅ | tested end-to-end |
-| Headset mode (both routes in one action) | 🟡 | desktop + Android home task; on Android the recorder uses the voice-call preset with echo cancellation while the headset task runs and returns to the user's preset afterwards. RNNoise now runs on the phone **or** the computer, the user's choice (§4.3/§15.7). The desktop has no AEC: [ADR-0020](adr/0020-desktop-echo-control.md) explains why and what it does instead |
-| Noise suppression on the phone or on the PC (§4.3, §15.7) | ✅ | `mic.noiseSuppressionAt`; the microphone's device decides per route and carries it in `StreamProfile.denoise`, gated by `FEATURE_RECEIVER_DENOISE` so 1.0 peers fall back to sender-side denoising. Receiver-side RNNoise in `pipeline/receiver.rs`; desktop and Android both expose it |
-| RNNoise auto-disable when capture misses deadlines (§8.3) | ✅ | `sp-engine/src/denoise.rs` supervises capture overruns: off after a burst with one notice, on again after 20 clean seconds. The setting is never rewritten, so it is on again at the next start |
-| Microphone feedback-loop detection (§8.2) | ✅ | `sp_media::dsp::FeedbackDetector` in the monitor path: a loud tone that holds its pitch while it builds is a howl; speech and room noise are not (unit-tested both ways). Warns once and points at headphones or Headset mode |
-| Desktop echo control without an AEC (§15.7) | ✅ | [ADR-0020](adr/0020-desktop-echo-control.md): no C/C++ AEC fits the CI toolchains, so `mic.echoDucking` ducks the microphone 18 dB while this device plays the far side on its speakers (`DuckGate`, far-end level from a shared `EchoReference`). Off by default; headphones stay the recommendation |
-| Two routes want the same virtual microphone (§8.2) | ✅ | The engine allows one feed and refuses a second with `error.audio.virtualMicBusy` (locally and over the wire as `DeviceBusy`); desktop and Android then ask "Replace current microphone source?" and retry with `replace`. Engine test with two phones |
-| Windows stage 1: VB-CABLE bundled in the SoundPush installer (silent install, credit line, restart prompt) | ⛔ | waiting for VB-Audio's written agreement (required by the licence in the package); pinned download script ready. See [virtual-microphone.md](virtual-microphone.md) §4 |
-| Windows stage 2: own "SoundPush Microphone" driver in the repo, built + test-signed in CI | 🟡 | `sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT: "SoundPush Microphone Feed" → "SoundPush Microphone"); x64 builds locally with `/W4 /WX /analyze`, infverif, inf2cat and ApiValidator clean; CI builds x64 + ARM64 and test-signs (`windows-driver.yml`). Not yet installed on a test-signing PC. Not used by the app: VB-CABLE stays active until attestation signing |
-| Windows stage 2: Microsoft attestation signing of the driver | ⛔ | needs an EV code-signing cert + Partner Center account (AudioRelay's driver is signed this way) |
-| Linux virtual microphone created by the app (PipeWire/PulseAudio null sink + remap source) | 🟡 | `virtual_mic.rs`; tested against PulseAudio in a container (load, audio, unload) and PipeWire (load, drop-in restore); PipeWire audio needs a desktop session. See [virtual-microphone.md](virtual-microphone.md) |
-| Push-to-talk / mute global hotkey | 🟡 | `src-tauri/src/hotkeys.rs` (global-shortcut plugin), recorder on the Audio page, conflict errors, tray check mark follows the engine's `micMuted`; mute also silences the phone mic feeding the virtual mic |
-| Auto-start phone mic when an app opens the virtual mic | 🟡 | `desktop.autoStartMic`; `PlatformHooks::virtual_mic_in_use` (Windows: active sessions on "CABLE Output"; macOS: `DeviceIsRunningSomewhere`; Linux: recording streams on the SoundPush source); engine `actor/local_audio.rs` starts the last mic phone and stops it 15 s after the app lets go |
-
-## Phase 3 — Parity completion
-
-| Item | Status | Notes |
-|---|---|---|
-| Android app audio → PC (playback capture) | 🟡 | `AppAudioCapture` |
-| PC mic → phone, PC↔PC, phone↔phone | 🟡 | same route model; untested on hardware |
-| Multi-device streaming | ✅ / 🟡 | encoder groups: one capture and encoder per (source, profile) shared by every route that can use it (engine test: two receivers, one capture); needs a multi-phone hardware check |
-| Per-stream volume, balance, mono, A/V offset, remote volume/mute, "Mute PC" | ✅ / 🟡 | engine + UI; OS mute via platform calls. `PeerView.speakersMuted` shows the state; a peer's remote mute ends with its session (engine test). Desktop: sending mutes this computer's speakers, receiving from another computer mutes that one |
-| Adaptive bitrate from receiver stats | ✅ | |
-| Packet redundancy ("Resilient": Auto / Always / Off) | ✅ | Auto is the unchanged default (on above 1 % loss, off after 10 clean seconds); Always and Off are the user's call (§15.6). Settings schema 3 migrates the old boolean, globally and per device. Test recovers frames with 20 % simulated loss |
-| Session timer, quality badge, connection details | ✅ | desktop: transport and path (USB/adb, tethering, local, IPv4/IPv6), address, per-stage latency (capture, encode, network, buffer, output from `RouteStats`), 5-minute latency/loss chart with a text summary |
-| Custom bitrate steps incl. AudioRelay's | ✅ | |
-| USB tethering | 🟡 | works as IP network; desktop `tethering.rs` detects RNDIS/NCM/Apple tethering adapters, labels devices reached through them and warns when the computer's internet uses the phone's mobile data (Windows/Linux unit-tested parsers; macOS reader not yet compiled) |
-| USB via ADB (TLS-over-TCP transport) | 🟡 | ADR-0005: `sp-transport/src/tcp.rs`; desktop listens on loopback, Devices page finds adb and runs `adb reverse`; the phone dials its loopback candidate after 2 s of network candidates. Tested engine to engine over TCP; needs a real phone |
-| Session resume after a network interruption | ✅ / 🟡 | single-use resume tokens bound to the peer key (10 min) + QUIC migration; an approved "Ask" route resumes without a second prompt (engine test); needs a Wi-Fi roam check |
-| Per-device audio profiles (latency, quality, bitrate, redundancy) | ✅ / 🟡 | `settings.deviceProfiles`, applied at route start and live (bitrate/redundancy live, codec changes renegotiated); desktop Devices page, Android device sheet |
-| Desktop test tools: test tone and microphone test (§5.1) | ✅ | Audio page; the tone reuses the cue generator on the chosen output, the microphone test borrows the engine's monitor for 15 s without touching the saved "Listen to my microphone" setting |
-| Android parity: balance, 80 Hz low-cut, "Recommended" mic-mode badge (§4.3, §23.1) | ✅ | Audio screen; same semantics and wording as the desktop, with TalkBack labels and ATF-checked Robolectric tests |
-| Network self-test (RTT, jitter, loss, achievable bitrate, recommendation) | ✅ / 🟡 | probes over the media path, ~10 s, cancellable; "Use recommended settings" applies a device profile |
-| Local crash reports for Rust panics and for crashes the panic hook never sees (plan §13.2, §8.4) | ✅ | `sp-engine/src/crash.rs` writes the redacted text report; `src-tauri/src/crash_dump.rs` adds `crash-handler` + `minidump-writer` for an access violation or a `SIGSEGV` in a driver, leaving a local minidump plus a note in the same folder. Notice once on next start, both kinds ordered by the timestamp in their names; the diagnostics export carries only the text, never the dump (it holds process memory). Nothing uploaded |
-| Real-time audio thread priority (plan §13.3, §12.3, §8.3) | 🟡 | `sp-audio-io/src/rt_priority.rs`: the first callback promotes the thread the OS audio stack calls it on, and a thread-local guard undoes it when that thread ends. Windows MMCSS "Pro Audio", macOS thread time-constraint policy, Linux `SCHED_RR` with a `nice` fallback; every step fails softly. Off with the "Real-time audio priority" advanced override. Needs a load test on each OS |
-| Idle optimisation (plan §13.5, §22.2) | ✅ | capture and playback devices were already released when a route stopped, so `actor/local_audio.rs`'s `IdleAudio` closes what is kept *between* streams after 60 s without audio (the backend's cached sound-server answer on Linux, the shell's cached device list) and fills it again on the next route. The virtual-microphone poll no longer asks the OS every two seconds when no connected device could supply a microphone. Unit-tested timing |
-| Hidden troubleshooting overrides (plan §4.3 "EventSync / continuous capture", §24.7) | ✅ | `settings.advanced`: continuous capture (DTX off), keep audio devices open, real-time audio priority. Folded-away Advanced section in Settings → Help, which folds itself open when something is off its default and offers "Back to defaults"; documented in [advanced.md](advanced.md) |
-| Make SoundPush the default input and output while active (plan §23.2) | 🟡 | `src-tauri/src/default_devices.rs`, `desktop.defaultDevicesWhileActive` (off). The recording default follows the virtual microphone while the phone feeds it; the playback default is only ever moved to a virtual cable SoundPush captures, never to a real speaker. Windows `IPolicyConfig` (Windows 11 26100 offers only `CPolicyConfigVistaClient`, so both are tried), macOS Core Audio default device, Linux sound server. The previous defaults are put back when the last route stops, when SoundPush exits, and from a note on disk after a crash. Windows path tested against the live endpoints; macOS and Linux need a machine |
-| Windows per-app capture | 🟡 | `sp-audio-io/src/wasapi_process.rs` (process loopback, one app or everything except one app, Windows 10 2004+); app picker on the Audio page |
-| Linux app capture (PipeWire/PulseAudio) | 🟡 | `sp-audio-io/src/pulse.rs` (`AppRouting`): the app's streams (or every other app's) move to a private null sink recorded from its monitor; a loopback keeps them audible on the speakers (~30 ms later); streams opened while capturing follow; streams go back on stop, and after a crash on the next start. App picker on the Audio page (`application.process.binary`). Tested against PulseAudio 16 in a container (only / everything except / late streams / crash cleanup); PipeWire needs a desktop session |
-| Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service; "Lower volume" uses a separate output duck gain (`set_output_duck`), route volumes are never overwritten |
-| Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
-| Android memory and battery (§8.4, §14.6) | 🟡 | `Caches` + `Application.onTrimMemory` release the remembered release check and stale diagnostics exports; engine snapshots are decoded off the engine thread and, while the app is hidden or the screen is off, at most twice a second, with stats/meter-only changes dropped (`StateUpdates`, unit-tested). Needs a battery measurement on a phone |
-| "Auto" quality follows the power state (§14.6) | 🟡 | `EngineHandle::set_prefer_lossless` decides what Auto resolves to on routes this device starts; the phone sets it from the charger, the link quality and the network (`preferLossless`, unit-tested). Desktops never set it. Needs a real-link check |
-| Live "microphone in use by another app" notice (§8.3) | 🟡 | `DeviceStatus.micSilenced` from `AudioManager.AudioRecordingCallback`; Home banner and a line in the streaming notification while it lasts. Needs a phone (a call or an assistant holding the mic) |
-| "Resume streams after restart" (§24) | ✅ | the engine setting now has a toggle in both apps: Android Settings → Background, desktop Settings → Privacy & security |
-| Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
-| Media Feature Pack detection (Windows N) | 🟡 | `src-tauri/src/system.rs` (missing `mfplat.dll`), Home banner → Optional features |
-| Windows Firewall / Public network fix | 🟡 | `src-tauri/src/network.rs`: firewall policy + network category read as a normal user; "Allow SoundPush" runs `netsh` through UAC (UDP, this exe, private/domain; public only if chosen). On a public network the dialog will not run until the user picks what to do about it, and the same elevated step moves that network to the Private profile (`Set-NetConnectionProfile`, adapters from `INetworkConnection::GetAdapterId`) when they say it is their own. The Home notice stays quiet while a device is connected; the uninstaller removes the rule with one UAC prompt (`windows/hooks.nsh`). Hardened: the system directory comes from `GetSystemDirectoryW` rather than `%SystemRoot%`, `netsh.exe` and `powershell.exe` are named by their absolute path, the elevated process starts in the system directory, and a program path holding `%`, a quote or a line break is refused. Plan §13.6's separate signed helper is deliberately **not** built: SoundPush installs per user, so the helper would live in a folder anything running as the user can write to while being the binary an administrator approves — see [advanced.md](advanced.md) and the module comment |
-| Audio device changes (follow default, device lost) | 🟡 | `src-tauri/src/device_watch.rs` (`IMMNotificationClient`, Core Audio listeners, sound server events on Linux via `pulse::watch_devices`, reconnecting when the server restarts) → `EngineHandle::audio_devices_changed`; routes on the default device reopen, pinned devices report lost |
-| Audio cues | 🟡 | `src-tauri/src/cues.rs`, generated tones, `settings.audioCues` |
-| Diagnostics export, guided troubleshooter, logs | ✅ (desktop) / 🟡 (Android tips only) | desktop troubleshooter runs checks (firewall, network profile, driver, devices, permissions, Bluetooth) with fix buttons; the export is previewed first (sections, what is removed, exact text) and redacts addresses, device ids and the pairing code, also inside log lines. The "Detailed logging" toggle appears once the engine exposes `debugLogging`. Parity with Android's tips: a real VPN check (a VPN holding the default route, named), client/AP isolation diagnosed from "every paired device has an address on this very network and none of them answers" instead of the static guest-Wi-Fi tip, and on Windows the audio-enhancement and overlay software that is running (Nahimic, Sonic Studio, Voicemod, …) with advice |
-| macOS permissions (microphone, System Audio Recording) | 🟡 | `src-tauri/src/macos.rs`: status without prompting, deep links to System Settings. Not yet compiled on macOS |
-| Windows ARM64 installer | 🟡 | `windows-build.yml` matrix, artifact `SoundPush-Windows-arm64` (cross-compiled; build passes on GitHub); also built and published by `release.yml` with a `windows-aarch64` updater entry. Needs a test on an ARM64 PC |
-| i18n infrastructure (English; locale files, plurals, Intl formats, RTL, pseudo-locales en-XA/ar-XB) | ✅ | `docs/translating.md`; translations via community later |
-| Accessibility pass (desktop: keyboard, focus, dialogs, live regions, reduced motion, high contrast, text zoom) | 🟡 | done in code; screen-reader test on NVDA/VoiceOver/Orca and external audit pending |
-| Help/About (user guide, privacy, license, report a problem, logs) | ✅ desktop / ✅ Android | |
-
-## Phase 4 — macOS parity
-
-| Item | Status | Notes |
-|---|---|---|
-| Desktop app runs on macOS (speaker, mic, pairing) | 🟡 | runs on this Mac; phone paired and played audio through the Mac speakers |
-| System-audio capture via process taps | 🟡 | `sp-audio-io/src/macos_tap.rs`: tap + aggregate device open and deliver frames; real audio needs the System Audio Recording permission, which macOS grants only to the bundled `SoundPush.app` (unbundled dev binaries receive silence). |
-| macOS 13 system audio via ScreenCaptureKit | 🟡 | `sp-audio-io/src/macos_sck.rs`, used before 14.2 (Screen Recording permission; CoreAudio weakly linked in `build.rs` so the tap functions may be missing). Minimum macOS 13. Type-checked and linted for aarch64-apple-darwin only; not yet run on a Mac |
-| Login item via `SMAppService` (macOS 13+) | 🟡 | `src-tauri/src/macos.rs`: registers the main app; the old LaunchAgent is removed on the next start; a launch within 2 min of console login counts as autostart; "requires approval" shows the Settings warning. Windows/Linux keep `tauri-plugin-autostart`. Type-checked only |
-| AudioServerPlugIn "SoundPush Microphone" | 🟡 | own C driver in `sound-push-desktop/drivers/macos-virtual-mic`, embedded in the app and installed from the Audio page; needs a real install test. Public distribution needs Apple Developer ID notarization |
-
-## Phase 5 — Hardening & release
-
-| Item | Status |
+| Status | Meaning |
 |---|---|
-| Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices); in-process soak and latency harnesses: `tools/soak`, `tools/latency-probe`, `tools/netsim` |
-| External security review | ⏳ |
-| Release workflow: NSIS (x64 + ARM64), universal DMG, deb/rpm/AppImage, APK **and Play App Bundle** (per-ABI and density splits), SHA256SUMS, CycloneDX SBOMs, draft GitHub Release, beta pre-releases | 🟡 (`release.yml`, not yet run on GitHub. Gradle signs both Android artifacts from `ANDROID_KEYSTORE_*`; without the secrets they keep the public debug key and their names say so) |
-| Desktop auto-update signed with a free minisign key; Android update check against GitHub Releases | 🟡 (needs the `TAURI_SIGNING_*` secrets and a first published release) |
-| Update channels (stable/beta) and staged rollout 10 % → 50 % → 100 % over 72 h, hold/halt | 🟡 (`settings.updateChannel`, `check_update`, `rollout.ts`, `update-channels.yml` + `tools/release/channels.mjs`; unit-tested; needs a first published release) |
-| Update check behaviour (plan §24) | ✅ | `updater.svelte.ts`: the first background check waits 30 s when the OS started SoundPush at sign-in, and a metered connection is left alone entirely (Windows `INetworkCostManager`, NetworkManager's `Metered` on Linux, best effort elsewhere). A check the user asks for always runs. Unit-tested, including that repeated `setAutomatic` calls still check once |
-| Linux portals for Flatpak and Wayland (plan §26.2, §13.2, §24) | 🟡 | `src-tauri/src/portals.rs`: `GlobalShortcuts` for the microphone shortcuts (falling back to the global-shortcut plugin), `Background` for running in the tray and launching at sign-in (the setting mirrors what the portal granted), and `Inhibit` for "keep the computer awake". Used only inside a sandbox or on Wayland; everything else keeps the paths it had. Compiles for Linux; needs a Flatpak session to verify |
-| Store manifests: winget, Homebrew cask, Flathub, F-Droid, Play listing texts | 🟡 (`packaging/`, fastlane metadata, filled per release by `fill-manifests.mjs`; winget validated, AppStream validated. Submissions need store accounts; Flathub needs screenshots — the portal-based autostart, sleep inhibit and global shortcuts are in place) |
-| Paid platform signing (Authenticode, Developer ID + notarisation, Android release key) | ⛔ (certificates/accounts; steps in `docs/release-signing.md`) |
+| Done | Written and covered by automated tests. Where it has never run on real hardware, the note says so. |
+| Partial | Some of what the plan asks for is in place; the note says what is missing. |
+| Not started | No code yet. |
+| Postponed | A deliberate decision — see [Deliberately postponed](#deliberately-postponed). |
+| Needs a person | The code is finished; someone has to do something outside the repository — see [Needs a person, not code](#needs-a-person-not-code). |
+
+---
+
+## What works today, in plain words
+
+**Everything is built and tested by machine. Nothing has yet been used on a phone, a Mac, an ARM64 PC
+or a real Wi-Fi network by a person.** That is the single biggest caveat on this page, and it applies
+to every platform below.
+
+**Windows** is the furthest along. The desktop app builds as an NSIS installer for x64 and ARM64
+(`windows-build.yml`), and its WASAPI paths — system audio, per-application capture, device
+enumeration — are exercised against the real audio stack by `sp-audio-io/tests/wasapi_smoke.rs`.
+Everything else the plan asks of Windows is written: receiving a phone's audio, feeding a phone's
+microphone into a virtual cable, the tray, global hotkeys, the firewall and network-profile helper,
+the WebView2 and Media Feature Pack checks, crash reports and diagnostics. The virtual microphone is
+still VB-CABLE; our own driver exists and is test-signed in CI but the app does not use it.
+
+**Linux** has the same desktop app. System audio, per-application capture, speaker muting and the
+app-created virtual microphone all run against a real PipeWire daemon in CI
+(`.github/workflows/ci.yml`, "Audio backend"), and deb, rpm and AppImage packages build. The XDG
+portal paths used inside Flatpak and on Wayland compile but have never run in a real session.
+
+**macOS** builds. CI produces a universal `.dmg` and checks its signature and audio-input entitlement
+(`.github/workflows/macos-build.yml`), so all the macOS-only code — process taps, ScreenCaptureKit,
+`SMAppService`, the Core Audio device watcher, the TCC permission flows — genuinely compiles for the
+platform rather than being type-checked. **Nobody has run this build on a Mac.** The bundled
+"SoundPush Microphone" AudioServerPlugIn has never been installed.
+
+**Android** builds a debug APK and a Play App Bundle, and passes its unit and Robolectric flow tests
+with accessibility checks (`app/src/test/.../MainFlowsTest.kt`) and Light/Dark/RTL/tablet screenshots
+(`ScreenshotTest.kt`). It has the streaming service, notification and Quick Settings controls, the
+widget, pairing by QR and code, microphone modes, app-audio capture, the audio screen, a
+troubleshooter that runs real checks, and the security log.
+**No physical phone has run it** — the development phone has never enumerated over USB.
+
+**The shared engine** is the most thoroughly tested part: protocol, pairing and trust, QUIC and
+TLS-over-TCP transports, discovery, Opus and PCM, the jitter buffer, drift compensation, redundancy,
+the route engine, reconnection and settings, with two-engine integration tests that pair, stream,
+interrupt and resume. Core line coverage is gated at 80 % in CI.
+
+---
+
+## Status by plan section
+
+### §4 Feature parity matrix
+
+| Plan section | What the plan asked for | Status | Evidence / note |
+|---|---|---|---|
+| §4.1 Streaming capabilities | Every source and sink combination: PC audio → phone, mic → any device, phone app audio → PC, phone ↔ phone, multiple receivers, Wi-Fi, USB tethering, ADB, headset mode | Done | Symmetric route model in `sp-engine/src/actor.rs`; `AppAudioCapture.kt`; ADB over `sp-transport/src/tcp.rs`; `HeadsetMode.kt`. No hardware test. |
+| §4.2 Connection and devices | Discovery, connect by address, connections list, secure pairing, per-device permissions, remote route control | Done | `sp-discovery/src/{mdns,beacon,registry,candidates}.rs`, `sp-security`, `features/Devices.svelte`, `feature-devices`. Multicast has never been tried on a real network. |
+| §4.3 Audio settings | Codec and bitrate, latency profiles, output effects, exclusive audio, mute PC, gain and RNNoise, mic presets, device selection | Done | `sp-engine/src/settings.rs`, `features/Audio.svelte`, `feature-audio/.../AudioScreen.kt`. Compatibility output and output audio effects are implemented, not pending — see §4.6. |
+| §4.4 App, settings and support | Stats, theme, language, startup, update check, crash reports, logs, troubleshooter, share links | Done | `features/Settings.svelte`, `feature-settings/.../SettingsScreen.kt`, `sp-engine/src/crash.rs`. |
+| §4.5 Platform parity | Windows, Linux, macOS and Android at the same level for 1.0 | Partial | Windows, Linux and Android are built and tested by machine; macOS builds in CI but has never been run (`macos-build.yml`). |
+| §4.6 Re-audit additions | Session timer, remote Mute PC and volume, mic monitoring, **output audio effects toggle**, exact bitrate steps, dismissible tips, Media Feature Pack and missing-device detection | Done | Output effects and compatibility output: `platform-service/.../PlatformPlayback.kt` (AudioTrack path, `ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION`), wired in `StreamingService.kt:233` `syncPlatformPlayback`, settings at `AudioScreen.kt:183-191`. Tips: `features/PlatformBanners.svelte`, `settings.dismissedTips`. |
+
+### §5–§8 Improvements and edge cases
+
+| Plan section | What the plan asked for | Status | Evidence / note |
+|---|---|---|---|
+| §5.1–§5.7 Improvements over AudioRelay | Headset mode, per-app capture, free premium features, pairing, accessibility, easy setup | Done | One deviation: the desktop has no acoustic echo canceller. [ADR-0020](adr/0020-desktop-echo-control.md) explains why and what replaces it. |
+| §8.1 Network edge cases | Loss, blackouts, lossless fallback, transport choice | Done | `sp-engine/src/health.rs` `QualityFallback` (PCM → Opus 256 kb/s after 5 s above 2 % loss, back after 15 s below 0.5 %); `settings.transport` pin (Auto/QUIC/TCP/USB). The TCP pin has never met a genuinely UDP-blocked network. |
+| §8.2 Device and session mistakes | Two routes wanting one virtual microphone, feedback loops | Done | `error.rs:138` `error.audio.virtualMicBusy`, with a "Replace current microphone source?" prompt and retry (`features/Home.svelte:42`, `SoundPush.kt:139`); `sp_media::dsp::FeedbackDetector` in the monitor path. |
+| §8.3 Audio edge cases | Clipping, RNNoise cost, microphone taken by another app | Done | Clip indicator: `pipeline/sender.rs:436-440` → `state.rs:294` → `LevelMeter.svelte` (announced as well as coloured), and `MainFlowsTest.kt:240` on Android. RNNoise auto-disable on capture overruns: `sp-engine/src/denoise.rs`. Mic-in-use notice: `DeviceStatus.kt:151` (`isClientSilenced`) → banner in `MainActivity.kt:701`. |
+| §8.4 Lifecycle and platform | Crashes, restarts, low memory | Done | `sp-engine/src/crash.rs` (redacted text report) plus `src-tauri/src/crash_dump.rs` (minidump for faults the panic hook never sees); Android `Caches.kt` with `onTrimMemory`, and `StateUpdates.kt` throttling snapshots while the app is hidden. |
+
+### §10–§14 Architecture
+
+| Plan section | What the plan asked for | Status | Evidence / note |
+|---|---|---|---|
+| §10 Technology stack | Shared Rust core, Tauri 2 + Svelte desktop, Kotlin + Compose Android, QUIC, Opus + PCM | Done | ADRs 0001, 0004, 0005, 0017, 0018. The plan named Oboe for Android audio; the code uses cpal, which uses AAudio there — recorded in [ADR-0002](adr/0002-audio-backends.md). |
+| §10.7, §13.4 Windows virtual microphone | Bundled VB-CABLE first, own signed driver next | Postponed | Stage 1 waits on the VB-Audio agreement; stage 2 is built and test-signed (`drivers/windows-virtual-audio`, `windows-driver.yml`) but the app still uses VB-CABLE. |
+| §11 Monorepo | Structure, workspaces, `justfile`, dependency rules | Done | `Cargo.toml`, `justfile`, `deny.toml` (dependency direction is a `cargo deny` check). |
+| §12 Shared core | `sp-protocol`, `sp-security`, `sp-transport`, `sp-discovery`, `sp-media`, `sp-audio-io`, `sp-engine`, `sp-testkit` | Done | All eight crates exist under `sound-push-core/`. `sp-engine` is `#![forbid(unsafe_code)]`. |
+| §13.1–§13.2 Desktop modules | Tray, window lifecycle, hotkeys, crash reports, portals | Done | `src-tauri/src/` — `tray.rs`, `window_state.rs` (including `desktop.keepWindowInMemory`, `settings.rs:342`), `hotkeys.rs`, `crash_dump.rs`, `portals.rs`. |
+| §13.3 Desktop audio I/O | Device selection, follow default, per-app capture, real-time priority | Done | `sp-audio-io/src/{cpal_backend,wasapi_process,pulse,macos_tap,macos_sck}.rs`; `src-tauri/src/device_watch.rs`; `sp-audio-io/src/rt_priority.rs` (MMCSS, Mach time-constraint policy, `SCHED_RR`). Priority has not been load-tested on any OS. |
+| §13.5 Background operation | Close to tray, idle behaviour | Done | `CloseHint.svelte`; `actor/local_audio.rs` `IdleAudio` closes the devices kept between streams after 60 s. |
+| §13.6 Permissions and system integration | Firewall rule, network profile, WebView2, Media Feature Pack | Done | `src-tauri/src/network.rs` (elevated `netsh`, absolute system paths, refusal of odd program paths), `webview2.rs`, `system.rs`. The plan's separate signed helper is deliberately not built; the reasoning is in [advanced.md](advanced.md). |
+| §14 Mobile architecture | Service, UI, audio, discovery, background, battery | Done | `platform-service/`, the `feature-*` modules, `core-engine/`. Battery behaviour has never been measured on a phone. |
+
+### §15–§20 Audio and networking
+
+| Plan section | What the plan asked for | Status | Evidence / note |
+|---|---|---|---|
+| §15.1–§15.3 Wire format and pipelines | 48 kHz, Opus/PCM, send and receive pipelines, mixed source | Done | `sp-engine/src/pipeline/{sender,receiver,monitor}.rs`; system audio and microphone mixed with independent gains via `Capabilities::SOURCE_MIXED` (`sp-protocol/src/version.rs:82`). The two capture clocks have never met real hardware. |
+| §15.2 DTX | Silence detection on Opus | Done | `FEATURE_DTX` capability bit 31; header-only packets after a 200 ms hangover, keep-alive every 400 ms. |
+| §15.4–§15.5 Latency profiles and drift | Low latency / Balanced / Stable / Custom, adaptive buffer, drift compensation | Done | `sp-media`, including a one-hour drift simulation test. |
+| §15.6 Loss resilience | Redundancy Auto / Always / Off | Done | The "Resilient" control exists in both apps: `features/Audio.svelte:234` and `AudioScreen.kt:116-129`, with a per-device override at `features/Devices.svelte:281`. The settings schema migrates the old boolean. |
+| §15.7 Microphone processing | Gain, limiter, RNNoise on either end, AEC | Done | Gain, soft limiter and clip indicator as in §8.3; `mic.noiseSuppressionAt` chooses sender or receiver (`settings.rs:240`), gated by `FEATURE_RECEIVER_DENOISE` (`version.rs:104`) so 1.0 peers fall back to the sender; receiver-side RNNoise at `pipeline/receiver.rs:210-214`, with a test at `receiver.rs:490-558` that the playout really suppresses hiss. No desktop AEC — `mic.echoDucking` instead, per [ADR-0020](adr/0020-desktop-echo-control.md). |
+| §15.9 Latency budget | Capture to output inside the Balanced budget | Partial | Per-stage latency is measured and shown (`RouteStats`), and `tools/latency-probe` measures it end to end from a chirp, but the budget has never been checked on a real link. |
+| §16.1–§16.2 Transports and protocol | QUIC, TLS over TCP, mutual TLS, pinning, migration, versioned messages | Done | `sp-transport`; real QUIC and TCP tests, including a client address change mid-session. |
+| §16.3 QoS | DSCP EF marking | Partial | `sp-transport/src/qos.rs`: qWAVE on Windows, `IP_TOS`/`IPV6_TCLASS` elsewhere. TCP carries the mark; QUIC does not, because quinn-udp 0.5 sends an ECN-only TOS control message. A test pins the version so the limitation is revisited when the dependency moves. |
+| §17 Discovery | mDNS, signed beacons, last-known addresses, candidate ranking and racing | Done | `sp-discovery`; `sp-engine/src/net.rs:79` `race_candidates` — 250 ms stagger, first authenticated handshake wins, losers cancelled, USB keeps a 2 s head start. |
+| §18 Pairing | Identity, QR and code, SAS, trust and permissions | Done | `sp-security` (16 tests); a pairing rate limit of 5 per minute per address in `sp-engine/src/pairing_limit.rs`. |
+| §19.1 Session state machine | Including a `Degraded` state | Done | `sp-engine/src/health.rs`: degraded above 3 % loss or 30 ms jitter for 3 s, recovered after 5 s below 1 % and 15 ms. |
+| §19.2 Multi-device | Encoder sharing and a receiver limit | Done | One capture and encoder per (source, profile); `settings.max_receivers` defaults to 8, range 1–16, refused with `SP-CFG-003`/`DeviceBusy` (`actor.rs:2619-2635`), with the bandwidth and CPU estimate both UIs show first (`safe_receivers`). |
+| §20 Reconnection | Backoff, resume tokens, anti-flap | Done | `sp-engine/src/{reconnect,resume}.rs`; more than five drops in two minutes holds the device on Stable for ten minutes. Never tried across a real Wi-Fi roam. |
+
+### §21–§28 Security, performance, UI and diagnostics
+
+| Plan section | What the plan asked for | Status | Evidence / note |
+|---|---|---|---|
+| §21.1–§21.2 Security controls | Pinned mutual TLS, trust store, consent, security log | Done | `sp-security`; `sp-engine/src/audit.rs` (1000 entries, 30 days, local only) with viewers in both apps. |
+| §21 External review | An independent security review before 1.0 | Needs a person | None has been commissioned. |
+| §22.1 Performance budgets | Release-blocking budgets for start-up, CPU, memory, size and glitch rate | Partial | Criterion benches cover the media hot paths and document the budget for each (`sp-media/benches/media.rs`), but nothing asserts them, and the application-level budgets have not been measured on any platform. |
+| §22.2 Continuous benchmarking | CI tracks regressions over 10 % | Not started | No workflow runs `cargo bench`; `android-benchmark.yml` covers Android start-up only, and it has never had a device. |
+| §23.1–§23.5 UI and accessibility | Information architecture, flows, theming, WCAG AA | Done | Desktop: `svelte-check`, Vitest, and Playwright e2e in light and dark with axe WCAG 2.1 AA checks. Android: Robolectric flow tests with ATF checks. No screen-reader pass on NVDA, VoiceOver or Orca. |
+| §23.6 Copy and localisation | i18n from day one, community translations | Partial | The machinery is complete — `ui/src/lib/i18n/` with plurals and `Intl` formats, RTL, pseudo-locales `en-XA`/`ar-XB`, and [translating.md](translating.md). **The only locale file is `en.json`**, and Android has no `values-*` language folder. |
+| §24 Desktop startup and background | Autostart, start hidden, resume routes, update timing | Done | "Resume streams after restart" exists globally in both apps: `settings.rs:518` `resume_routes_on_start`, with toggles at `features/Settings.svelte:202` and `SettingsScreen.kt:137`. Update timing: `updater.svelte.ts` delays the first check by 30 s after a sign-in launch and leaves metered connections alone. |
+| §25 Mobile background | Foreground service, OS constraints, lifecycle | Done | `StreamingService.kt`, `BootReceiver.kt`, `BatteryGuide.kt`. Untested on a phone. |
+| §26 Permissions | Android runtime permissions, desktop and macOS TCC, SoundPush-level consent | Done | `src-tauri/src/macos.rs` reads status without prompting and deep-links to System Settings; it compiles for macOS in CI but has never been exercised there. |
+| §27 Error handling | A shared taxonomy with stable public codes | Done | `sp-engine/src/error.rs` `code()` and `stop_reason_code()` reach state snapshots, the FFI, both UIs, diagnostics and logs; listed in [error-codes.md](error-codes.md). |
+| §28.1 Logging | Rotation 5 × 10 MB desktop, 3 × 2 MB Android; a debug level that reverts after 24 h | Partial | `sp-engine/src/logging.rs` and `settings.rs:625-641` (`schedule_debug_logging`, `expire_debug_logging`, unit-tested). The desktop toggle is live at `features/Settings.svelte:251`. **Android has no Detailed logging toggle** — the setting reaches `EngineState.kt:316` but no screen offers it. |
+| §28.2 Diagnostics | Connection details, network test, guided troubleshooter, export, audit log, crash reports | Done | Desktop `features/Troubleshooter.svelte`. **Android runs real checks too**: `feature-settings/.../Troubleshooter.kt` builds network, audio, microphone and background checks from live state with fix buttons (`findChecks`, `audioChecks`, `micChecks`, `backgroundChecks`) — it is not a list of tips. Deviation: the export carries only the redacted text crash report, never the minidump, because a dump holds process memory. |
+
+### §29–§36 Process, build and release
+
+| Plan section | What the plan asked for | Status | Evidence / note |
+|---|---|---|---|
+| §29.1 Test pyramid | Unit, simulation, fuzz, backend integration, e2e, soak | Done | `sp-testkit` (seeded impairment link, chirp cross-correlation); `sp-engine/tests/sim_network.rs`; `fuzz/` with targets run 30 minutes each nightly (`fuzz.yml`); `tools/{netsim,latency-probe,soak}`. |
+| §29.2 Device and OS matrix | A release gate across Windows, macOS, Linux and Android hardware | Not started | Needs a device lab — see below. |
+| §29.3 Quality gates | Format, clippy `-D warnings`, ktlint, eslint, coverage, dependency checks | Done | `.github/workflows/ci.yml` runs: `core` (Ubuntu, Windows and macOS — `cargo fmt --check`, the clippy gate through `tools/ci/clippy-gate.mjs`, workspace tests, PulseAudio server tests), `backends` (PipeWire and WASAPI), `coverage` (core gated at 80 % lines, engine reported), `desktop-ui` (eslint, Prettier, svelte-check, Vitest, `npm audit`), `desktop-e2e` (Playwright; the `test:e2e` script now exists, so the job really runs), `release-tools`, `dependencies` (`cargo-deny`) and `android` (assemble, bundle, unit tests, lint, ktlint, SHA-256 dependency verification). Alongside it: `fuzz.yml`, `windows-driver.yml`, `docs.yml`, `android-benchmark.yml`, and the Windows, macOS and Linux build workflows. |
+| §30 Standards and Definition of Done | Conventions and a review checklist | Done | `CONTRIBUTING.md`, `clippy.toml`. No `TODO`, `FIXME`, `todo!()` or `unimplemented!()` anywhere in the application code. |
+| §31 Dependency strategy | Pinned, audited, verified | Done | `deny.toml`; `android/gradle/verification-metadata.xml` covers 855 components and is regenerated against a cold Gradle home by `just mobile-verification`. |
+| §32 Build, release and update | Installers for four platforms, checksums, SBOMs, a signed updater, channels, staged rollout | Partial | `release.yml` builds NSIS x64 and ARM64, a universal DMG, deb/rpm/AppImage, and an Android APK **and App Bundle**, with checksums and SBOMs; `update-channels.yml` with `tools/release/channels.mjs` does stable/beta and the 10 % → 50 % → 100 % rollout. Nothing has been released and the signing secrets are unset. |
+| §33.1 Extension points | Designed into v1 | Done | Symmetric route model ([ADR-0009](adr/0009-symmetric-route-model.md)), capability bits, settings migrations (`settings.rs` `migrate`, schema v3). |
+| §33.2–§33.3 Roadmap and local API | Post-1.0 | Not started | By design. |
+| §36.1 Open-source model | GPL-3.0, no telemetry, everything free | Done | `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `PRIVACY.md`, `CHANGELOG.md`, issue and PR templates, CODEOWNERS, Dependabot. |
+| §36.3 Documentation deliverables | Protocol, security, ADRs, user guide, troubleshooting, UX docs | Done | `docs/protocol`, `docs/security`, ADRs 0001–0020, [user-guide.md](user-guide.md), [troubleshooting.md](troubleshooting.md), [advanced.md](advanced.md), [error-codes.md](error-codes.md), [virtual-microphone.md](virtual-microphone.md), `ux/flows.md`, `ux/copy.md`. The site builds with `mkdocs build --strict` but is not published. |
+| §36.5 Internationalisation | Ready from day one | Partial | See §23.6. |
+
+---
+
+## Deliberately postponed
+
+Two decisions, taken knowingly, and the things they hold up.
+
+**1. Paid code signing and notarisation.** Certificates and developer accounts cost money and the
+project is not releasing yet. The build system is ready for them: `release.yml` enables Windows
+Authenticode once `WINDOWS_CERTIFICATE` is set and Apple signing and notarisation once
+`APPLE_CERTIFICATE` is set, and the steps are written down in [release-signing.md](release-signing.md).
+Free signing is used where it exists — the desktop updater uses a minisign key
+([ADR-0019](adr/0019-release-signing-without-paid-certificates.md)).
+
+This blocks: installing on Windows without a SmartScreen warning; Gatekeeper accepting the macOS
+`.dmg`, which is ad-hoc signed today and needs "Open Anyway"; publishing to Google Play with a real
+release key; and Microsoft attestation signing of our Windows driver, which is what item 2 waits for.
+
+**2. Switching Windows from VB-CABLE to our own driver.** The driver is finished and built:
+`sound-push-desktop/drivers/windows-virtual-audio` (PortCls/WaveRT, "SoundPush Microphone Feed" →
+"SoundPush Microphone"), compiled for x64 and ARM64 and test-signed by `windows-driver.yml` with
+infverif, inf2cat and ApiValidator clean. It is **not used by the application**, because an unattested
+driver cannot load on an ordinary PC.
+
+This blocks: retiring the VB-CABLE dependency, and with it the need for the VB-Audio bundling
+agreement; the optional "SoundPush Speakers" render endpoint (§13.4, §4.6), so "Mute PC speakers" on
+Windows mutes the default endpoint (`src-tauri/src/hooks.rs:239`) instead of taking the render-endpoint
+route the plan prefers; and any test of the driver on a test-signing PC.
+
+---
+
+## Needs a person, not code
+
+| What | Why it is stuck |
+|---|---|
+| Enable GitHub Pages | Repository Settings → Pages → Source: "GitHub Actions". `docs.yml` builds and uploads the site every time and skips the deployment with a notice until an administrator does this. |
+| `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets | Without them `release.yml` builds no updater bundles, so installed apps would never see an update. The key is free to generate. |
+| `LINUX_GPG_PRIVATE_KEY` and `LINUX_GPG_PASSPHRASE` secrets | `SHA256SUMS.asc` is skipped until they are set. Also free. |
+| A written agreement with VB-Audio | The VB-CABLE licence requires one before the installer may bundle the package. The pinned download script is ready ([virtual-microphone.md](virtual-microphone.md) §4). |
+| A Hosted Weblate project | The component configuration is in [translating.md](translating.md) and `.weblate`; the project itself has to be created. |
+| Store accounts | Google Play, Microsoft Partner Center, Flathub, F-Droid and Homebrew submissions. Manifests live in `packaging/` and are filled per release by `tools/release/fill-manifests.mjs`; Flathub also wants screenshots. |
+| An external security review | §21 asks for one before 1.0. |
+| A device lab and real-network testing | The whole of §29.2, plus a DSCP packet capture, a Wi-Fi roam, an ARM64 Windows PC, a machine without the WebView2 runtime, a Flatpak or Wayland session, a battery measurement, and **running the macOS build on a Mac**. |
+| Translations | The i18n machinery is complete; somebody has to write the locale files. There are none in any language but English. |
+
+---
+
+## Known gaps
+
+What is genuinely missing or partial, with the plan section it belongs to.
+
+1. **§16.3 — DSCP on QUIC.** TCP carries the EF mark; QUIC does not, because quinn-udp 0.5 attaches
+   only the ECN bits. Blocked upstream. `sp-transport/src/qos.rs`.
+2. **§22.1 — Performance budgets unverified.** Start-up time, idle CPU and memory, per-stream CPU, APK
+   and installer size, connection time and glitch rate have not been measured on any platform.
+3. **§22.2 — No benchmark regression tracking.** `sp-media/benches/media.rs` exists and lists a budget
+   per bench, but no workflow runs `cargo bench` and nothing asserts the budgets, so a 10 % regression
+   would pass unnoticed. The bench file says as much in its own header comment.
+4. **§29.2 — No hardware matrix at all.** Nothing has run on a physical Android phone, a Mac, an ARM64
+   Windows PC, or a Wayland or Flatpak Linux session.
+5. **§23.5 — No screen-reader pass.** The automated axe and ATF checks pass; NVDA, VoiceOver and Orca
+   have not been used, and no external accessibility audit has been done.
+6. **§23.6, §36.5 — No translations.** `ui/src/lib/i18n/en.json` is the only locale file, and Android
+   has no `values-*` language folder.
+7. **§28.1 — Android has no Detailed logging toggle.** The engine setting and its 24-hour expiry are
+   implemented and reach `EngineState.kt:316`, but only the desktop exposes it.
+8. **§28.2 — Minidumps are not in the diagnostics export.** A deliberate deviation: the export carries
+   the redacted text crash report only, because a minidump holds process memory.
+9. **§13.4, §4.6 — No "SoundPush Speakers" render endpoint on Windows.** "Mute PC speakers" mutes the
+   default endpoint instead. Held up by the postponed driver switch.
+10. **§17, §20 — Discovery and roaming untested on real networks.** mDNS multicast, client and AP
+    isolation, and QUIC migration across a Wi-Fi roam are covered by unit and simulation tests only.
+11. **§13.3 — Real-time audio priority untested under load.** `sp-audio-io/src/rt_priority.rs` fails
+    softly on every platform, so a silent failure would go unnoticed without a load test.
+12. **Virtual microphone drivers never installed.** Neither the Windows driver (test-signed in CI) nor
+    the macOS AudioServerPlugIn (`drivers/macos-virtual-mic`, embedded in the app bundle) has been
+    installed on a real machine.
+13. **§32 — Nothing released.** The release, channel and store workflows have never run against a real
+    tag, so the updater path is unproven end to end.
