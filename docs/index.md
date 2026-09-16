@@ -22,7 +22,9 @@ Store listings (winget, Homebrew, Flathub, F-Droid, Google Play) are being prepa
 - **Headset**: both directions at once.
 - **Phone audio on the computer**: send app audio from Android 10 or newer to the computer.
 
-Start with the [user guide](user-guide.md). If something doesn't work, see [troubleshooting](troubleshooting.md).
+Start with the [user guide](user-guide.md). If something doesn't work, see
+[troubleshooting](troubleshooting.md), or look up the code in the message on the
+[error codes](error-codes.md) page.
 
 ## Help and contributing
 

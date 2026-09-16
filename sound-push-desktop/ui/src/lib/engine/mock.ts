@@ -39,6 +39,7 @@ const settings: Settings = {
     echoDucking: false,
   },
   capture: { systemDevice: null, muteLocalSpeakers: false, app: null, excludeApp: false },
+  mixed: { systemGainDb: 0, micGainDb: 0 },
   desktop: {
     launchAtLogin: true,
     startMinimized: true,
@@ -52,6 +53,8 @@ const settings: Settings = {
   },
   mobile: { stayAvailable: false, remindAfterRestart: true },
   autoConnectTrusted: true,
+  transport: "auto",
+  maxReceivers: 8,
   resumeRoutesOnStart: false,
   savedRoutes: [],
   dismissedTips: [],
@@ -93,6 +96,7 @@ let state: EngineState = {
       canSendSystemAudio: false,
       canSendAppAudio: true,
       canSendMic: true,
+      canSendMixed: false,
       canPlay: true,
       hasVirtualMic: false,
       transport: "quic",
@@ -109,6 +113,7 @@ let state: EngineState = {
     systemAudio: true,
     appAudio: false,
     microphone: true,
+    mixed: true,
     speaker: true,
     virtualMic: false,
     virtualMicDevice: null,
@@ -124,6 +129,15 @@ let state: EngineState = {
   noiseSuppressionSuspended: false,
   micMuted: false,
   networkTests: [],
+  streaming: {
+    receivers: 0,
+    maxReceivers: 8,
+    safeReceivers: 8,
+    kbps: 0,
+    cpuPct: 0,
+    perReceiverKbps: 143,
+    perReceiverCpuPct: 1,
+  },
 };
 
 const mockNetwork = {

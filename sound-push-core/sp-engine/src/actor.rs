@@ -34,9 +34,9 @@ use tracing::{debug, info, warn};
 
 use crate::audit::{AuditEntry, AuditKind, AuditLog, permission_name, policy_name};
 use crate::denoise::{DenoiseChange, DenoiseSupervisor};
-use crate::error::{ErrorView, Severity};
-use crate::health::LinkHealth;
-use crate::net::{local_addresses, resolve, sort_candidates};
+use crate::error::{ErrorView, Severity, stop_reason_code};
+use crate::health::{FALLBACK_BITRATE, LinkHealth, QualityFallback};
+use crate::net::{local_addresses, race_candidates, resolve, sort_candidates};
 use crate::nettest::NetworkReport;
 use crate::pairing_limit::{Decision, PairingLimiter};
 use crate::pipeline::monitor::MicMonitor;
@@ -48,7 +48,8 @@ use crate::reconnect::{Backoff, FlapDetector};
 use crate::resume::ResumeTokens;
 use crate::session::{self, Established, SessionCmd, SessionEvent};
 use crate::settings::{
-    DeviceProfile, LatencyMode, MicMode, SavedRoute, Settings, SettingsStore, Visibility,
+    DeviceProfile, LatencyMode, MicMode, SavedRoute, Settings, SettingsStore, TransportPin,
+    Visibility,
 };
 use crate::state::*;
 use crate::{EngineConfig, EngineError};
@@ -67,6 +68,20 @@ const LOCAL_ADDRESS_REFRESH: Duration = Duration::from_secs(30);
 const TRUST_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 /// Network candidates get this head start before the USB (adb reverse) candidate (plan §17.3).
 const USB_FALLBACK_DELAY: Duration = Duration::from_secs(2);
+/// A single candidate's handshake is given up after this long; the others race on regardless.
+const CANDIDATE_TIMEOUT: Duration = Duration::from_secs(3);
+/// What packet headers and framing add to a media payload, in percent (plan §19.2 estimate).
+const PACKET_OVERHEAD_PCT: u32 = 12;
+/// Rough share of one CPU core an encoder group costs: capture, the DSP chain and one encode per
+/// frame (`sp-media` benches: ~100 µs per 10 ms stereo Opus frame, so about 1 % of a core).
+const ENCODER_CPU_PCT: u32 = 2;
+/// Lossless has no encoder, only the copy into the packet.
+const PCM_ENCODER_CPU_PCT: u32 = 1;
+/// What each receiver of a group adds on top: patching its header and a socket write.
+const PER_RECEIVER_CPU_PCT: u32 = 1;
+/// Outgoing bandwidth beyond which a shared Wi-Fi link starts to drop audio. Receivers past this
+/// are still allowed; the UIs warn before them (plan §19.2).
+const SAFE_TOTAL_KBPS: u32 = 8_000;
 /// Time to open audio devices once a route is accepted.
 const PIPELINE_START_DEADLINE: Duration = Duration::from_secs(20);
 /// A blocked device that keeps reconnecting is written to the security log at most this often.
@@ -323,6 +338,9 @@ struct Route {
     last_received: u64,
     last_missing: u64,
     loss_pct: f64,
+    /// Lossless held on Opus while the link keeps losing packets (plan §8.1); only the route's
+    /// requester, which proposes the codec, keeps this.
+    quality_fallback: QualityFallback,
     paused_at: Option<Instant>,
     deadline: Option<Instant>,
 }
@@ -458,25 +476,15 @@ pub(crate) async fn spawn(
             ..EndpointConfig::default()
         },
     )?);
-    // TLS over TCP on loopback, where `adb reverse` forwards a phone's USB connection.
-    let tcp = if config.tcp_listener {
-        match TcpEndpoint::bind(
-            &identity,
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            endpoint.local_port(),
-        )
-        .await
-        {
-            Ok(t) => Some(t),
-            Err(e) => {
-                warn!(error = %e, "no TCP listener: USB connections unavailable");
-                TcpEndpoint::dialer(&identity).ok()
-            }
-        }
-    } else {
-        TcpEndpoint::dialer(&identity).ok()
-    }
-    .map(Arc::new);
+    // TLS over TCP on loopback, where `adb reverse` forwards a phone's USB connection (or on
+    // every interface while the user pins the TCP transport).
+    let tcp = bind_tcp(
+        &identity,
+        config.tcp_listener,
+        tcp_listen_ip(settings.transport),
+        endpoint.local_port(),
+    )
+    .await;
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
     let (internal_tx, mut internal_rx) = mpsc::unbounded_channel();
@@ -584,18 +592,8 @@ pub(crate) async fn spawn(
         });
     }
 
-    if let Some(tcp) = tcp.filter(|t| t.local_port() != 0) {
-        let tx = internal_tx.clone();
-        tokio::spawn(async move {
-            while let Some(handshake) = tcp.accept().await {
-                let tx = tx.clone();
-                tokio::spawn(async move {
-                    if let Ok(conn) = handshake.finish().await {
-                        let _ = tx.send(Internal::Incoming(conn));
-                    }
-                });
-            }
-        });
+    if let Some(tcp) = tcp {
+        spawn_tcp_accept(tcp, internal_tx.clone());
     }
 
     // Discovery.
@@ -655,6 +653,71 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// Media bandwidth one stream with this profile needs, in kb/s, headers included (plan §19.2).
+fn profile_kbps(p: &StreamProfile) -> u32 {
+    // 48 kHz × 16 bit × channels for PCM; the negotiated bitrate for Opus.
+    let media = if p.codec == Codec::PcmS16Le as u32 {
+        48 * 16 * p.channels.clamp(1, 2)
+    } else {
+        p.bitrate / 1000
+    };
+    // Redundancy repeats the previous frame in every packet.
+    let media = if p.redundancy { media * 2 } else { media };
+    media + media * PACKET_OVERHEAD_PCT / 100
+}
+
+fn encoder_cpu_pct(p: &StreamProfile) -> u32 {
+    if p.codec == Codec::PcmS16Le as u32 {
+        PCM_ENCODER_CPU_PCT
+    } else {
+        ENCODER_CPU_PCT
+    }
+}
+
+/// Where the TLS-over-TCP listener binds (plan §16.1): loopback, where `adb reverse` delivers a
+/// phone's USB connection, or every interface while the user pins the TCP transport, so that a
+/// peer pinned the same way can reach this device on a network that blocks UDP. The listener is
+/// mutually authenticated like the QUIC one, so a wider bind exposes nothing new.
+fn tcp_listen_ip(pin: TransportPin) -> IpAddr {
+    match pin {
+        TransportPin::Tcp => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        _ => IpAddr::V4(Ipv4Addr::LOCALHOST),
+    }
+}
+
+/// Bind the TLS-over-TCP endpoint, falling back to a dial-only one when it cannot listen.
+async fn bind_tcp(
+    identity: &DeviceIdentity,
+    listen: bool,
+    ip: IpAddr,
+    port: u16,
+) -> Option<Arc<TcpEndpoint>> {
+    if listen {
+        match TcpEndpoint::bind(identity, ip, port).await {
+            Ok(t) => return Some(Arc::new(t)),
+            Err(e) => warn!(error = %e, "no TCP listener: USB connections unavailable"),
+        }
+    }
+    TcpEndpoint::dialer(identity).ok().map(Arc::new)
+}
+
+fn spawn_tcp_accept(tcp: Arc<TcpEndpoint>, tx: mpsc::UnboundedSender<Internal>) {
+    if tcp.local_port() == 0 {
+        return;
+    }
+    tokio::spawn(async move {
+        while let Some(handshake) = tcp.accept().await {
+            // Each handshake on its own task: one stalled peer must not hold up the others.
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                if let Ok(conn) = handshake.finish().await {
+                    let _ = tx.send(Internal::Incoming(conn));
+                }
+            });
+        }
+    });
+}
+
 fn route_key(peer: &DeviceId, id: u8) -> String {
     format!("{}-{}", peer.to_hex(), id)
 }
@@ -697,10 +760,13 @@ impl Actor {
             Some(sp_audio_io::RenderTarget::Output(name)) => Some(name.clone()),
             _ => None,
         };
+        let system_audio = self.backend.supports_loopback();
         LocalCapabilities {
-            system_audio: self.backend.supports_loopback(),
+            system_audio,
             app_audio: self.hooks.app_audio_source().is_some(),
             microphone: true,
+            // Both halves have to exist for the mixed source (plan §5.1).
+            mixed: system_audio,
             speaker: true,
             virtual_mic: virtual_mic.is_some(),
             virtual_mic_input: virtual_mic_device
@@ -734,6 +800,9 @@ impl Actor {
         if caps.microphone {
             bits = bits.with(Capabilities::SOURCE_MICROPHONE);
         }
+        if caps.mixed {
+            bits = bits.with(Capabilities::SOURCE_MIXED);
+        }
         if caps.speaker {
             bits = bits.with(Capabilities::SINK_SPEAKER);
         }
@@ -762,6 +831,13 @@ impl Actor {
                 "apps",
                 "App audio",
                 EndpointKind::SourceAppAudio,
+            ));
+        }
+        if caps.mixed {
+            endpoints.push(endpoint_info(
+                "mixed",
+                "System audio + microphone",
+                EndpointKind::SourceMixed,
             ));
         }
         if caps.virtual_mic {
@@ -821,6 +897,12 @@ impl Actor {
     ) {
         let id = self.next_notice_id;
         self.next_notice_id += 1;
+        // The support code goes into the log as well, so a report quoting it can be found there
+        // even when the user dismissed the message (plan §36.4).
+        match error {
+            Some(e) => warn!(code = e.code(), key = e.key(), detail = %e, "engine error"),
+            None => debug!(key, "notice"),
+        }
         self.notices.push(NoticeView {
             id,
             key: key.to_string(),
@@ -1195,6 +1277,11 @@ impl Actor {
                 let old = std::mem::replace(&mut self.settings, settings);
                 self.save_settings();
                 self.apply_settings(&old);
+                // Pinning (or unpinning) TCP moves the listener between loopback and every
+                // interface. Open connections are unaffected.
+                if tcp_listen_ip(old.transport) != tcp_listen_ip(self.settings.transport) {
+                    self.rebind_tcp().await;
+                }
                 let _ = reply.send(Ok(self.settings.clone()));
             }
             Command::DismissNotice { id } => self.notices.retain(|n| n.id != id),
@@ -1269,6 +1356,13 @@ impl Actor {
         {
             self.update_discovery();
         }
+        // A new transport pin should be tried at once, not after the current backoff.
+        if old.transport != self.settings.transport {
+            for d in self.dials.values_mut() {
+                d.backoff.reset();
+                d.next_attempt = Instant::now();
+            }
+        }
         // Live updates to running routes.
         for r in &self.routes {
             if let Some(c) = r.receiver_controls.as_ref().filter(|_| !r.kind.is_mic()) {
@@ -1304,6 +1398,27 @@ impl Actor {
         } else if let Some(m) = &self.monitor {
             m.gain_db.set(self.settings.mic.gain_db);
         }
+    }
+
+    /// Move the TLS-over-TCP listener after a transport pin change (plan §16.1). Sessions already
+    /// running over TCP keep their connections; only the listener is replaced. `TRANSPORT_TCP`
+    /// may change with it, which `tick` re-announces to connected peers.
+    async fn rebind_tcp(&mut self) {
+        if let Some(old) = self.tcp.take() {
+            old.close();
+        }
+        let tcp = bind_tcp(
+            &self.identity,
+            self.config.tcp_listener,
+            tcp_listen_ip(self.settings.transport),
+            self.endpoint.local_port(),
+        )
+        .await;
+        self.tcp = tcp.clone();
+        if let Some(tcp) = tcp {
+            spawn_tcp_accept(tcp, self.internal_tx.clone());
+        }
+        self.update_discovery();
     }
 
     fn refresh_audio_devices(&mut self) {
@@ -1364,7 +1479,7 @@ impl Actor {
 
     // ============================================================ dialing
 
-    /// Dial candidates in order. Returns the conn_id the resulting session will use.
+    /// Race the candidates (plan §17.3). Returns the conn_id the resulting session will use.
     /// With `usb_port`, a TLS-over-TCP attempt to that loopback port (an `adb reverse` forward)
     /// races the network candidates, starting after [`USB_FALLBACK_DELAY`] if there are any.
     fn dial(
@@ -1376,36 +1491,52 @@ impl Actor {
         usb_port: Option<u16>,
     ) -> u64 {
         sort_candidates(&mut addrs, self.config.include_loopback);
+        // The pinned transport (plan §16.1) decides which candidates exist at all; Auto keeps
+        // both, with the USB head start.
+        let pin = self.settings.transport;
+        let over_tcp = pin == TransportPin::Tcp;
+        if matches!(pin, TransportPin::Usb) {
+            addrs.clear();
+        }
+        let usb_port = usb_port.filter(|_| pin != TransportPin::Quic);
         let conn_id = self.next_conn_id();
         let endpoint = self.endpoint.clone();
-        let tcp = self.tcp.clone().filter(|_| usb_port.is_some());
+        // `Some` on the network candidates only while TCP is pinned; the USB candidate is
+        // always TCP.
+        let network_tcp = self.tcp.clone().filter(|_| over_tcp);
+        let usb_tcp = self.tcp.clone().filter(|_| usb_port.is_some());
         let tx = self.internal_tx.clone();
         let task = tokio::spawn(async move {
             let has_network = !addrs.is_empty();
-            let network = async move {
-                let mut last = EngineError::Unreachable;
-                for addr in addrs.into_iter().take(8) {
-                    match tokio::time::timeout(
-                        Duration::from_secs(3),
-                        endpoint.connect(addr, pinned),
-                    )
-                    .await
-                    {
-                        Ok(Ok(conn)) => return Ok(conn),
+            // The ranked candidates race each other, each starting 250 ms after the one before
+            // it; the first authenticated handshake wins and the rest are cancelled.
+            let network = race_candidates(addrs, move |addr| {
+                let endpoint = endpoint.clone();
+                let tcp = network_tcp.clone();
+                async move {
+                    let connect = async {
+                        match &tcp {
+                            Some(tcp) => tcp.connect(addr, pinned).await,
+                            None => endpoint.connect(addr, pinned).await,
+                        }
+                    };
+                    match tokio::time::timeout(CANDIDATE_TIMEOUT, connect).await {
+                        Ok(Ok(conn)) => Ok(conn),
                         Ok(Err(e)) => {
                             debug!(%addr, error = %e, "dial failed");
-                            last = e.into();
+                            Err(EngineError::from(e))
                         }
-                        Err(_) => last = EngineError::Unreachable,
+                        Err(_) => Err(EngineError::Unreachable),
                     }
                 }
-                Err(last)
-            };
+            });
             let usb = async move {
-                let (Some(tcp), Some(port)) = (tcp, usb_port) else {
+                let (Some(tcp), Some(port)) = (usb_tcp, usb_port) else {
                     return Err(EngineError::Unreachable);
                 };
-                if has_network {
+                // Head start for the network only when both transports are in play: pinned to
+                // TCP, the USB candidate is no slower than the others.
+                if has_network && !over_tcp {
                     tokio::time::sleep(USB_FALLBACK_DELAY).await;
                 }
                 tcp.connect(SocketAddr::from(([127, 0, 0, 1], port)), pinned)
@@ -2087,6 +2218,45 @@ impl Actor {
         }
     }
 
+    /// Lossless (PCM) streams that keep losing packets fall back to Opus, and go back to lossless
+    /// when the link is good again (plan §8.1, §15.6). Both ways are announced, because the user
+    /// asked for lossless and would otherwise wonder where it went.
+    ///
+    /// Only the route's requester proposes the codec, so only it runs this; the other side
+    /// receives the change as an ordinary `RouteUpdate`.
+    fn update_quality_fallback(&mut self) {
+        let pcm = Codec::PcmS16Le as u32;
+        let changed: Vec<(String, DeviceId, bool)> = self
+            .routes
+            .iter_mut()
+            .filter(|r| r.requested_locally && r.status == RouteStatus::Active)
+            .filter(|r| {
+                r.quality_fallback.is_active() || r.profile.as_ref().is_some_and(|p| p.codec == pcm)
+            })
+            .filter_map(|r| {
+                r.quality_fallback
+                    .update(r.loss_pct)
+                    .then(|| (r.key(), r.peer, r.quality_fallback.is_active()))
+            })
+            .collect();
+        for (key, peer, active) in changed {
+            self.reconfigure_route(&key);
+            let name = self.peer_name(&peer);
+            if active {
+                info!(route = key, "lossless fell back to Opus");
+                self.notice(
+                    "notice.qualityFallback",
+                    vec![name],
+                    Severity::Warning,
+                    None,
+                );
+            } else {
+                info!(route = key, "lossless restored");
+                self.notice("notice.qualityRestored", vec![name], Severity::Info, None);
+            }
+        }
+    }
+
     // ============================================================ control messages
 
     fn on_control(&mut self, conn_id: u64, msg: ControlMsg) {
@@ -2148,9 +2318,12 @@ impl Actor {
                     let err = match reason {
                         StopReason::PermissionDenied => EngineError::PeerDenied,
                         StopReason::UnsupportedEndpoint => EngineError::VirtualMicMissing,
+                        // A device answers `DeviceBusy` when its source already feeds as many
+                        // receivers as it allows (plan §19.2).
+                        StopReason::DeviceBusy => EngineError::TooManyReceivers,
                         // Another device already feeds the peer's virtual microphone; the app
                         // offers to replace it (plan §8.2).
-                        StopReason::DeviceBusy => EngineError::VirtualMicBusy,
+                        StopReason::VirtualMicBusy => EngineError::VirtualMicBusy,
                         StopReason::AudioDeviceLost => EngineError::AudioDevice("remote".into()),
                         _ => EngineError::PeerDenied,
                     };
@@ -2263,16 +2436,31 @@ impl Actor {
         replace: bool,
         reply: Reply<String>,
     ) {
-        if let Err(e) = self.check_local_capability(kind) {
-            let _ = reply.send(Err(e));
-            return;
-        }
+        self.start_route_keeping(peer, kind, replace, reply, QualityFallback::default());
+    }
+
+    /// `fallback`: the quality fallback of the route this one replaces, so a route restarted on a
+    /// lossy link does not ask for lossless again (`profiles::restart_route`).
+    fn start_route_keeping(
+        &mut self,
+        peer: DeviceId,
+        kind: RouteKind,
+        replace: bool,
+        reply: Reply<String>,
+        fallback: QualityFallback,
+    ) {
+        // Starting a route that already runs is a no-op, answered before anything can refuse it:
+        // repeated start calls stay safe (plan §27.2), including at the receiver limit.
         if let Some(existing) = self
             .routes
             .iter()
             .find(|r| r.peer == peer && r.kind == kind && r.status != RouteStatus::Stopped)
         {
             let _ = reply.send(Ok(existing.key()));
+            return;
+        }
+        if let Err(e) = self.check_local_capability(kind) {
+            let _ = reply.send(Err(e));
             return;
         }
         // Only one device at a time can be the virtual microphone (plan §15.8). The app asks
@@ -2289,7 +2477,10 @@ impl Actor {
                 None => {}
             }
         }
-        let profile = self.profile_for(kind, &peer);
+        let mut profile = self.profile_for(kind, &peer);
+        if fallback.is_active() {
+            profiles::apply_quality_fallback(&mut profile);
+        }
         let Some(session) = self.sessions.get_mut(&peer) else {
             let _ = reply.send(Err(if self.trust.get(&peer).is_some() {
                 EngineError::Unreachable
@@ -2311,6 +2502,7 @@ impl Actor {
         let mut route = new_route(peer, id, kind, true, self.settings.output.volume);
         route.status = RouteStatus::Requesting;
         route.profile = Some(profile);
+        route.quality_fallback = fallback;
         route.reply = Some(reply);
         route.deadline = Some(Instant::now() + Duration::from_secs(35));
         self.routes.push(route);
@@ -2329,13 +2521,86 @@ impl Actor {
             .map(Route::key)
     }
 
+    /// Devices this one already feeds from `source` ("system", "apps", "mic"). Paused routes are
+    /// not counted: they cost nothing, and a device reconnecting must not find its own place
+    /// taken.
+    fn receivers_of(&self, source: &str) -> u32 {
+        self.routes
+            .iter()
+            .filter(|r| !matches!(r.status, RouteStatus::Stopped | RouteStatus::Paused))
+            .filter(|r| r.kind.local_is_source() && r.kind.endpoints().0 == source)
+            .count() as u32
+    }
+
+    /// The multi-device picture for the UIs: how many devices listen, the limit, and an estimate
+    /// of the bandwidth and CPU it costs (plan §19.2). See [`StreamingLoad`].
+    fn streaming_load(&self) -> StreamingLoad {
+        let sending: Vec<&Route> = self
+            .routes
+            .iter()
+            .filter(|r| !matches!(r.status, RouteStatus::Stopped | RouteStatus::Paused))
+            .filter(|r| r.kind.local_is_source())
+            .collect();
+        let mut kbps = 0;
+        let mut cpu_pct = 0;
+        let mut receivers = 0;
+        let mut per_receiver_kbps = None;
+        for source in ["system", "apps", "mic", "mixed"] {
+            let group: Vec<&&Route> = sending
+                .iter()
+                .filter(|r| r.kind.endpoints().0 == source)
+                .collect();
+            let Some(first) = group.first().and_then(|r| r.profile.as_ref()) else {
+                continue;
+            };
+            let each = profile_kbps(first);
+            kbps += each * group.len() as u32;
+            cpu_pct += encoder_cpu_pct(first) + PER_RECEIVER_CPU_PCT * group.len() as u32;
+            if group.len() as u32 >= receivers {
+                receivers = group.len() as u32;
+                per_receiver_kbps = Some(each);
+            }
+        }
+        // Nothing is running yet: estimate from the settings, so the cost of the first extra
+        // device can be shown before it is added.
+        let per_receiver_kbps = per_receiver_kbps.unwrap_or_else(|| {
+            let s = &self.settings.stream;
+            profile_kbps(&build_profile(
+                s.latency_profile(),
+                s.quality(),
+                2,
+                s.redundancy_always(),
+            ))
+        });
+        let max_receivers = self.settings.max_receivers;
+        StreamingLoad {
+            receivers,
+            max_receivers,
+            safe_receivers: (SAFE_TOTAL_KBPS / per_receiver_kbps.max(1)).clamp(1, max_receivers),
+            kbps,
+            cpu_pct,
+            per_receiver_kbps,
+            per_receiver_cpu_pct: PER_RECEIVER_CPU_PCT,
+        }
+    }
+
     fn check_local_capability(&self, kind: RouteKind) -> Result<(), EngineError> {
         let caps = self.local_capabilities();
+        // Plan §19.2: a source feeds at most `max_receivers` devices at once.
+        if kind.local_is_source()
+            && self.receivers_of(kind.endpoints().0) >= self.settings.max_receivers
+        {
+            return Err(EngineError::TooManyReceivers);
+        }
         match kind {
             RouteKind::SendSystemAudio if !caps.system_audio => {
                 Err(EngineError::LoopbackUnsupported)
             }
             RouteKind::SendAppAudio if !caps.app_audio => Err(EngineError::LoopbackUnsupported),
+            RouteKind::SendMixed if !caps.mixed => Err(EngineError::LoopbackUnsupported),
+            RouteKind::SendMixed if !self.hooks.microphone_permitted() => {
+                Err(EngineError::MicPermissionDenied)
+            }
             RouteKind::ReceiveMicToVirtualMic if !caps.virtual_mic => {
                 Err(EngineError::VirtualMicMissing)
             }
@@ -2395,8 +2660,14 @@ impl Actor {
         if let Err(e) = self.check_local_capability(kind) {
             let reason = match e {
                 EngineError::MicPermissionDenied => StopReason::PermissionDenied,
+                EngineError::TooManyReceivers => StopReason::DeviceBusy,
                 _ => StopReason::UnsupportedEndpoint,
             };
+            if e == EngineError::TooManyReceivers {
+                self.audit_peer(AuditKind::RouteDenied, &peer, Some(kind), "limit");
+                let name = self.peer_name(&peer);
+                self.error_notice(&e, vec![name]);
+            }
             self.reject(peer, req.route, reason);
             return;
         }
@@ -2406,7 +2677,7 @@ impl Actor {
             && let Some(current) = self.virtual_mic_feed(Some(peer))
         {
             if !req.replace {
-                self.reject(peer, req.route, StopReason::DeviceBusy);
+                self.reject(peer, req.route, StopReason::VirtualMicBusy);
                 return;
             }
             self.stop_route_by_key(&current, StopReason::Superseded, true);
@@ -2603,6 +2874,12 @@ impl Actor {
         let mut route = self.routes.remove(pos);
         self.release_pipelines(&mut route);
         if matches!(route.status, RouteStatus::Active | RouteStatus::Paused) {
+            info!(
+                route = key,
+                code = stop_reason_code(reason),
+                reason = ?reason,
+                "route stopped"
+            );
             self.audit_peer(
                 AuditKind::RouteStopped,
                 &route.peer,
@@ -2954,6 +3231,7 @@ impl Actor {
         }
 
         self.update_link_health();
+        self.update_quality_fallback();
         self.expire_stable_holds(now);
         self.refused_audited
             .retain(|_, t| now.duration_since(*t) < REFUSED_AUDIT_INTERVAL);
@@ -3090,9 +3368,10 @@ impl Actor {
                 continue;
             }
             match r.kind {
-                RouteKind::SendMicToSpeaker | RouteKind::SendMicToVirtualMic => {
-                    ka.microphone = true
-                }
+                // A mixed stream records the microphone too.
+                RouteKind::SendMicToSpeaker
+                | RouteKind::SendMicToVirtualMic
+                | RouteKind::SendMixed => ka.microphone = true,
                 RouteKind::SendAppAudio => ka.app_audio_capture = true,
                 RouteKind::SendSystemAudio => {}
                 _ => ka.playback = true,
@@ -3311,6 +3590,7 @@ impl Actor {
             noise_suppression_suspended: self.denoise.suspended(),
             network_tests: self.network_test_views(),
             mic_muted: self.mic_muted,
+            streaming: self.streaming_load(),
         };
         let _ = self.state_tx.send(Arc::new(state));
     }
@@ -3395,6 +3675,7 @@ impl Actor {
             can_send_system_audio: caps.has(Capabilities::SOURCE_SYSTEM_AUDIO),
             can_send_app_audio: caps.has(Capabilities::SOURCE_APP_AUDIO),
             can_send_mic: caps.has(Capabilities::SOURCE_MICROPHONE),
+            can_send_mixed: caps.has(Capabilities::SOURCE_MIXED),
             can_play: caps.has(Capabilities::SINK_SPEAKER),
             has_virtual_mic: caps.has(Capabilities::SINK_VIRTUAL_MIC),
             transport: match session.map(|s| s.conn.transport()) {
@@ -3495,6 +3776,7 @@ fn new_route(
         last_received: 0,
         last_missing: 0,
         loss_pct: 0.0,
+        quality_fallback: QualityFallback::default(),
         paused_at: None,
         deadline: None,
     }

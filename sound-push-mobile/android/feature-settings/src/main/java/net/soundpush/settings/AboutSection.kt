@@ -91,6 +91,9 @@ internal fun AboutSection(state: EngineState, onOpenLicenses: () -> Unit = {}) {
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
         NavRow(stringResource(R.string.settings_user_guide)) { openUrl(context, ProjectLinks.USER_GUIDE) }
+        NavRow(stringResource(R.string.settings_error_codes), stringResource(R.string.settings_error_codes_desc)) {
+            openUrl(context, ProjectLinks.ERROR_CODES)
+        }
         NavRow(stringResource(R.string.settings_report_bug)) { openUrl(context, ProjectLinks.REPORT_BUG) }
         NavRow(stringResource(R.string.settings_privacy_policy)) { openUrl(context, ProjectLinks.PRIVACY) }
         NavRow(stringResource(R.string.settings_license), stringResource(R.string.settings_license_desc)) {

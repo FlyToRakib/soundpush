@@ -27,7 +27,11 @@ if-addrs = "0.13"
 rand = "0.8"
 
 [dev-dependencies]
+# Building a pairing code with extra candidates (candidate racing test).
+sp-security = { path = "../sp-security" }
 tempfile = "3"
+# `start_paused` runs the candidate-racing tests on a virtual clock, without real waiting.
+tokio = { version = "1", features = ["test-util"] }
 tracing-subscriber = "0.3"
 
 [lints]

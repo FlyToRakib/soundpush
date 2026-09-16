@@ -170,6 +170,9 @@
     // the store rather than a derived: this runs after the component is gone.
     if (micTest) void engine.setMicMonitor(store.state?.settings.mic.monitor ?? false).catch(() => {});
   });
+
+  /** "0 dB", "+3 dB", "−6 dB" for the mixed source's two gains. */
+  const gainLabel = (v: number) => (v > 0 ? t("audio.gain.plus", String(v)) : t("audio.gain.value", String(v)));
 </script>
 
 <div class="page stack">
@@ -311,6 +314,20 @@
         onchange={(v) => updateSettings((x) => (x.capture.muteLocalSpeakers = v))} />
     </SettingRow>
   </Card>
+
+  <!-- The mixed source (plan §5.1): system audio and the microphone in one stream. -->
+  {#if app.capabilities.mixed}
+    <Card title={t("audio.mixed")} description={t("audio.mixed.desc")}>
+      <SettingRow label={t("audio.mixed.systemGain")}>
+        <Slider value={s.mixed.systemGainDb} min={-30} max={10} step={1} label={t("audio.mixed.systemGain")} format={gainLabel}
+          onchange={(v) => updateSettings((x) => (x.mixed.systemGainDb = v))} />
+      </SettingRow>
+      <SettingRow label={t("audio.mixed.micGain")} description={t("audio.mixed.micGain.desc")}>
+        <Slider value={s.mixed.micGainDb} min={-30} max={10} step={1} label={t("audio.mixed.micGain")} format={gainLabel}
+          onchange={(v) => updateSettings((x) => (x.mixed.micGainDb = v))} />
+      </SettingRow>
+    </Card>
+  {/if}
 
   <Card title={t("audio.mic")}>
     {#if micPermission === "denied" || micPermission === "restricted"}

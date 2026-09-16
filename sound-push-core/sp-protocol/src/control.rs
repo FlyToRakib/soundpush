@@ -181,6 +181,9 @@ pub enum EndpointKind {
     SourceSystemAudio = 1,
     SourceAppAudio = 2,
     SourceMicrophone = 3,
+    /// System audio and the microphone mixed into one stream (`SOURCE_MIXED`). A peer that does
+    /// not know the value decodes it as `Unspecified` and rejects the route.
+    SourceMixed = 4,
     SinkSpeaker = 10,
     SinkVirtualMic = 11,
 }
@@ -288,6 +291,9 @@ pub enum StopReason {
     /// Too many pairing attempts from this address; try again in a minute. Peers that do not
     /// know the value treat it as an ordinary close.
     RateLimited = 13,
+    /// Another device already feeds that computer's virtual microphone, and the request did not
+    /// ask to replace it. Peers that do not know the value treat it as an ordinary close.
+    VirtualMicBusy = 14,
 }
 
 /// Target of a volume or mute command.

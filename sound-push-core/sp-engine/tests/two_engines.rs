@@ -2,10 +2,13 @@
 //! reconnect and resume, shared encoders, per-device profiles, USB (TCP) and the network test.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // test helpers fail the test on purpose
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use sp_security::pairing::QrPairingPayload;
 
 use sp_engine::settings::{DeviceProfile, QualityMode};
 use sp_engine::sp_audio_io::null::NullBackend;
@@ -357,6 +360,171 @@ fn qr_pairing_route_and_audio() {
     let log = rt.block_on(desk.audit_log()).unwrap();
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].kind, AuditKind::LogCleared);
+}
+
+#[test]
+fn a_mixed_route_carries_system_audio_and_the_microphone_in_one_stream() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let captures = Arc::new(AtomicUsize::new(0));
+    let desk = start(
+        &desk_dir,
+        "Desk",
+        Arc::new(Counting {
+            inner: NullBackend {
+                recorded: None,
+                capture_frequency: 440.0,
+            },
+            captures: captures.clone(),
+        }),
+    );
+    let (phone_backend, recorded) = recorder();
+    let phone = start(&phone_dir, "Phone", phone_backend);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (desk_id, _) = pair(&rt, &desk, &phone);
+
+    // The mixed source is offered only where the peer advertises the capability bit.
+    wait_for(&phone, "the desk offers a mixed source", |s| {
+        s.peers
+            .iter()
+            .any(|p| p.device_id == desk_id && p.can_send_mixed)
+    });
+
+    let route_id = rt
+        .block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveMixed, false))
+        .unwrap();
+    wait_for(&desk, "the desk mixes", |s| {
+        s.routes
+            .iter()
+            .any(|r| r.kind == RouteKind::SendMixed && r.status == RouteStatus::Active)
+    });
+    wait_for_audio(&recorded, "phone should play the mixed stream");
+    assert_eq!(
+        captures.load(Ordering::Relaxed),
+        2,
+        "a mixed source opens the system audio and the microphone"
+    );
+
+    // Gains are live: silencing both halves leaves silence, and the route keeps running.
+    let mut settings = desk.state().settings.clone();
+    settings.mixed.system_gain_db = -30.0;
+    settings.mixed.mic_gain_db = -30.0;
+    let saved = rt.block_on(desk.update_settings(settings)).unwrap();
+    assert_eq!(saved.mixed.system_gain_db, -30.0);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while peak_of_last_second(&recorded) > 0.05 {
+        assert!(Instant::now() < deadline, "the mixed gains did not apply");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        desk.state()
+            .routes
+            .iter()
+            .any(|r| r.kind == RouteKind::SendMixed && r.status == RouteStatus::Active),
+        "turning both halves down does not stop the route"
+    );
+
+    phone.stop_route(route_id).unwrap();
+    wait_for(&desk, "the mixed route stopped", |s| {
+        !s.routes.iter().any(|r| r.kind == RouteKind::SendMixed)
+    });
+}
+
+#[test]
+fn a_source_feeds_at_most_its_configured_number_of_receivers() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let a_dir = tempfile::tempdir().unwrap();
+    let b_dir = tempfile::tempdir().unwrap();
+    let desk = start(&desk_dir, "Desk", sine());
+    let phone_a = start(&a_dir, "Phone A", Arc::new(NullBackend::default()));
+    let phone_b = start(&b_dir, "Phone B", Arc::new(NullBackend::default()));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (desk_id, _) = pair(&rt, &desk, &phone_a);
+    pair(&rt, &desk, &phone_b);
+
+    // One listener per source (the plan's default is eight).
+    let mut settings = desk.state().settings.clone();
+    settings.max_receivers = 1;
+    let saved = rt.block_on(desk.update_settings(settings)).unwrap();
+    assert_eq!(saved.max_receivers, 1);
+
+    rt.block_on(phone_a.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
+        .unwrap();
+    let state = wait_for(&desk, "the desk counts its listener", |s| {
+        s.streaming.receivers == 1
+    });
+    assert_eq!(state.streaming.max_receivers, 1);
+    assert!(
+        state.streaming.kbps > 0 && state.streaming.per_receiver_kbps > 0,
+        "an estimate is offered: {:?}",
+        state.streaming
+    );
+
+    // The second phone is refused, with the stable code for it, and the first keeps streaming.
+    let refused = rt
+        .block_on(phone_b.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
+        .unwrap_err();
+    assert_eq!(sp_engine::ErrorView::from(&refused).code, "SP-CFG-003");
+    // Asking again for a route that already runs stays a no-op, even at the limit.
+    assert!(
+        rt.block_on(phone_a.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
+            .is_ok()
+    );
+    let log = rt.block_on(desk.audit_log()).unwrap();
+    assert!(
+        log.iter()
+            .any(|e| e.kind == AuditKind::RouteDenied && e.detail == "limit"),
+        "{log:#?}"
+    );
+    assert_eq!(desk.state().streaming.receivers, 1);
+
+    // Raising the limit lets the second phone in.
+    let mut settings = desk.state().settings.clone();
+    settings.max_receivers = 4;
+    rt.block_on(desk.update_settings(settings)).unwrap();
+    rt.block_on(phone_b.start_route(desk_id, RouteKind::ReceiveSystemAudio, false))
+        .unwrap();
+    let state = wait_for(&desk, "two listeners share one capture", |s| {
+        s.streaming.receivers == 2
+    });
+    assert_eq!(state.streaming.kbps, 2 * state.streaming.per_receiver_kbps);
+}
+
+#[test]
+fn unreachable_candidates_do_not_delay_the_connection() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let desk = start(&desk_dir, "Desk", sine());
+    let phone = start(&phone_dir, "Phone", Arc::new(NullBackend::default()));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    // Put two black holes ahead of the desk's best address in its pairing code (a code carries
+    // three). They rank best (192.168/16) and equal ranks keep their order, so they are dialled
+    // first; each one costs the full 3 s handshake timeout. Dialling in order would need about
+    // 6 s; racing the candidates 250 ms apart reaches the real address at once (plan §17.3).
+    let uri = rt.block_on(desk.start_pairing()).unwrap();
+    let mut payload = QrPairingPayload::from_uri(&uri).unwrap();
+    let port = desk.state().local.port;
+    payload.addresses.truncate(1);
+    for octet in [11u8, 12] {
+        payload
+            .addresses
+            .insert(0, SocketAddr::from(([192, 168, 254, octet], port)));
+    }
+    let desk_id = desk.state().local.device_id.clone();
+    let started = Instant::now();
+    rt.block_on(phone.pair_with_qr(payload.to_uri())).unwrap();
+    wait_for_within(
+        &phone,
+        "phone connects past the black holes",
+        Duration::from_secs(4),
+        |s| connected(s, &desk_id),
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "candidates were not raced: {:?}",
+        started.elapsed()
+    );
 }
 
 #[test]

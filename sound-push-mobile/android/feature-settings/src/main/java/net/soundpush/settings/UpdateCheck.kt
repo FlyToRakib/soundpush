@@ -13,6 +13,7 @@ internal object ProjectLinks {
     private const val REPO = "https://github.com/FlyToRakib/soundpush"
     const val RELEASES = "$REPO/releases/latest"
     const val USER_GUIDE = "$REPO/blob/HEAD/docs/user-guide.md"
+    const val ERROR_CODES = "$REPO/blob/HEAD/docs/error-codes.md"
     const val PRIVACY = "$REPO/blob/HEAD/PRIVACY.md"
     const val LICENSE = "$REPO/blob/HEAD/LICENSE"
     const val REPORT_BUG = "$REPO/issues/new/choose"

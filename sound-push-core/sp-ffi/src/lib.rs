@@ -31,6 +31,8 @@ pub enum FfiError {
     // Not named `message`: Kotlin exceptions already define that property.
     #[error("{detail}")]
     Engine {
+        /// Stable support code, e.g. `SP-NET-004` (docs/error-codes.md).
+        code: String,
         key: String,
         detail: String,
         fix: Option<String>,
@@ -41,6 +43,7 @@ impl From<EngineError> for FfiError {
     fn from(e: EngineError) -> Self {
         let view = sp_engine::ErrorView::from(&e);
         Self::Engine {
+            code: view.code.to_string(),
             key: view.key.to_string(),
             detail: view.message,
             fix: view

@@ -154,7 +154,7 @@ object SoundPush {
             try {
                 engine.block()
             } catch (e: FfiException.Engine) {
-                _errors.tryEmit(ErrorView(key = e.key, message = e.detail, fix = e.fix))
+                _errors.tryEmit(ErrorView(key = e.key, code = e.code, message = e.detail, fix = e.fix))
             }
         }
     }

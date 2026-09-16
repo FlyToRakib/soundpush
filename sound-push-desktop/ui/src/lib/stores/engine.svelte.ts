@@ -37,6 +37,7 @@ class EngineStore {
       switch (kind) {
         case "sendSystemAudio":
         case "sendAppAudio":
+        case "sendMixed":
         case "sendMicToSpeaker":
           return p.canPlay;
         case "sendMicToVirtualMic":
@@ -45,6 +46,8 @@ class EngineStore {
           return p.canSendSystemAudio;
         case "receiveAppAudio":
           return p.canSendAppAudio;
+        case "receiveMixed":
+          return p.canSendMixed;
         case "receiveMicToVirtualMic":
         case "receiveMicToSpeaker":
           return p.canSendMic;

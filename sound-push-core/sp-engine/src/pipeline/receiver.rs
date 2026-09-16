@@ -367,6 +367,7 @@ mod tests {
                 application: OpusApplication::LowDelay,
                 source: CaptureSource::DefaultInput,
                 echo: None,
+                mix: None,
             },
             Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
             Box::new(|_| {}),

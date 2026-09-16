@@ -13,8 +13,9 @@ Supported range: **1.0 – 1.1**. Everything added in 1.1 is gated by a capabili
 - Keep-alive 1 s, idle timeout 10 s.
 - QoS (plan §16.3): media is marked DSCP EF (46) where the platform allows, best effort. Windows: a qWAVE flow per
   peer (traffic type Voice, then EF when the process may set it). Linux, Android, macOS: `IP_TOS`/`IPV6_TCLASS` on
-  the sockets; TLS-over-TCP carries it, but QUIC packets do not yet, because quinn-udp 0.5 sets a per-packet TOS
-  holding only ECN bits (`sp-transport/src/qos.rs`).
+  the sockets; TLS-over-TCP carries it, but QUIC packets do not yet, because quinn-udp 0.5.15 sets a per-packet TOS
+  holding only ECN bits (`sp-transport/src/qos.rs`). A test there pins that version and fails when the dependency
+  moves, so the limitation is re-checked instead of forgotten.
 - Connection migration is enabled: a peer whose address changes within the idle timeout keeps its connection.
 
 ### TLS over TCP (1.1, `TRANSPORT_TCP`)
@@ -25,6 +26,10 @@ For links that forward TCP only (USB via `adb reverse`, ADR-0005).
 - Desktops listen on **loopback only**, on the same port number as their UDP port when free. A phone dials
   `127.0.0.1:<computer's port>`, which `adb reverse tcp:<port> tcp:<tcp port>` forwards. The dialer starts this
   candidate 2 s after the network candidates (or immediately when it has none); the first authenticated handshake wins.
+- A device whose user pinned the **TCP** transport (§16.1, `settings.transport`) instead listens on every interface
+  and dials the network candidates over TCP, for networks that block UDP. Two devices must both be pinned for that
+  to connect. `TRANSPORT_TCP` is advertised whenever the listener is up, so peers see the change without
+  reconnecting.
 - One stream carries typed frames: `kind u8 | length u32 BE | payload`.
 
 | kind | Payload | Max |
@@ -56,14 +61,20 @@ Routes:
 |---|---|---|
 | `RouteRequest{route, source_endpoint, sink_endpoint, requester_is_source, profile}` | either | Ask to start a route. The requester allocates `route` (dialer even ids, listener odd ids). |
 | `RouteAccept{route, profile}` | responder | Accepted with the final profile (receiver's jitter bounds win). |
-| `RouteReject{route, reason}` | responder | Declined. |
+| `RouteReject{route, reason}` | responder | Declined. Reason 5 `DeviceBusy` means the source already feeds as many receivers as it allows (§19.2). |
 | `RouteStop{route, reason}` | either | Stop. |
 | `RouteUpdate{route, profile}` | either | Live profile change. |
 | `VolumeSet` / `MuteSet` | either | Remote control (`target = RouteStream` or `DeviceSpeakers`); requires the ControlMe permission. |
 | `StatsReport` | receiver → sender, 1 Hz | Loss, jitter, buffer, drift; drives adaptive bitrate. |
 | `Goodbye{reason}` | either | Orderly close. Reason 13 `RateLimited`: too many pairing attempts from this address (5/min, `docs/security/pairing.md`); peers that do not know it treat it as an ordinary close. |
 
-Endpoint ids: sources `system`, `apps`, `mic`; sinks `speaker`, `virtual-mic`.
+Endpoint ids: sources `system`, `apps`, `mic`, `mixed`; sinks `speaker`, `virtual-mic`.
+
+`mixed` (plan §5.1) is one stream carrying the sender's system audio and its microphone, summed
+with a gain per part. It is offered only to peers advertising `SOURCE_MIXED`, and a peer that does
+not know the endpoint answers `RouteReject(UnsupportedEndpoint)`, so 1.0 builds are unaffected. On
+the wire it is an ordinary stream: the mixing happens before the encoder, and a receiver needs no
+knowledge of it.
 
 `RouteUpdate` semantics: the route's requester proposes codec, bitrate, channels, frame size and redundancy; the
 receiving side always keeps its own jitter bounds. Bitrate and redundancy apply live. A codec, channel or frame change
@@ -91,6 +102,7 @@ interruption without asking the user again (see `docs/security/pairing.md`).
 | Bit | Name |
 |---|---|
 | 0, 1, 2 | `SOURCE_SYSTEM_AUDIO`, `SOURCE_APP_AUDIO`, `SOURCE_MICROPHONE` |
+| 3 | `SOURCE_MIXED` (the `mixed` endpoint: system audio + microphone in one stream) |
 | 8, 9 | `SINK_SPEAKER`, `SINK_VIRTUAL_MIC` |
 | 16, 17 | `CODEC_OPUS`, `CODEC_PCM` |
 | 24, 25, 26 | `FEATURE_REDUNDANCY`, `FEATURE_REMOTE_CONTROL`, `FEATURE_MIC_MONITOR` |

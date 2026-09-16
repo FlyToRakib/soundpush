@@ -126,6 +126,7 @@
       live={false}
       severity={notice.severity}
       message={t(notice.key, ...notice.args)}
+      code={notice.error?.code}
       actionLabel={fix && notice.error?.fix ? t(`fix.${notice.error.fix}`) : undefined}
       onaction={fix
         ? () => {

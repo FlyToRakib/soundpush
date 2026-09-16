@@ -25,6 +25,8 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+# Kotlin compiler daemon session files (sound-push-mobile/android/.kotlin/sessions).
+.kotlin/
 sound-push-mobile/android/core-engine/src/main/jniLibs/
 
 # Generated

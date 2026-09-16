@@ -4,6 +4,8 @@ export type Theme = "system" | "light" | "dark";
 export type Visibility = "everyone" | "trustedOnly" | "hidden";
 export type LatencyMode = "lowLatency" | "balanced" | "stable" | "custom";
 export type QualityMode = "auto" | "opus" | "lossless";
+/** Pinned transport (Advanced settings). "auto" races QUIC against the USB link. */
+export type TransportPin = "auto" | "quic" | "tcp" | "usb";
 export type AudioFocusMode = "pause" | "duck" | "mix" | "mixDuringCalls";
 /** "Resilient" (plan §15.6): on while the connection needs it, always on, or never. */
 export type RedundancyMode = "auto" | "on" | "off";
@@ -21,10 +23,13 @@ export type MicMode =
 export type RouteKind =
   | "sendSystemAudio"
   | "sendAppAudio"
+  /** This computer's system audio and microphone, mixed into one stream. */
+  | "sendMixed"
   | "sendMicToVirtualMic"
   | "sendMicToSpeaker"
   | "receiveSystemAudio"
   | "receiveAppAudio"
+  | "receiveMixed"
   | "receiveMicToVirtualMic"
   | "receiveMicToSpeaker";
 
@@ -108,6 +113,14 @@ export interface CaptureSettings {
   excludeApp: boolean;
 }
 
+/** The mixed source: system audio and the microphone in one stream, each part with its own gain. */
+export interface MixedSettings {
+  /** dB, −30 … +10. */
+  systemGainDb: number;
+  /** dB, −30 … +10; applied after the microphone's own gain and processing. */
+  micGainDb: number;
+}
+
 export interface DesktopSettings {
   launchAtLogin: boolean;
   startMinimized: boolean;
@@ -182,9 +195,14 @@ export interface Settings {
   output: OutputSettings;
   mic: MicSettings;
   capture: CaptureSettings;
+  mixed: MixedSettings;
   desktop: DesktopSettings;
   mobile: { stayAvailable: boolean; remindAfterRestart: boolean };
   autoConnectTrusted: boolean;
+  /** Transport pinned in Advanced settings; "auto" lets the engine choose. */
+  transport: TransportPin;
+  /** Most devices that may receive the same source at once (1–16, default 8). */
+  maxReceivers: number;
   resumeRoutesOnStart: boolean;
   savedRoutes: SavedRoute[];
   dismissedTips: string[];
@@ -232,6 +250,8 @@ export interface PeerView {
   canSendSystemAudio: boolean;
   canSendAppAudio: boolean;
   canSendMic: boolean;
+  /** Can send its system audio and microphone mixed into one stream. */
+  canSendMixed: boolean;
   canPlay: boolean;
   hasVirtualMic: boolean;
   /** "quic" or "tcp" (USB) while connected, "" otherwise. */
@@ -292,6 +312,8 @@ export interface RouteRequestPrompt {
 }
 
 export interface ErrorView {
+  /** Stable support code, e.g. "SP-NET-004" (docs/error-codes.md). */
+  code: string;
   key: string;
   message: string;
   severity: Severity;
@@ -357,6 +379,8 @@ export interface EngineState {
     systemAudio: boolean;
     appAudio: boolean;
     microphone: boolean;
+    /** System audio and the microphone in one stream. */
+    mixed: boolean;
     speaker: boolean;
     virtualMic: boolean;
     /** Device the phone microphone is fed into. */
@@ -375,6 +399,22 @@ export interface EngineState {
   networkTests: NetworkTestView[];
   /** Microphone mute (tray, shortcuts, push-to-talk). */
   micMuted: boolean;
+  streaming: StreamingLoad;
+}
+
+/**
+ * Multi-device streaming: how many devices receive this computer's audio, the limit, and a rough
+ * estimate of what it costs, so the cost of one more can be shown before it is added.
+ */
+export interface StreamingLoad {
+  receivers: number;
+  maxReceivers: number;
+  /** Adding a receiver beyond this is where we warn. */
+  safeReceivers: number;
+  kbps: number;
+  cpuPct: number;
+  perReceiverKbps: number;
+  perReceiverCpuPct: number;
 }
 
 // ---- desktop platform (src-tauri: network.rs, system.rs, hotkeys.rs)

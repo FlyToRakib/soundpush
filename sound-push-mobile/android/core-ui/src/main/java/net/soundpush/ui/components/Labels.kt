@@ -47,6 +47,8 @@ object Labels {
         "sendMicToSpeaker" -> R.string.route_sendMicToSpeaker
         "sendAppAudio" -> R.string.route_sendAppAudio
         "sendSystemAudio" -> R.string.route_sendSystemAudio
+        "sendMixed" -> R.string.route_sendMixed
+        "receiveMixed" -> R.string.route_receiveMixed
         "receiveMicToVirtualMic" -> R.string.route_receiveMicToVirtualMic
         else -> R.string.route_receiveMicToSpeaker
     }
@@ -73,6 +75,8 @@ object Labels {
         "notice.pairingRateLimited" -> R.string.notice_pairing_rate_limited
         "notice.denoiseSuspended" -> R.string.notice_denoise_suspended
         "notice.micFeedback" -> R.string.notice_mic_feedback
+        "notice.qualityFallback" -> R.string.notice_quality_fallback
+        "notice.qualityRestored" -> R.string.notice_quality_restored
         else -> R.string.notice_generic
     }
 
@@ -105,6 +109,7 @@ object Labels {
         "error.audio.loopbackUnsupported" -> R.string.error_loopback
         "error.audio.virtualMicMissing" -> R.string.error_virtual_mic
         "error.audio.virtualMicBusy" -> R.string.error_virtual_mic_busy
+        "error.route.tooManyReceivers" -> R.string.error_too_many_receivers
         "error.input.invalid" -> R.string.error_invalid
         "error.engine.starting" -> R.string.error_starting
         else -> R.string.error_generic

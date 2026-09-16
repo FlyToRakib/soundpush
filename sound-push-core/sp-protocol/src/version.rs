@@ -76,6 +76,10 @@ impl Capabilities {
     pub const SOURCE_SYSTEM_AUDIO: u64 = 1 << 0;
     pub const SOURCE_APP_AUDIO: u64 = 1 << 1;
     pub const SOURCE_MICROPHONE: u64 = 1 << 2;
+    /// Can send system audio and the microphone mixed into one stream (plan §5.1, §9.2; the
+    /// `mixed` endpoint). A requester offers that source only to peers advertising this bit, and
+    /// a peer without it rejects the endpoint as unsupported, so 1.0 builds are unaffected.
+    pub const SOURCE_MIXED: u64 = 1 << 3;
     pub const SINK_SPEAKER: u64 = 1 << 8;
     pub const SINK_VIRTUAL_MIC: u64 = 1 << 9;
     pub const CODEC_OPUS: u64 = 1 << 16;
