@@ -299,10 +299,18 @@ impl SoundPushEngine {
 
     // ------------------------------------------------------------ routes
 
-    pub fn start_route(&self, device_id: String, kind: String) -> Result<String, FfiError> {
+    /// `replace` takes the peer's virtual microphone away from the device feeding it now. Without
+    /// it a second microphone route fails with `error.audio.virtualMicBusy`, so the app can ask
+    /// "Replace current microphone source?" first (plan §8.2).
+    pub fn start_route(
+        &self,
+        device_id: String,
+        kind: String,
+        replace: bool,
+    ) -> Result<String, FfiError> {
         let kind = parse_kind(&kind)?;
         Ok(pollster::block_on(
-            self.handle.start_route(device_id, kind),
+            self.handle.start_route(device_id, kind, replace),
         )?)
     }
 

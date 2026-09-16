@@ -49,8 +49,18 @@ First public preview. Nothing has been released yet; everything below is new.
 - **Translations on Weblate**: component setup for the desktop and Android strings (`docs/translating.md`).
 - **Quality gates in CI**: clippy with warnings as errors, line coverage report with an 80 % gate on the core
   crates, nightly fuzzing of every fuzz target, and a hook for desktop end-to-end tests.
-- **Documentation**: user guide, privacy policy, threat model, release-signing guide, ADRs 0006–0019, issue and pull
+- **Documentation**: user guide, privacy policy, threat model, release-signing guide, ADRs 0006–0020, issue and pull
   request templates.
+- **Noise suppression where you want it**: RNNoise runs on the phone or on the computer, so you choose which
+  device spends the CPU. It also switches itself off (with a notice) when a machine stops keeping up, and comes
+  back when it recovers.
+- **Resilient streaming**: Auto, Always or Off, instead of only automatic. Auto stays the default.
+- **Test tools on the desktop Audio page**: a test tone on the chosen output, and a microphone test you can hear.
+- **Clip indicator** on the level meters, announced as well as coloured, when the volume boost hits the limiter.
+- **Feedback-loop warning** while monitoring the microphone on speakers, with a headphones suggestion and an
+  optional "Reduce echo on speakers" for desktops without echo cancellation (ADR-0020).
+- **"Replace current microphone source?"** when a second device asks to be a computer’s microphone.
+- **Android**: balance, the 80 Hz low-cut filter, and a “Recommended” badge on the microphone mode list.
 
 ### Changed
 

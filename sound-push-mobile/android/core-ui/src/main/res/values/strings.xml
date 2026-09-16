@@ -122,7 +122,7 @@
     <string name="audio_noise_suppression_desc">Reduces background noise. Uses more battery.</string>
     <string name="audio_mic_mode">Microphone mode</string>
     <string name="mic_default">Default</string>
-    <string name="mic_voiceCommunication">Voice calls (recommended)</string>
+    <string name="mic_voiceCommunication">Voice calls</string>
     <string name="mic_raw">Unprocessed</string>
     <string name="mic_voicePerformance">Low latency</string>
     <string name="mic_voiceRecognition">Voice recognition</string>
@@ -520,4 +520,36 @@
     <string name="settings_share_app">Share SoundPush</string>
     <string name="devices_select">Choose a device to see its settings.</string>
     <string name="share_app_text">SoundPush plays your computer\'s sound on your phone and turns your phone into a microphone. Free and open source: %1$s</string>
+    <!-- Audio: Resilient, where noise suppression runs, balance, low-cut, level meter (plan 4.3, 8.2, 8.3, 15.6) -->
+    <string name="audio_redundancy">Resilient</string>
+    <string name="audio_redundancy_auto">Auto</string>
+    <string name="audio_redundancy_auto_desc">Sends each moment of sound twice while the connection is losing packets, and stops again when it recovers. Recommended.</string>
+    <string name="audio_redundancy_on">Always</string>
+    <string name="audio_redundancy_on_desc">Always sends each moment of sound twice, so single losses are inaudible. Uses about twice the data.</string>
+    <string name="audio_redundancy_off">Off</string>
+    <string name="audio_redundancy_off_desc">Never sends anything twice. Saves data on a metered or busy network; short dropouts may be audible.</string>
+    <string name="audio_noise_suppression_where">Noise suppression runs</string>
+    <string name="audio_noise_suppression_sender">On this phone</string>
+    <string name="audio_noise_suppression_sender_desc">This phone does the work, which uses a little more battery.</string>
+    <string name="audio_noise_suppression_receiver">On the computer</string>
+    <string name="audio_noise_suppression_receiver_desc">The computer playing your microphone does the work, saving this phone\'s battery. Computers too old to do it fall back to this phone.</string>
+    <string name="audio_noise_suppression_suspended">Noise suppression turned itself off because the device couldn\'t keep up with it. It comes back on by itself.</string>
+    <string name="audio_high_pass">Low-cut filter</string>
+    <string name="audio_high_pass_desc">Removes rumble, handling noise and wind below 80 Hz.</string>
+    <string name="audio_balance">Balance</string>
+    <string name="audio_balance_center">Center</string>
+    <string name="audio_balance_left">Left %1$d%%</string>
+    <string name="audio_balance_right">Right %1$d%%</string>
+    <string name="audio_mic_level">Microphone level</string>
+    <string name="audio_clipping">Clipping</string>
+    <string name="a11y_level">%1$d dB</string>
+    <string name="a11y_level_clipping">%1$s, clipping</string>
+    <string name="mic_recommended_badge">Recommended</string>
+    <string name="audio_feedback">That whistling is a feedback loop: this phone\'s microphone is picking up its own sound from the speaker. Use headphones, or switch to Headset mode.</string>
+    <string name="notice_denoise_suspended">Noise suppression turned itself off because the device couldn\'t keep up with it. It comes back on by itself.</string>
+    <string name="notice_mic_feedback">Your microphone is picking up the speaker and starting to whistle. Use headphones, or switch to Headset mode.</string>
+    <string name="error_virtual_mic_busy">Another device is already the microphone on that computer.</string>
+    <string name="mic_takeover_title">Replace current microphone source?</string>
+    <string name="mic_takeover_body">Another device is the microphone on %1$s right now. Starting this one stops that.</string>
+    <string name="mic_takeover_replace">Replace</string>
 </resources>

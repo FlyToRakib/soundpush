@@ -5,6 +5,10 @@ export type Visibility = "everyone" | "trustedOnly" | "hidden";
 export type LatencyMode = "lowLatency" | "balanced" | "stable" | "custom";
 export type QualityMode = "auto" | "opus" | "lossless";
 export type AudioFocusMode = "pause" | "duck" | "mix" | "mixDuringCalls";
+/** "Resilient" (plan §15.6): on while the connection needs it, always on, or never. */
+export type RedundancyMode = "auto" | "on" | "off";
+/** Which device suppresses microphone noise (plan §15.7). */
+export type DenoiseAt = "sender" | "receiver";
 export type MicMode =
   | "default"
   | "voiceCommunication"
@@ -63,7 +67,7 @@ export interface StreamSettings {
   customMaxMs: number;
   quality: QualityMode;
   opusBitrate: number;
-  redundancy: boolean;
+  redundancy: RedundancyMode;
 }
 
 export interface OutputSettings {
@@ -82,6 +86,8 @@ export interface MicSettings {
   device: string | null;
   gainDb: number;
   noiseSuppression: boolean;
+  /** Where noise suppression runs: this device, or the one that plays the microphone. */
+  noiseSuppressionAt: DenoiseAt;
   mode: MicMode;
   systemAgc: boolean;
   systemNoiseSuppression: boolean;
@@ -89,6 +95,8 @@ export interface MicSettings {
   monitor: boolean;
   /** 80 Hz high-pass filter before noise suppression. */
   highPass: boolean;
+  /** Lower this microphone while this computer plays the other side on its speakers. */
+  echoDucking: boolean;
 }
 
 export interface CaptureSettings {
@@ -120,7 +128,7 @@ export interface DeviceProfile {
   customMaxMs?: number;
   quality?: QualityMode;
   opusBitrate?: number;
-  redundancy?: boolean;
+  redundancy?: RedundancyMode;
 }
 
 export interface SavedRoute {
@@ -244,6 +252,8 @@ export interface RouteStats {
   underruns: number;
   driftPpm: number;
   levelDb: number;
+  /** The soft limiter after the volume boost is working (plan §8.3). */
+  clipping: boolean;
   /** Parts of latencyMs; the jitter buffer is bufferMs. */
   captureMs: number;
   encodeMs: number;
@@ -356,6 +366,12 @@ export interface EngineState {
   };
   audioDevices: AudioDeviceView[];
   micLevelDb: number;
+  /** The microphone limiter is working; the level meter shows a clip indicator. */
+  micClipping: boolean;
+  /** Monitoring the microphone on this computer's speakers is howling (plan §8.2). */
+  micFeedback: boolean;
+  /** Noise suppression switched itself off because capture could not keep up (plan §8.3). */
+  noiseSuppressionSuspended: boolean;
   networkTests: NetworkTestView[];
   /** Microphone mute (tray, shortcuts, push-to-talk). */
   micMuted: boolean;

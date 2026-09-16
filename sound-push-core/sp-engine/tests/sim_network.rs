@@ -195,6 +195,7 @@ impl Scenario {
             ReceiverConfig {
                 profile: profile.clone(),
                 target: RenderTarget::DefaultOutput,
+                echo: None,
             },
             rx.clone(),
             Box::new(|_| {}),
@@ -207,6 +208,7 @@ impl Scenario {
                 profile: profile.clone(),
                 application: OpusApplication::LowDelay,
                 source: CaptureSource::SystemLoopback(None),
+                echo: None,
             },
             Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
             Box::new(|_| {}),

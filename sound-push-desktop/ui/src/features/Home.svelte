@@ -29,10 +29,22 @@
       .reduce((acc, list) => acc.filter((p) => list.some((q) => q.deviceId === p.deviceId)));
   }
 
-  async function startTask(task: Task, peer: PeerView) {
+  /** A start that needs "Replace current microphone source?" before it can go ahead (plan §8.2). */
+  let takeover = $state<{ task: Task; peer: PeerView } | null>(null);
+
+  async function startTask(task: Task, peer: PeerView, replace = false) {
     picking = null;
     for (const kind of task.kinds) {
-      await run(engine.startRoute(peer.deviceId, kind));
+      try {
+        await engine.startRoute(peer.deviceId, kind, replace);
+      } catch (e) {
+        // Another device is the peer's microphone: ask before taking it over.
+        if ((e as { key?: string }).key === "error.audio.virtualMicBusy" && !replace) {
+          takeover = { task, peer };
+          return;
+        }
+        await run(Promise.reject(e));
+      }
     }
   }
 
@@ -167,6 +179,23 @@
         {#if supported}<Icon name="chevron" size={16} />{/if}
       </button>
     {/each}
+  </Dialog>
+{/if}
+
+{#if takeover}
+  {@const pending = takeover}
+  <Dialog title={t("mic.takeover.title")} onclose={() => (takeover = null)}>
+    <p class="muted">{t("mic.takeover.body", pending.peer.name)}</p>
+    {#snippet actions()}
+      <Button onclick={() => (takeover = null)}>{t("common.cancel")}</Button>
+      <Button
+        variant="primary"
+        onclick={() => {
+          takeover = null;
+          void startTask(pending.task, pending.peer, true);
+        }}>{t("mic.takeover.replace")}</Button
+      >
+    {/snippet}
   </Dialog>
 {/if}
 

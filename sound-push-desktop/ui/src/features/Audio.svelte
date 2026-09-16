@@ -15,7 +15,7 @@
   import SettingRow from "../lib/components/SettingRow.svelte";
   import Slider from "../lib/components/Slider.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
-  import type { AudioApps, HotkeyKind, LatencyMode, QualityMode } from "../lib/engine/types";
+  import type { AudioApps, DenoiseAt, HotkeyKind, LatencyMode, QualityMode, RedundancyMode } from "../lib/engine/types";
   import { t } from "../lib/i18n";
   import { store } from "../lib/stores/engine.svelte";
   import { updateSettings } from "../lib/stores/settings";
@@ -149,6 +149,27 @@
     label: `${k} kb/s`,
   }));
   const fromSelect = (v: string) => (v === DEFAULT ? null : v);
+
+  // Test tools (plan §5.1). The microphone test reuses the engine's monitor without touching the
+  // saved "Listen to my microphone" setting, and stops itself so nobody leaves it running.
+  const MIC_TEST_SECONDS = 15;
+  let micTest = $state(false);
+  let micTestTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function toggleMicTest() {
+    clearTimeout(micTestTimer);
+    const next = !micTest;
+    micTest = next;
+    await run(engine.setMicMonitor(next || s.mic.monitor));
+    if (next) micTestTimer = setTimeout(() => void toggleMicTest(), MIC_TEST_SECONDS * 1000);
+  }
+
+  onMount(() => () => {
+    clearTimeout(micTestTimer);
+    // Never leave the monitor running because the page was left mid-test. Read the setting from
+    // the store rather than a derived: this runs after the component is gone.
+    if (micTest) void engine.setMicMonitor(store.state?.settings.mic.monitor ?? false).catch(() => {});
+  });
 </script>
 
 <div class="page stack">
@@ -185,6 +206,14 @@
           onchange={(v) => updateSettings((x) => (x.stream.opusBitrate = Number(v)))} />
       </SettingRow>
     {/if}
+    <SettingRow label={t("audio.redundancy")} description={t(`audio.redundancy.${s.stream.redundancy}.desc`)}>
+      <Segmented
+        value={s.stream.redundancy}
+        label={t("audio.redundancy")}
+        options={(["auto", "on", "off"] as RedundancyMode[]).map((v) => ({ value: v, label: t(`audio.redundancy.${v}`) }))}
+        onchange={(v) => updateSettings((x) => (x.stream.redundancy = v as RedundancyMode))}
+      />
+    </SettingRow>
   </Card>
 
   <Card title={t("audio.virtualMic")} description={t("audio.virtualMic.desc")}>
@@ -314,13 +343,48 @@
       <Toggle checked={s.mic.highPass} label={t("audio.highPass")}
         onchange={(v) => updateSettings((x) => (x.mic.highPass = v))} />
     </SettingRow>
+    {#if app.noiseSuppressionSuspended}
+      <Banner severity="warning" message={t("audio.noiseSuppression.suspended")} />
+    {/if}
     <SettingRow label={t("audio.noiseSuppression")} description={t("audio.noiseSuppression.desc")}>
       <Toggle checked={s.mic.noiseSuppression} label={t("audio.noiseSuppression")}
         onchange={(v) => updateSettings((x) => (x.mic.noiseSuppression = v))} />
     </SettingRow>
+    {#if s.mic.noiseSuppression}
+      <SettingRow label={t("audio.noiseSuppression.where")} description={t(`audio.noiseSuppression.${s.mic.noiseSuppressionAt}.desc`)}>
+        <Segmented
+          value={s.mic.noiseSuppressionAt}
+          label={t("audio.noiseSuppression.where")}
+          options={(["sender", "receiver"] as DenoiseAt[]).map((v) => ({ value: v, label: t(`audio.noiseSuppression.${v}`) }))}
+          onchange={(v) => updateSettings((x) => (x.mic.noiseSuppressionAt = v as DenoiseAt))}
+        />
+      </SettingRow>
+    {/if}
+    <SettingRow label={t("audio.echoDucking")} description={t("audio.echoDucking.desc")}>
+      <Toggle checked={s.mic.echoDucking} label={t("audio.echoDucking")}
+        onchange={(v) => updateSettings((x) => (x.mic.echoDucking = v))} />
+    </SettingRow>
+    {#if app.micFeedback}
+      <Banner
+        severity="warning"
+        message={t("audio.feedback")}
+        actionLabel={s.mic.echoDucking ? undefined : t("audio.feedback.duck")}
+        onaction={() => updateSettings((x) => (x.mic.echoDucking = true))}
+      />
+    {/if}
     <SettingRow label={t("audio.monitor")} description={t("audio.monitor.desc")}>
-      {#if s.mic.monitor}<LevelMeter db={app.micLevelDb} label={t("audio.mic")} />{/if}
+      {#if s.mic.monitor || micTest}<LevelMeter db={app.micLevelDb} label={t("audio.mic")} clipping={app.micClipping} />{/if}
       <Toggle checked={s.mic.monitor} label={t("audio.monitor")} onchange={(v) => updateSettings((x) => (x.mic.monitor = v))} />
+    </SettingRow>
+  </Card>
+
+  <Card title={t("audio.test")} description={t("audio.test.desc")}>
+    <SettingRow label={t("audio.test.tone")} description={t("audio.test.tone.desc")}>
+      <Button onclick={() => run(engine.playTestTone())}>{t("audio.test.tone.play")}</Button>
+    </SettingRow>
+    <SettingRow label={t("audio.test.mic")} description={t(micTest ? "audio.test.mic.running" : "audio.test.mic.desc")}>
+      {#if micTest}<LevelMeter db={app.micLevelDb} label={t("audio.mic")} clipping={app.micClipping} />{/if}
+      <Button onclick={toggleMicTest}>{t(micTest ? "audio.test.mic.stop" : "audio.test.mic.start")}</Button>
     </SettingRow>
   </Card>
 

@@ -44,7 +44,7 @@ class StreamTileService : TileService() {
                 unlockAndRun { startActivityAndCollapseCompat() }
                 return
             }
-            SoundPush.command { startRoute(peer.deviceId, "receiveSystemAudio") }
+            SoundPush.command { startRoute(peer.deviceId, "receiveSystemAudio", false) }
         }
     }
 

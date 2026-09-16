@@ -395,7 +395,7 @@ fn run() -> Result<bool, Error> {
     settings.stream.latency = o.latency;
     settings.stream.quality = o.quality;
     rt.block_on(receiver.update_settings(settings))?;
-    rt.block_on(receiver.start_route(sender_id.clone(), RouteKind::ReceiveSystemAudio))?;
+    rt.block_on(receiver.start_route(sender_id.clone(), RouteKind::ReceiveSystemAudio, false))?;
     wait_for(&receiver, "active route", |s| {
         s.routes.iter().any(|r| r.status == RouteStatus::Active)
     })?;

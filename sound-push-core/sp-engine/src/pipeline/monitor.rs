@@ -1,12 +1,16 @@
 //! Local microphone monitoring ("Listen to my mic").
 //!
 //! Captures the microphone and plays it on this device with minimal buffering.
+//!
+//! The captured audio also goes through a feedback detector: when the monitor plays on speakers
+//! rather than headphones, the loop can start to howl, and the engine then warns the user and
+//! suggests headphones or Headset mode (plan §8.2).
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use sp_audio_io::{AudioBackend, AudioStream, CaptureSource, RenderTarget};
-use sp_media::dsp::{Gain, db_to_gain};
+use sp_media::dsp::{FeedbackDetector, Gain, db_to_gain};
 
 use super::controls::AtomicF32;
 use crate::EngineError;
@@ -15,6 +19,8 @@ pub struct MicMonitor {
     _capture: Box<dyn AudioStream>,
     _render: Box<dyn AudioStream>,
     pub gain_db: Arc<AtomicF32>,
+    /// True while the monitor is howling; the engine warns once and then clears it.
+    feedback: Arc<AtomicBool>,
 }
 
 impl MicMonitor {
@@ -27,11 +33,17 @@ impl MicMonitor {
         // ~40 ms of mono audio: enough to absorb callback scheduling, small enough to stay responsive.
         let (mut producer, mut consumer) = rtrb::RingBuffer::<f32>::new(1920);
         let gain_ctl = Arc::new(AtomicF32::new(gain_db));
+        let feedback = Arc::new(AtomicBool::new(false));
 
+        let heard = feedback.clone();
+        let mut detector = FeedbackDetector::new();
         let capture = backend.open_capture(
             &source,
             1,
             Box::new(move |samples: &[f32]| {
+                if detector.process(samples) {
+                    heard.store(true, Ordering::Relaxed);
+                }
                 for s in samples {
                     if producer.push(*s).is_err() {
                         break;
@@ -59,12 +71,18 @@ impl MicMonitor {
             }),
             Box::new(|_| {}),
         )?;
-        let _ = Ordering::Relaxed;
 
         Ok(Self {
             _capture: capture,
             _render: render,
             gain_db: gain_ctl,
+            feedback,
         })
+    }
+
+    /// Whether a feedback loop has been heard since this was last read; reading clears it, so the
+    /// user is warned once per loop rather than on every tick.
+    pub fn take_feedback(&self) -> bool {
+        self.feedback.swap(false, Ordering::Relaxed)
     }
 }

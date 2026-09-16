@@ -8,6 +8,7 @@
 mod actor;
 pub mod audit;
 pub mod crash;
+mod denoise;
 pub mod error;
 mod health;
 pub mod logging;
@@ -264,14 +265,20 @@ impl EngineHandle {
     // ---------------------------------------------------------------- routes
 
     /// Start a route with a connected device. Returns the route id.
+    ///
+    /// `replace` takes the virtual microphone away from the device feeding it now; without it a
+    /// second microphone route fails with [`EngineError::VirtualMicBusy`] so the app can ask
+    /// "Replace current microphone source?" first (plan §8.2).
     pub async fn start_route(
         &self,
         device_id: String,
         kind: RouteKind,
+        replace: bool,
     ) -> Result<String, EngineError> {
         self.request(|reply| Command::StartRoute {
             device_id,
             kind,
+            replace,
             reply,
         })
         .await

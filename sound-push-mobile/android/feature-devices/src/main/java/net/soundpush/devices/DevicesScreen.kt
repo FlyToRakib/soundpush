@@ -299,22 +299,14 @@ private fun ProfileCard(peer: PeerView, profile: DeviceProfile) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
         SettingChoice(
             stringResource(R.string.devices_profile_redundancy),
-            when (profile.redundancy) {
-                true -> "on"
-                false -> "off"
-                null -> ""
-            },
+            profile.redundancy ?: "",
             listOf(
                 default,
-                Choice("on", stringResource(R.string.devices_profile_on)),
-                Choice("off", stringResource(R.string.devices_profile_off)),
+                Choice("auto", stringResource(R.string.audio_redundancy_auto)),
+                Choice("on", stringResource(R.string.audio_redundancy_on)),
+                Choice("off", stringResource(R.string.audio_redundancy_off)),
             ),
-        ) { v ->
-            setProfile(
-                peer.deviceId,
-                profile.copy(redundancy = when (v) { "on" -> true; "off" -> false; else -> null }),
-            )
-        }
+        ) { v -> setProfile(peer.deviceId, profile.copy(redundancy = v.ifEmpty { null })) }
     }
 }
 
@@ -373,7 +365,8 @@ private fun NetworkTestCard(peer: PeerView, test: NetworkTestView?) {
                         latency = rec.latency,
                         quality = rec.quality,
                         opusBitrate = if (rec.quality == "opus") rec.opusBitrate else null,
-                        redundancy = rec.redundancy,
+                        // The test says whether this link needs it from the start; otherwise leave it automatic.
+                        redundancy = if (rec.redundancy) "on" else "auto",
                     ),
                 )
             }) { Text(stringResource(R.string.nettest_apply)) }

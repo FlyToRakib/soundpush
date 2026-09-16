@@ -30,6 +30,8 @@ impl Actor {
             .filter(|r| {
                 let peer = r.peer.to_hex();
                 old.stream_for(&peer) != self.settings.stream_for(&peer)
+                    // Where this device's microphone is denoised travels with the profile.
+                    || (r.kind.is_mic() && r.kind.local_is_source() && old.mic != self.settings.mic)
             })
             .map(Route::key)
             .collect();
@@ -60,6 +62,11 @@ impl Actor {
             next.redundancy = wanted.redundancy;
             next.adaptive_bitrate = wanted.adaptive_bitrate;
         }
+        // Where a microphone is denoised is the source device's setting, whoever asked for the
+        // route (plan §15.7).
+        if kind.local_is_source() {
+            next.denoise = wanted.denoise;
+        }
         sanitize_profile(&mut next);
         if next == current {
             return;
@@ -72,7 +79,8 @@ impl Actor {
             self.restart_route(key);
             return;
         }
-        let send_update = requested_locally && quality_changed(&current, &next);
+        let send_update = (requested_locally && quality_changed(&current, &next))
+            || (kind.local_is_source() && current.denoise != next.denoise);
         self.apply_profile(key, next.clone());
         if send_update {
             if let Some(s) = self.sessions.get(&peer) {
@@ -96,7 +104,10 @@ impl Actor {
             return;
         };
         sanitize_profile(&mut next);
-        if !r.kind.local_is_source() {
+        if r.kind.local_is_source() {
+            // This device's microphone, so its own noise-suppression setting stands.
+            next.denoise = current.denoise;
+        } else {
             // The receiving side's latency preference wins.
             next.jitter_min_ms = current.jitter_min_ms;
             next.jitter_max_ms = current.jitter_max_ms;
@@ -120,11 +131,15 @@ impl Actor {
         if let Some(c) = &r.receiver_controls {
             c.jitter_min_ms.store(next.jitter_min_ms, Ordering::Relaxed);
             c.jitter_max_ms.store(next.jitter_max_ms, Ordering::Relaxed);
+            c.noise_suppression.store(next.denoise, Ordering::Relaxed);
         }
         if let Some(c) = &r.sender_controls {
             c.bitrate.store(next.bitrate, Ordering::Relaxed);
             c.redundancy.store(next.redundancy, Ordering::Relaxed);
         }
+        // A microphone group denoises here only for routes the other side does not denoise.
+        self.update_mic_groups();
+        let r = &self.routes[pos];
         if !rebuild || r.status != RouteStatus::Active {
             return;
         }
@@ -149,7 +164,8 @@ impl Actor {
         self.stop_route_by_key(key, StopReason::Superseded, true);
         if requested_locally {
             let (tx, _rx) = oneshot::channel();
-            self.start_route(peer, kind, tx);
+            // A restart must not take an endpoint from some other device either.
+            self.start_route(peer, kind, false, tx);
             if let Some(r) = self
                 .routes
                 .iter_mut()

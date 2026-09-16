@@ -8,13 +8,13 @@ use bytes::Bytes;
 use sp_audio_io::{AudioBackend, AudioStream, ErrorCallback, RenderTarget};
 use sp_media::codec::{Decoder, decoder_for};
 use sp_media::drift::{DriftController, FractionalResampler};
-use sp_media::dsp::{Gain, LevelMeter, balance_and_mono};
+use sp_media::dsp::{Gain, LevelMeter, NoiseSuppressor, balance_and_mono};
 use sp_media::jitter::{JitterBuffer, JitterConfig, PopStatus};
 use sp_media::{ms_to_samples, samples_per_frame};
 use sp_protocol::control::StreamProfile;
 use sp_protocol::{Codec, MediaFlags, MediaPacket};
 
-use super::controls::ReceiverControls;
+use super::controls::{EchoReference, ReceiverControls};
 use crate::EngineError;
 
 /// A packet queued from the network task to the audio thread.
@@ -64,6 +64,9 @@ pub struct Receiver {
 pub struct ReceiverConfig {
     pub profile: StreamProfile,
     pub target: RenderTarget,
+    /// Set when this stream goes to the device's own speakers, so microphone captures here can
+    /// duck while it plays (plan §15.7).
+    pub echo: Option<Arc<EchoReference>>,
 }
 
 impl Receiver {
@@ -85,6 +88,7 @@ impl Receiver {
             decoder,
             expected_codec,
             controls.clone(),
+            config.echo.clone(),
         );
 
         let render = backend.open_render(
@@ -128,11 +132,15 @@ struct Playout {
     gain: Gain,
     meter: LevelMeter,
     controls: Arc<ReceiverControls>,
+    /// Noise suppression asked for by the microphone's own device; built on first use.
+    denoiser: Option<NoiseSuppressor>,
+    echo: Option<Arc<EchoReference>>,
     pulls: u64,
     bounds: (u32, u32, i32),
 }
 
 impl Playout {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         profile: &StreamProfile,
         channels: usize,
@@ -140,6 +148,7 @@ impl Playout {
         decoder: Box<dyn Decoder>,
         codec: Codec,
         controls: Arc<ReceiverControls>,
+        echo: Option<Arc<EchoReference>>,
     ) -> Self {
         let frame = samples_per_frame(profile.frame_us);
         let min = controls.jitter_min_ms.load(Ordering::Relaxed);
@@ -164,6 +173,8 @@ impl Playout {
             gain: Gain::new(controls.volume.get()),
             meter: LevelMeter::default(),
             controls,
+            denoiser: None,
+            echo,
             pulls: 0,
             bounds: (min, max, 0),
         }
@@ -190,6 +201,18 @@ impl Playout {
                 // Comfort silence while the sender is in DTX; the drift estimate holds.
                 PopStatus::Silence => self.drift.ratio(),
             };
+            // Noise suppression the microphone's own device asked us to run (plan §15.7). It sits
+            // before the drift resampler so RNNoise always sees whole 10 ms frames.
+            if self.controls.noise_suppression.load(Ordering::Relaxed)
+                && self.channels == 1
+                && self.frame_samples % 480 == 0
+            {
+                self.denoiser
+                    .get_or_insert_with(NoiseSuppressor::new)
+                    .process(&mut self.frame_buf);
+            } else if self.denoiser.is_some() {
+                self.denoiser = None;
+            }
             self.resampler
                 .process(&self.frame_buf, ratio, &mut self.acc);
         }
@@ -212,6 +235,10 @@ impl Playout {
             );
         }
         self.meter.process(out);
+        // Tell microphone captures on this device how loud its speakers are right now.
+        if let Some(echo) = &self.echo {
+            echo.set_level_db(self.meter.peak_db());
+        }
 
         self.pulls += 1;
         if self.pulls % 25 == 0 {
@@ -339,6 +366,7 @@ mod tests {
                 profile: profile.clone(),
                 application: OpusApplication::LowDelay,
                 source: CaptureSource::DefaultInput,
+                echo: None,
             },
             Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
             Box::new(|_| {}),
@@ -389,6 +417,7 @@ mod tests {
             ReceiverConfig {
                 profile: profile.clone(),
                 target: RenderTarget::DefaultOutput,
+                echo: None,
             },
             rx_controls.clone(),
             Box::new(|_| {}),
@@ -431,6 +460,7 @@ mod tests {
             ReceiverConfig {
                 profile: profile.clone(),
                 target: RenderTarget::DefaultOutput,
+                echo: None,
             },
             rx_controls.clone(),
             Box::new(|_| {}),
@@ -456,6 +486,78 @@ mod tests {
         assert!(rx_controls.underruns.load(Ordering::Relaxed) <= 2);
     }
 
+    /// "Noise suppression → on the other device" (plan §15.7): the playout denoises the stream it
+    /// was told to, and leaves it alone otherwise. Driven directly, so it is deterministic.
+    #[test]
+    fn receiver_side_noise_suppression_quietens_hiss() {
+        let profile = build_profile(LatencyProfile::Balanced, Quality::Lossless, 1, false);
+        let frame = sp_media::samples_per_frame(profile.frame_us);
+        // Six seconds of quiet hiss as PCM frames; the same audio feeds both runs.
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut noise = Vec::new();
+        for _ in 0..(frame * 600) {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            noise.push(((seed >> 40) as i16) / 32);
+        }
+
+        let rms_with = |denoise: bool| -> f32 {
+            let (mut producer, consumer) = rtrb::RingBuffer::<InboundPacket>::new(512);
+            let controls = Arc::new(ReceiverControls::new(
+                1.0,
+                profile.jitter_min_ms,
+                profile.jitter_max_ms,
+            ));
+            controls.noise_suppression.store(denoise, Ordering::Relaxed);
+            let mut playout = Playout::new(
+                &profile,
+                1,
+                consumer,
+                decoder_for(&profile).unwrap(),
+                Codec::PcmS16Le,
+                controls,
+                None,
+            );
+            for (n, block) in noise.chunks_exact(frame).enumerate() {
+                let mut payload = Vec::with_capacity(block.len() * 2);
+                for s in block {
+                    payload.extend_from_slice(&s.to_le_bytes());
+                }
+                let at = (n * frame) as u64;
+                let _ = producer.push(InboundPacket {
+                    timestamp: at,
+                    arrival_samples: at,
+                    codec: Codec::PcmS16Le,
+                    discontinuity: false,
+                    redundant: false,
+                    dtx: false,
+                    payload: Bytes::from(payload),
+                });
+            }
+            let mut played = Vec::new();
+            let mut out = vec![0.0f32; frame];
+            for _ in 0..560 {
+                playout.fill(&mut out);
+                played.extend_from_slice(&out);
+            }
+            // The last part, after the jitter buffer filled and RNNoise settled.
+            let tail = &played[played.len() * 3 / 4..];
+            (tail.iter().map(|s| s * s).sum::<f32>() / tail.len() as f32).sqrt()
+        };
+
+        let plain = rms_with(false);
+        let denoised = rms_with(true);
+        assert!(
+            plain > 0.001,
+            "the plain playout passes audio through: {plain}"
+        );
+        assert!(
+            denoised < plain / 5.0,
+            "the receiver should suppress hiss: {denoised} vs {plain}"
+        );
+    }
+
     #[test]
     fn dtx_silence_is_cheap_and_does_not_underrun() {
         let backend = NullBackend {
@@ -473,6 +575,7 @@ mod tests {
             ReceiverConfig {
                 profile: profile.clone(),
                 target: RenderTarget::DefaultOutput,
+                echo: None,
             },
             rx_controls.clone(),
             Box::new(|_| {}),

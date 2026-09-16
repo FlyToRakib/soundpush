@@ -69,6 +69,8 @@ pub fn build_profile(
         jitter_max_ms,
         redundancy,
         adaptive_bitrate: adaptive,
+        // Where noise suppression runs is a microphone setting; the engine fills it in.
+        denoise: false,
     }
 }
 

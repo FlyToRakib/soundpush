@@ -60,6 +60,8 @@ pub enum EngineError {
     LoopbackUnsupported,
     #[error("virtual microphone not installed")]
     VirtualMicMissing,
+    #[error("another device already feeds the virtual microphone")]
+    VirtualMicBusy,
     #[error("route not found")]
     RouteNotFound,
     #[error("invalid input: {0}")]
@@ -95,6 +97,7 @@ impl EngineError {
             Self::AudioDevice(_) => "error.audio.device",
             Self::LoopbackUnsupported => "error.audio.loopbackUnsupported",
             Self::VirtualMicMissing => "error.audio.virtualMicMissing",
+            Self::VirtualMicBusy => "error.audio.virtualMicBusy",
             Self::RouteNotFound => "error.route.notFound",
             Self::InvalidInput(_) => "error.input.invalid",
             Self::Storage(_) => "error.storage",
@@ -111,6 +114,7 @@ impl EngineError {
             | Self::RouteNotFound
             | Self::InvalidInput(_)
             | Self::PairingRateLimited
+            | Self::VirtualMicBusy
             | Self::Cancelled => Severity::Warning,
             _ => Severity::Error,
         }

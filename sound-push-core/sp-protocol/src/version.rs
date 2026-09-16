@@ -94,6 +94,10 @@ impl Capabilities {
     /// Handles header-only `DTX` media packets: silence until the route's next audio packet.
     /// Senders use DTX only towards receivers advertising this bit.
     pub const FEATURE_DTX: u64 = 1 << 31;
+    /// Applies noise suppression to a microphone stream it receives when the source device sets
+    /// `StreamProfile.denoise` ("noise suppression on the other device", plan §4.3/§15.7).
+    /// Sources denoise locally instead towards peers without this bit.
+    pub const FEATURE_RECEIVER_DENOISE: u64 = 1 << 32;
 
     pub const fn has(self, bit: u64) -> bool {
         self.0 & bit == bit

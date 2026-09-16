@@ -24,6 +24,9 @@ pub enum Cue {
     StreamStopped,
     Muted,
     Unmuted,
+    /// "Test tone" on the Audio page (plan §5.1): long enough to hear which device is playing,
+    /// short enough not to startle anyone.
+    Test,
 }
 
 impl Cue {
@@ -36,6 +39,7 @@ impl Cue {
             Self::StreamStopped => &[(550.0, 60)],
             Self::Muted => &[(440.0, 50)],
             Self::Unmuted => &[(740.0, 50)],
+            Self::Test => &[(440.0, 250), (554.37, 250), (659.25, 250), (880.0, 300)],
         }
     }
 }
@@ -91,8 +95,14 @@ pub fn changes(previous: &EngineState, current: &EngineState) -> Vec<Cue> {
     cues
 }
 
-/// Play cues one after another without blocking the caller.
+/// Play cues one after another on the default output, without blocking the caller.
 pub fn play(backend: Arc<CpalBackend>, cues: Vec<Cue>) {
+    play_on(backend, cues, RenderTarget::DefaultOutput);
+}
+
+/// Like [`play`], on a chosen device. The Audio page's test tone uses the output the user picked,
+/// so the tone proves which device streams will actually come out of.
+pub fn play_on(backend: Arc<CpalBackend>, cues: Vec<Cue>, target: RenderTarget) {
     if cues.is_empty() {
         return;
     }
@@ -105,7 +115,7 @@ pub fn play(backend: Arc<CpalBackend>, cues: Vec<Cue>) {
                     Duration::from_millis(samples.len() as u64 * 1000 / RATE as u64 + 80);
                 let mut position = 0;
                 let stream = backend.open_render(
-                    &RenderTarget::DefaultOutput,
+                    &target,
                     1,
                     Box::new(move |out: &mut [f32]| {
                         for s in out.iter_mut() {
@@ -148,6 +158,16 @@ mod tests {
             assert!(s.iter().all(|v| v.abs() <= LEVEL));
             assert!(s[0].abs() < 0.01 && s[s.len() - 1].abs() < 0.02);
         }
+    }
+
+    #[test]
+    fn the_test_tone_is_audible_but_short() {
+        let s = render(Cue::Test);
+        // Around a second: long enough to find the speaker, short enough not to annoy.
+        assert!(s.len() > RATE as usize / 2 && s.len() < RATE as usize * 2);
+        assert!(s.iter().all(|v| v.abs() <= LEVEL));
+        assert!(s[0].abs() < 0.01 && s[s.len() - 1].abs() < 0.02);
+        assert!(s.iter().any(|v| v.abs() > LEVEL / 2.0), "it makes a sound");
     }
 
     #[test]

@@ -71,6 +71,8 @@ object Labels {
         "notice.crashReport" -> R.string.notice_crash_report
         "notice.unstableConnection" -> R.string.notice_unstable_connection
         "notice.pairingRateLimited" -> R.string.notice_pairing_rate_limited
+        "notice.denoiseSuspended" -> R.string.notice_denoise_suspended
+        "notice.micFeedback" -> R.string.notice_mic_feedback
         else -> R.string.notice_generic
     }
 
@@ -102,6 +104,7 @@ object Labels {
         "error.audio.device" -> R.string.error_audio_device
         "error.audio.loopbackUnsupported" -> R.string.error_loopback
         "error.audio.virtualMicMissing" -> R.string.error_virtual_mic
+        "error.audio.virtualMicBusy" -> R.string.error_virtual_mic_busy
         "error.input.invalid" -> R.string.error_invalid
         "error.engine.starting" -> R.string.error_starting
         else -> R.string.error_generic

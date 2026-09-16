@@ -9,4 +9,4 @@ pub mod monitor;
 pub mod receiver;
 pub mod sender;
 
-pub use controls::{ReceiverControls, SenderControls};
+pub use controls::{EchoReference, ReceiverControls, SenderControls};
