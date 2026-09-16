@@ -52,6 +52,7 @@ check that this page matches your app version (Settings → About).
 | `SP-AUD-001` | An audio device could not be opened or was unplugged. | Choose another device, or reconnect the one you want. |
 | `SP-AUD-002` | This device cannot capture its own system audio. | On Windows 10 N, install the Media Feature Pack; on macOS, allow System Audio Recording. |
 | `SP-AUD-003` | The virtual microphone is not installed. | Set it up on the [virtual microphone](virtual-microphone.md) page. |
+| `SP-AUD-004` | Another device is already the virtual microphone. | Answer "Replace" when SoundPush asks, or stop the other device's route first. |
 
 ## Settings and input — `SP-CFG`
 
@@ -92,6 +93,7 @@ reason's value on the wire, so it is stable across versions.
 | `SP-SES-011` | The other device does not have that source or output. |
 | `SP-SES-012` | It timed out. |
 | `SP-SES-013` | Too many pairing attempts from that address. |
+| `SP-SES-014` | Another device already feeds that computer's virtual microphone. |
 
 ---
 

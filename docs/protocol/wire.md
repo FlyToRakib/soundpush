@@ -66,7 +66,7 @@ Routes:
 | `RouteUpdate{route, profile}` | either | Live profile change. |
 | `VolumeSet` / `MuteSet` | either | Remote control (`target = RouteStream` or `DeviceSpeakers`); requires the ControlMe permission. |
 | `StatsReport` | receiver → sender, 1 Hz | Loss, jitter, buffer, drift; drives adaptive bitrate. |
-| `Goodbye{reason}` | either | Orderly close. Reason 13 `RateLimited`: too many pairing attempts from this address (5/min, `docs/security/pairing.md`); peers that do not know it treat it as an ordinary close. |
+| `Goodbye{reason}` | either | Orderly close. Reason 13 `RateLimited`: too many pairing attempts from this address (5/min, `docs/security/pairing.md`); peers that do not know it treat it as an ordinary close. Reason 14 `VirtualMicBusy`: another device already feeds that computer's virtual microphone and the request did not ask to replace it (`RouteRequest.replace`); unknown to older peers in the same way. |
 
 Endpoint ids: sources `system`, `apps`, `mic`, `mixed`; sinks `speaker`, `virtual-mic`.
 
