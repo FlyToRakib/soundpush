@@ -48,7 +48,7 @@ jobs:
       - uses: ./.github/actions/android-sdk
         with:
           ndk: 27.2.12479018
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: cargo install cargo-ndk --locked
       - name: Host audio libraries for the binding build
         run: |
