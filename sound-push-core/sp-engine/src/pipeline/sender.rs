@@ -713,11 +713,59 @@ mod tests {
 
     /// Two captures at different, constant levels, so a mixed stream can be checked sample by
     /// sample: system audio at 0.4, the microphone at 0.2.
-    struct TwoSources;
+    ///
+    /// Both are driven by one clock thread, microphone first on every tick. Two separate threads
+    /// looked more like two devices but tested the CI machine instead: on a loaded macOS runner
+    /// each woke late and caught up in a burst of its own, the encoder took the system audio's
+    /// burst before the microphone's thread had even run, and half the packets came out without
+    /// a microphone — something real capture callbacks, which run at real-time priority, do not
+    /// do. How the mix copes with two clocks is tested exactly, without threads, by the
+    /// `MixReader` tests; this backend is for checking the running stream's gains and mute.
+    #[derive(Default)]
+    struct TwoSources {
+        clock: Arc<Clock>,
+        next_id: AtomicU64,
+    }
+
+    #[derive(Default)]
+    struct Clock {
+        devices: Mutex<Vec<Device>>,
+        running: AtomicBool,
+    }
+
+    struct Device {
+        id: u64,
+        microphone: bool,
+        buf: Vec<f32>,
+        on_audio: sp_audio_io::CaptureCallback,
+    }
+
+    impl Clock {
+        fn run(&self) {
+            // Paced by absolute deadlines, like a sound card's clock: a relative sleep oversleeps
+            // a little every time, by whole percents on macOS.
+            let start = std::time::Instant::now();
+            let mut n = 0u32;
+            while self.running.load(Ordering::Relaxed) {
+                if let Ok(mut devices) = self.devices.lock() {
+                    for microphone in [true, false] {
+                        for d in devices.iter_mut().filter(|d| d.microphone == microphone) {
+                            (d.on_audio)(&d.buf);
+                        }
+                    }
+                }
+                n += 1;
+                let due = start + Duration::from_millis(10) * n;
+                if let Some(wait) = due.checked_duration_since(std::time::Instant::now()) {
+                    std::thread::sleep(wait);
+                }
+            }
+        }
+    }
 
     struct Ticker {
-        running: Arc<AtomicBool>,
-        thread: Option<JoinHandle<()>>,
+        clock: Arc<Clock>,
+        id: u64,
     }
 
     impl AudioStream for Ticker {
@@ -733,9 +781,12 @@ mod tests {
 
     impl Drop for Ticker {
         fn drop(&mut self) {
-            self.running.store(false, Ordering::Relaxed);
-            if let Some(t) = self.thread.take() {
-                let _ = t.join();
+            if let Ok(mut devices) = self.clock.devices.lock() {
+                devices.retain(|d| d.id != self.id);
+                if devices.is_empty() {
+                    // The clock thread sees this on its next tick and ends.
+                    self.clock.running.store(false, Ordering::Relaxed);
+                }
             }
         }
     }
@@ -754,34 +805,30 @@ mod tests {
             &self,
             source: &CaptureSource,
             channels: u16,
-            mut on_audio: sp_audio_io::CaptureCallback,
+            on_audio: sp_audio_io::CaptureCallback,
             _on_error: ErrorCallback,
         ) -> Result<Box<dyn AudioStream>, sp_audio_io::AudioError> {
-            let level = match source {
-                CaptureSource::SystemLoopback(_) => 0.4f32,
-                _ => 0.2,
-            };
-            let buf = vec![level; 480 * channels.clamp(1, 2) as usize];
-            let running = Arc::new(AtomicBool::new(true));
-            let flag = running.clone();
-            let thread = std::thread::spawn(move || {
-                // Paced by absolute deadlines, like a sound card's clock: a relative sleep
-                // oversleeps a little every time (by whole percents on macOS), so two such
-                // "devices" would drift apart far faster than any real pair of audio clocks.
-                let start = std::time::Instant::now();
-                let mut n = 0u32;
-                while flag.load(Ordering::Relaxed) {
-                    on_audio(&buf);
-                    n += 1;
-                    let due = start + Duration::from_millis(10) * n;
-                    if let Some(wait) = due.checked_duration_since(std::time::Instant::now()) {
-                        std::thread::sleep(wait);
-                    }
-                }
+            let microphone = !matches!(source, CaptureSource::SystemLoopback(_));
+            let level = if microphone { 0.2 } else { 0.4f32 };
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let mut devices = self
+                .clock
+                .devices
+                .lock()
+                .map_err(|_| sp_audio_io::AudioError::DeviceNotFound("clock".into()))?;
+            devices.push(Device {
+                id,
+                microphone,
+                buf: vec![level; 480 * channels.clamp(1, 2) as usize],
+                on_audio,
             });
+            if !self.clock.running.swap(true, Ordering::Relaxed) {
+                let clock = self.clock.clone();
+                std::thread::spawn(move || clock.run());
+            }
             Ok(Box::new(Ticker {
-                running,
-                thread: Some(thread),
+                clock: self.clock.clone(),
+                id,
             }))
         }
         fn open_render(
@@ -948,8 +995,9 @@ mod tests {
     fn a_mixed_source_sums_both_parts_with_their_own_gains() {
         let profile = build_profile(LatencyProfile::Balanced, Quality::Lossless, 2, false);
         let group_controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
+        let backend = TwoSources::default();
         let group = Sender::start(
-            &TwoSources,
+            &backend,
             SenderConfig {
                 profile: profile.clone(),
                 application: OpusApplication::LowDelay,
@@ -988,10 +1036,10 @@ mod tests {
 
     /// Wait until the newest packets carry `expected`, then check they keep doing so.
     ///
-    /// The capture threads here are real threads, so how soon a change reaches a packet depends on
-    /// the machine; a single sample after a fixed sleep fails on a slow CI runner for no reason.
-    /// What must hold is that the level gets there and then stays there: a mix with gaps would
-    /// keep dropping back to the system audio alone, which the second check catches.
+    /// How soon a change reaches a packet depends on the machine, so a single sample after a
+    /// fixed sleep would fail on a slow CI runner for no reason. What must hold is that the level
+    /// gets there and then stays there: a mix with gaps would keep dropping back to the system
+    /// audio alone, which the second check catches.
     fn settles_at(out: &Collect, expected: f32, what: &str) {
         let close = |level: Option<f32>| level.is_some_and(|l| (l - expected).abs() < 0.02);
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -1003,12 +1051,8 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
-        // And it is where the mix sits, not a moment passing through: most samples after it stay.
-        // Most rather than all, because these fake devices are ordinary threads, and a shared CI
-        // machine can hold one back longer than the cushion (real capture callbacks run at
-        // real-time priority). Gaps and drift are covered exactly, without threads, by the
-        // `MixReader` tests above; what only this test can show is that each gain and the mute
-        // reach the right half of a running stream.
+        // And it is where the mix sits, not a moment passing through. Both fake devices share one
+        // clock, so nothing but a real fault in the mix can move it.
         let mut held = 0;
         for _ in 0..20 {
             std::thread::sleep(Duration::from_millis(10));
@@ -1017,7 +1061,7 @@ mod tests {
             }
         }
         assert!(
-            held >= 15,
+            held >= 19,
             "{what}: only {held} of 20 samples stayed at {expected}"
         );
     }
