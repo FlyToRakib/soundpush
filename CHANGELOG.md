@@ -132,5 +132,10 @@ First public preview. Nothing has been released yet; everything below is new.
 - Android: computer-initiated app-audio streams ask for screen-capture consent instead of sending silence.
 - Pairing by address: "Back" no longer submits the form.
 - CI: the Android job builds the Kotlin bindings again (the host build needed the ALSA development package).
+- rustls 0.23.45, which closes RUSTSEC-2026-0285: TLS 1.3 handshake messages were accepted at the wrong encryption
+  level when they followed a key change inside the same record.
+- CI: the Android job configures again. Its Gradle dependency verification file was written on a machine that already
+  had part of the dependency metadata, so thirteen checksums were missing and a machine starting cold — every CI run —
+  refused the build before it ran a task.
 
 [Unreleased]: https://github.com/FlyToRakib/soundpush/commits/HEAD
