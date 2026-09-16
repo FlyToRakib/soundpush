@@ -29,9 +29,11 @@ impl From<EngineError> for CommandError {
 }
 
 impl CommandError {
-    /// An error the engine does not know about (desktop-only features), by i18n key.
+    /// An error the engine does not know about (desktop-only features), by i18n key. These carry
+    /// no support code: the engine owns that list (docs/error-codes.md).
     fn keyed(key: &'static str, message: impl Into<String>) -> Self {
         Self(ErrorView {
+            code: "",
             key,
             message: message.into(),
             severity: Severity::Warning,

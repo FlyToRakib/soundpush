@@ -55,6 +55,7 @@ describe("t", () => {
       "error.audio.loopbackUnsupported",
       "error.audio.virtualMicMissing",
       "error.route.notFound",
+      "error.route.tooManyReceivers",
       "error.input.invalid",
       "error.storage",
       "error.engine.stopped",

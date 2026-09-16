@@ -50,6 +50,8 @@ const settings: Settings = {
   },
   mobile: { stayAvailable: false, remindAfterRestart: true },
   autoConnectTrusted: true,
+  transport: "auto",
+  maxReceivers: 8,
   resumeRoutesOnStart: false,
   savedRoutes: [],
   dismissedTips: [],
@@ -119,6 +121,15 @@ let state: EngineState = {
   micLevelDb: -120,
   micMuted: false,
   networkTests: [],
+  streaming: {
+    receivers: 0,
+    maxReceivers: 8,
+    safeReceivers: 8,
+    kbps: 0,
+    cpuPct: 0,
+    perReceiverKbps: 143,
+    perReceiverCpuPct: 1,
+  },
 };
 
 const mockNetwork = {

@@ -68,6 +68,8 @@ pub enum EngineError {
     VirtualMicMissing,
     #[error("route not found")]
     RouteNotFound,
+    #[error("too many devices are receiving this source")]
+    TooManyReceivers,
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("storage error: {0}")]
@@ -103,6 +105,7 @@ impl EngineError {
             Self::VirtualMicMissing => "SP-AUD-003",
             Self::RouteNotFound => "SP-CFG-001",
             Self::InvalidInput(_) => "SP-CFG-002",
+            Self::TooManyReceivers => "SP-CFG-003",
             Self::Storage(_) => "SP-SYS-001",
             Self::Stopped => "SP-SYS-002",
             Self::Starting => "SP-SYS-003",
@@ -130,6 +133,7 @@ impl EngineError {
             Self::LoopbackUnsupported => "error.audio.loopbackUnsupported",
             Self::VirtualMicMissing => "error.audio.virtualMicMissing",
             Self::RouteNotFound => "error.route.notFound",
+            Self::TooManyReceivers => "error.route.tooManyReceivers",
             Self::InvalidInput(_) => "error.input.invalid",
             Self::Storage(_) => "error.storage",
             Self::Stopped => "error.engine.stopped",
@@ -143,6 +147,7 @@ impl EngineError {
         match self {
             Self::DeviceNotFound
             | Self::RouteNotFound
+            | Self::TooManyReceivers
             | Self::InvalidInput(_)
             | Self::PairingRateLimited
             | Self::Cancelled => Severity::Warning,
@@ -279,6 +284,7 @@ mod tests {
             EngineError::LoopbackUnsupported,
             EngineError::VirtualMicMissing,
             EngineError::RouteNotFound,
+            EngineError::TooManyReceivers,
             EngineError::InvalidInput(String::new()),
             EngineError::Storage(String::new()),
             EngineError::Stopped,

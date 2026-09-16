@@ -1,12 +1,14 @@
 <script lang="ts">
+  import Banner from "../lib/components/Banner.svelte";
   import Button from "../lib/components/Button.svelte";
   import Card from "../lib/components/Card.svelte";
   import Segmented from "../lib/components/Segmented.svelte";
   import Select from "../lib/components/Select.svelte";
   import SettingRow from "../lib/components/SettingRow.svelte";
+  import Slider from "../lib/components/Slider.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
   import { engine } from "../lib/engine/client";
-  import type { Theme, UpdateChannel, Visibility } from "../lib/engine/types";
+  import type { Theme, TransportPin, UpdateChannel, Visibility } from "../lib/engine/types";
   import { PSEUDO_LONG, PSEUDO_RTL, availableLanguages, languageName, t } from "../lib/i18n";
   import { LINKS, docsUrl, type DocsPage } from "../lib/links";
   import { store } from "../lib/stores/engine.svelte";
@@ -22,6 +24,10 @@
 
   const app = $derived(store.state!);
   const s = $derived(app.settings);
+  /** Multi-device streaming: listeners, the limit and the estimated cost (plan §19.2). */
+  const load = $derived(app.streaming);
+  /** kb/s as Mb/s with one decimal, so a line about bandwidth stays readable. */
+  const mbps = (kbps: number) => (kbps / 1000).toFixed(1);
   const isMac = $derived(app.local.platform === "macos");
   /** Launch at login is on here but switched off in the OS (Task Manager / Startup apps). */
   const startupBlocked = $derived(s.desktop.launchAtLogin && platform.system?.autostartDisabledByOs === true);
@@ -145,6 +151,35 @@
   {#if showAuditLog}
     <AuditLog onclose={() => (showAuditLog = false)} />
   {/if}
+
+  <Card title={t("settings.advanced")}>
+    <SettingRow label={t("settings.transport")} description={t(`transport.${s.transport}.desc`)} id="transport">
+      <Select
+        id="transport"
+        value={s.transport}
+        label={t("settings.transport")}
+        options={(["auto", "quic", "tcp", "usb"] as TransportPin[]).map((v) => ({ value: v, label: t(`transport.${v}`) }))}
+        onchange={(v) => updateSettings((x) => (x.transport = v as TransportPin))}
+      />
+    </SettingRow>
+    <SettingRow label={t("settings.maxReceivers")} description={t("settings.maxReceivers.desc")}>
+      <Slider
+        value={s.maxReceivers}
+        min={1}
+        max={16}
+        step={1}
+        label={t("settings.maxReceivers")}
+        format={(v) => String(v)}
+        onchange={(v) => updateSettings((x) => (x.maxReceivers = v))}
+      />
+    </SettingRow>
+    <p class="caption" role="status">
+      {t("settings.streamingLoad", String(load.receivers), String(load.maxReceivers), mbps(load.kbps), String(load.cpuPct))}
+    </p>
+    {#if load.receivers >= load.safeReceivers}
+      <Banner severity="warning" message={t("settings.streamingLoad.warn", mbps(load.perReceiverKbps), String(load.perReceiverCpuPct))} />
+    {/if}
+  </Card>
 
   <Card title={t("settings.help")}>
     <Troubleshooter />

@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import kotlin.math.roundToInt
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.SoundPush
@@ -38,6 +39,7 @@ import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.NavRow
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingChoice
+import net.soundpush.ui.components.SettingSlider
 import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.components.readableWidth
@@ -181,6 +183,58 @@ fun SettingsScreen(
             NavRow(stringResource(R.string.settings_audit_log), stringResource(R.string.settings_audit_log_desc), onOpenAuditLog)
         }
 
+        SectionTitle(stringResource(R.string.settings_advanced))
+        SpCard {
+            SettingChoice(
+                stringResource(R.string.settings_transport),
+                s.transport,
+                listOf(
+                    Choice("auto", stringResource(R.string.transport_auto)),
+                    Choice("quic", stringResource(R.string.transport_quic)),
+                    Choice("tcp", stringResource(R.string.transport_tcp)),
+                    Choice("usb", stringResource(R.string.transport_usb)),
+                ),
+            ) { v -> SoundPush.updateSettings { it.copy(transport = v) } }
+            Caption(
+                stringResource(
+                    when (s.transport) {
+                        "quic" -> R.string.transport_quic_desc
+                        "tcp" -> R.string.transport_tcp_desc
+                        "usb" -> R.string.transport_usb_desc
+                        else -> R.string.transport_auto_desc
+                    },
+                ),
+            )
+            Divider()
+            // Plan §19.2: the limit is per source, with the estimated cost next to it.
+            SettingSlider(
+                label = stringResource(R.string.settings_max_receivers),
+                value = s.maxReceivers.toFloat(),
+                range = 1f..16f,
+                steps = 14,
+                format = { it.roundToInt().toString() },
+            ) { v -> SoundPush.updateSettings { it.copy(maxReceivers = v.roundToInt()) } }
+            val load = state.streaming
+            Caption(
+                stringResource(
+                    R.string.settings_streaming_load,
+                    load.receivers,
+                    load.maxReceivers,
+                    mbps(load.kbps),
+                    load.cpuPct,
+                ),
+            )
+            if (load.receivers >= load.safeReceivers) {
+                Caption(
+                    stringResource(
+                        R.string.settings_streaming_load_warn,
+                        mbps(load.perReceiverKbps),
+                        load.perReceiverCpuPct,
+                    ),
+                )
+            }
+        }
+
         SectionTitle(stringResource(R.string.settings_help))
         SpCard {
             NavRow(stringResource(R.string.settings_troubleshoot), stringResource(R.string.settings_troubleshoot_desc), onOpenTroubleshooter)
@@ -233,3 +287,6 @@ private fun Caption(text: String) {
 }
 
 private fun Int.dp() = androidx.compose.ui.unit.Dp(toFloat())
+
+/** kb/s as Mb/s with one decimal, so a line about bandwidth stays readable. */
+private fun mbps(kbps: Int): String = String.format(java.util.Locale.getDefault(), "%.1f", kbps / 1000f)

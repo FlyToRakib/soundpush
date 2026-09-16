@@ -156,6 +156,19 @@
     <string name="visibility_trustedOnly">Paired devices only</string>
     <string name="visibility_hidden">Nobody</string>
     <string name="settings_privacy_note">Audio never leaves your devices. No accounts, ads or tracking.</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="settings_transport">Connection type</string>
+    <string name="transport_auto">Automatic</string>
+    <string name="transport_auto_desc">Use Wi-Fi when it works, and the USB cable when it doesn\'t. Recommended.</string>
+    <string name="transport_quic">Wi-Fi only</string>
+    <string name="transport_quic_desc">Never connect over the USB cable.</string>
+    <string name="transport_tcp">TCP only</string>
+    <string name="transport_tcp_desc">For networks that block the fast protocol. Slightly higher latency; the computer needs the same setting.</string>
+    <string name="transport_usb">USB only</string>
+    <string name="transport_usb_desc">Only the USB cable, set up with adb on the computer. Nothing is sent over Wi-Fi.</string>
+    <string name="settings_max_receivers">Maximum devices per stream</string>
+    <string name="settings_streaming_load">%1$d of %2$d devices listening · about %3$s Mb/s and %4$d %% of one CPU core.</string>
+    <string name="settings_streaming_load_warn">Another device would add about %1$s Mb/s and %2$d %% CPU, which this network may not carry without drop-outs.</string>
     <string name="settings_help">Help</string>
     <string name="settings_get_desktop">Get SoundPush for computer</string>
     <string name="settings_about">About</string>
@@ -184,6 +197,7 @@
     <string name="error_loopback">That device can\'t send its sound yet.</string>
     <string name="error_virtual_mic">Set up the virtual microphone on your computer first.</string>
     <string name="error_invalid">That doesn\'t look right.</string>
+    <string name="error_too_many_receivers">That source already has as many listening devices as it allows. Stop one, or raise the limit in Settings → Advanced.</string>
     <string name="error_starting">SoundPush is still starting.</string>
     <!-- An error message followed by its support code, e.g. "Couldn't reach the device. (SP-NET-001)". -->
     <string name="error_with_code">%1$s (%2$s)</string>

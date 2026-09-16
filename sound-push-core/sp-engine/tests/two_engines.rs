@@ -363,6 +363,61 @@ fn qr_pairing_route_and_audio() {
 }
 
 #[test]
+fn a_source_feeds_at_most_its_configured_number_of_receivers() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let a_dir = tempfile::tempdir().unwrap();
+    let b_dir = tempfile::tempdir().unwrap();
+    let desk = start(&desk_dir, "Desk", sine());
+    let phone_a = start(&a_dir, "Phone A", Arc::new(NullBackend::default()));
+    let phone_b = start(&b_dir, "Phone B", Arc::new(NullBackend::default()));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (desk_id, _) = pair(&rt, &desk, &phone_a);
+    pair(&rt, &desk, &phone_b);
+
+    // One listener per source (the plan's default is eight).
+    let mut settings = desk.state().settings.clone();
+    settings.max_receivers = 1;
+    let saved = rt.block_on(desk.update_settings(settings)).unwrap();
+    assert_eq!(saved.max_receivers, 1);
+
+    rt.block_on(phone_a.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+        .unwrap();
+    let state = wait_for(&desk, "the desk counts its listener", |s| {
+        s.streaming.receivers == 1
+    });
+    assert_eq!(state.streaming.max_receivers, 1);
+    assert!(
+        state.streaming.kbps > 0 && state.streaming.per_receiver_kbps > 0,
+        "an estimate is offered: {:?}",
+        state.streaming
+    );
+
+    // The second phone is refused, with the stable code for it, and the first keeps streaming.
+    let refused = rt
+        .block_on(phone_b.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+        .unwrap_err();
+    assert_eq!(sp_engine::ErrorView::from(&refused).code, "SP-CFG-003");
+    let log = rt.block_on(desk.audit_log()).unwrap();
+    assert!(
+        log.iter()
+            .any(|e| e.kind == AuditKind::RouteDenied && e.detail == "limit"),
+        "{log:#?}"
+    );
+    assert_eq!(desk.state().streaming.receivers, 1);
+
+    // Raising the limit lets the second phone in.
+    let mut settings = desk.state().settings.clone();
+    settings.max_receivers = 4;
+    rt.block_on(desk.update_settings(settings)).unwrap();
+    rt.block_on(phone_b.start_route(desk_id, RouteKind::ReceiveSystemAudio))
+        .unwrap();
+    let state = wait_for(&desk, "two listeners share one capture", |s| {
+        s.streaming.receivers == 2
+    });
+    assert_eq!(state.streaming.kbps, 2 * state.streaming.per_receiver_kbps);
+}
+
+#[test]
 fn unreachable_candidates_do_not_delay_the_connection() {
     let desk_dir = tempfile::tempdir().unwrap();
     let phone_dir = tempfile::tempdir().unwrap();

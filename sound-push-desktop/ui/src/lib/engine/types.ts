@@ -4,6 +4,8 @@ export type Theme = "system" | "light" | "dark";
 export type Visibility = "everyone" | "trustedOnly" | "hidden";
 export type LatencyMode = "lowLatency" | "balanced" | "stable" | "custom";
 export type QualityMode = "auto" | "opus" | "lossless";
+/** Pinned transport (Advanced settings). "auto" races QUIC against the USB link. */
+export type TransportPin = "auto" | "quic" | "tcp" | "usb";
 export type AudioFocusMode = "pause" | "duck" | "mix" | "mixDuringCalls";
 export type MicMode =
   | "default"
@@ -177,6 +179,10 @@ export interface Settings {
   desktop: DesktopSettings;
   mobile: { stayAvailable: boolean; remindAfterRestart: boolean };
   autoConnectTrusted: boolean;
+  /** Transport pinned in Advanced settings; "auto" lets the engine choose. */
+  transport: TransportPin;
+  /** Most devices that may receive the same source at once (1–16, default 8). */
+  maxReceivers: number;
   resumeRoutesOnStart: boolean;
   savedRoutes: SavedRoute[];
   dismissedTips: string[];
@@ -361,6 +367,22 @@ export interface EngineState {
   networkTests: NetworkTestView[];
   /** Microphone mute (tray, shortcuts, push-to-talk). */
   micMuted: boolean;
+  streaming: StreamingLoad;
+}
+
+/**
+ * Multi-device streaming: how many devices receive this computer's audio, the limit, and a rough
+ * estimate of what it costs, so the cost of one more can be shown before it is added.
+ */
+export interface StreamingLoad {
+  receivers: number;
+  maxReceivers: number;
+  /** Adding a receiver beyond this is where we warn. */
+  safeReceivers: number;
+  kbps: number;
+  cpuPct: number;
+  perReceiverKbps: number;
+  perReceiverCpuPct: number;
 }
 
 // ---- desktop platform (src-tauri: network.rs, system.rs, hotkeys.rs)

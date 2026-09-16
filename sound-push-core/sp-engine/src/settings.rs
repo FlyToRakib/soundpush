@@ -17,7 +17,8 @@ use sp_media::profile::{LatencyProfile, Quality};
 use sp_security::secretbox::write_atomic;
 
 /// 2: `savedRoutes[].keep` is always written; microphone high-pass filter.
-pub const SETTINGS_VERSION: u32 = 2;
+/// 3: transport pin and the receiver limit (both take their defaults in files written before them).
+pub const SETTINGS_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +37,32 @@ pub enum Visibility {
     TrustedOnly,
     Hidden,
 }
+
+/// Which transport connections use (plan §16.1). The engine picks by itself unless the user
+/// pins one in Advanced settings.
+///
+/// - `Quic`: QUIC over UDP only, never the USB (`adb reverse`) candidate.
+/// - `Tcp`: TLS over TCP only, for networks that block UDP. This device then also *listens* for
+///   TCP on every interface instead of loopback alone, so a peer pinned the same way can reach it.
+/// - `Usb`: only the USB link. A phone dials the computer's `adb reverse` forward; a computer,
+///   which is the listening end of that link, then makes no outgoing connections at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TransportPin {
+    Quic,
+    Tcp,
+    Usb,
+    /// Race QUIC against the USB link and keep the first connection. Also used for unknown values
+    /// from newer versions (`#[serde(other)]` must stay on the last variant).
+    #[default]
+    #[serde(other)]
+    Auto,
+}
+
+/// Receivers one source may feed at the same time (plan §19.2); the default is [`DEFAULT_MAX_RECEIVERS`].
+pub const MAX_RECEIVERS_LIMIT: u32 = 16;
+/// Plan §19.2: "default 8 concurrent receivers per source (configurable)".
+pub const DEFAULT_MAX_RECEIVERS: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -350,6 +377,10 @@ pub struct Settings {
     pub desktop: DesktopSettings,
     pub mobile: MobileSettings,
     pub auto_connect_trusted: bool,
+    /// Transport the user pinned in Advanced settings; `Auto` lets the engine choose (plan §16.1).
+    pub transport: TransportPin,
+    /// Most devices that may receive the same source at once (plan §19.2). 1 – [`MAX_RECEIVERS_LIMIT`].
+    pub max_receivers: u32,
     pub resume_routes_on_start: bool,
     pub saved_routes: Vec<SavedRoute>,
     pub dismissed_tips: Vec<String>,
@@ -398,6 +429,8 @@ impl Default for Settings {
             desktop: DesktopSettings::default(),
             mobile: MobileSettings::default(),
             auto_connect_trusted: true,
+            transport: TransportPin::Auto,
+            max_receivers: DEFAULT_MAX_RECEIVERS,
             resume_routes_on_start: false,
             saved_routes: Vec::new(),
             dismissed_tips: Vec::new(),
@@ -420,6 +453,7 @@ impl Settings {
         self.output.av_offset_ms = self.output.av_offset_ms.clamp(-500, 500);
         self.mic.gain_db = self.mic.gain_db.clamp(0.0, 20.0);
         self.stream.opus_bitrate = self.stream.opus_bitrate.clamp(6_000, 510_000);
+        self.max_receivers = self.max_receivers.clamp(1, MAX_RECEIVERS_LIMIT);
         self.stream.custom_min_ms = self.stream.custom_min_ms.clamp(5, 500);
         self.stream.custom_max_ms = self
             .stream
@@ -606,6 +640,8 @@ mod tests {
         assert!(s.saved_routes[0].keep);
         assert!(!s.saved_routes[1].keep, "explicit values are kept");
         assert!(s.mic.high_pass, "new fields take their defaults");
+        assert_eq!(s.transport, TransportPin::Auto);
+        assert_eq!(s.max_receivers, DEFAULT_MAX_RECEIVERS);
 
         let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(written["version"], SETTINGS_VERSION);
@@ -675,6 +711,42 @@ mod tests {
         assert!(!recovered);
         assert_eq!(loaded.device_name, "Desk");
         assert_eq!(loaded.update_channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn transport_pin_and_receiver_limit_round_trip_and_stay_in_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(dir.path());
+        assert_eq!(Settings::default().transport, TransportPin::Auto);
+
+        let s = Settings {
+            transport: TransportPin::Tcp,
+            max_receivers: 3,
+            ..Settings::default()
+        };
+        store.save(&s).unwrap();
+        let (loaded, _) = store.load();
+        assert_eq!(loaded.transport, TransportPin::Tcp);
+        assert_eq!(loaded.max_receivers, 3);
+
+        // A pin written by a newer version falls back to Auto without losing the rest.
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"deviceName":"Desk","transport":"relay","maxReceivers":99}"#,
+        )
+        .unwrap();
+        let (loaded, recovered) = store.load();
+        assert!(!recovered);
+        assert_eq!(loaded.device_name, "Desk");
+        assert_eq!(loaded.transport, TransportPin::Auto);
+        assert_eq!(loaded.max_receivers, MAX_RECEIVERS_LIMIT);
+
+        let mut zero = Settings {
+            max_receivers: 0,
+            ..Settings::default()
+        };
+        zero.sanitize();
+        assert_eq!(zero.max_receivers, 1);
     }
 
     #[test]

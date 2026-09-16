@@ -104,6 +104,7 @@ object Labels {
         "error.audio.device" -> R.string.error_audio_device
         "error.audio.loopbackUnsupported" -> R.string.error_loopback
         "error.audio.virtualMicMissing" -> R.string.error_virtual_mic
+        "error.route.tooManyReceivers" -> R.string.error_too_many_receivers
         "error.input.invalid" -> R.string.error_invalid
         "error.engine.starting" -> R.string.error_starting
         else -> R.string.error_generic

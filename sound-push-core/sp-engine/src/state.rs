@@ -27,6 +27,35 @@ pub struct EngineState {
     pub network_tests: Vec<crate::nettest::NetworkTestView>,
     /// Microphone mute (tray, global shortcuts): silences every microphone route on this device.
     pub mic_muted: bool,
+    /// What this device is sending out, and what one more listener would cost (plan §19.2).
+    pub streaming: StreamingLoad,
+}
+
+/// Multi-device streaming: how many devices receive this one's audio, the limit, and an estimate
+/// of what it costs (plan §19.2).
+///
+/// The estimate is deliberately rough and comes from the running stream profiles, so a UI can
+/// show it *before* another device is added. Bandwidth is the media bitrate plus the ~12 % that
+/// packet headers and framing add; CPU is a share of one core taken from `sp-media`'s benchmarks
+/// (an Opus encode of a 10 ms stereo frame at 128 kb/s takes about 100 µs, so roughly 1 % of a
+/// core, with the capture and DSP around it about as much again). Receivers of the same source
+/// share one encode, so each extra one only costs its own copy and socket write.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingLoad {
+    /// Devices receiving audio from the busiest source on this device.
+    pub receivers: u32,
+    /// `settings.maxReceivers`: a request past this is refused (`SP-CFG-003`).
+    pub max_receivers: u32,
+    /// Adding a receiver beyond this is where a UI warns first.
+    pub safe_receivers: u32,
+    /// Outgoing media bandwidth of every stream this device sends, in kb/s.
+    pub kbps: u32,
+    /// Share of one CPU core the outgoing streams take, in percent.
+    pub cpu_pct: u32,
+    /// What one more receiver of the busiest source would add.
+    pub per_receiver_kbps: u32,
+    pub per_receiver_cpu_pct: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

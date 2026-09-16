@@ -23,6 +23,7 @@ data class EngineState(
     val capabilities: Capabilities = Capabilities(),
     val micLevelDb: Float = -120f,
     val networkTests: List<NetworkTestView> = emptyList(),
+    val streaming: StreamingLoad = StreamingLoad(),
 ) {
     val trustedPeers get() = peers.filter { it.trusted }
     val connectedPeers get() = trustedPeers.filter { it.isConnected }
@@ -47,6 +48,22 @@ data class Capabilities(
     val microphone: Boolean = true,
     val speaker: Boolean = true,
     val virtualMic: Boolean = false,
+)
+
+/**
+ * Multi-device streaming (plan §19.2): devices receiving this one's audio, the limit, and a rough
+ * estimate of the bandwidth and CPU it costs, so the cost of one more can be shown beforehand.
+ */
+@Serializable
+data class StreamingLoad(
+    val receivers: Int = 0,
+    val maxReceivers: Int = 8,
+    /** Adding a receiver beyond this is where the app warns. */
+    val safeReceivers: Int = 8,
+    val kbps: Int = 0,
+    val cpuPct: Int = 0,
+    val perReceiverKbps: Int = 0,
+    val perReceiverCpuPct: Int = 0,
 )
 
 @Serializable
@@ -274,7 +291,7 @@ data class SavedRoute(val peerId: String, val kind: String, val keep: Boolean = 
 
 @Serializable
 data class Settings(
-    val version: Int = 2,
+    val version: Int = 3,
     val deviceName: String = "",
     val theme: String = "system",
     val language: String = "system",
@@ -286,6 +303,10 @@ data class Settings(
     val desktop: DesktopSettings = DesktopSettings(),
     val mobile: MobileSettings = MobileSettings(),
     val autoConnectTrusted: Boolean = true,
+    /** Pinned transport: auto | quic | tcp | usb (plan §16.1). */
+    val transport: String = "auto",
+    /** Most devices that may receive the same source at once, 1–16 (plan §19.2). */
+    val maxReceivers: Int = 8,
     val resumeRoutesOnStart: Boolean = false,
     val savedRoutes: List<SavedRoute> = emptyList(),
     val dismissedTips: List<String> = emptyList(),
