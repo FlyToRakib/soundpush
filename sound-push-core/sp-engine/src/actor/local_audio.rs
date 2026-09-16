@@ -251,7 +251,7 @@ impl Actor {
         };
         info!("an app opened the virtual microphone; starting the phone microphone");
         let (reply, _) = oneshot::channel();
-        self.start_route(peer, RouteKind::ReceiveMicToVirtualMic, reply);
+        self.start_route(peer, RouteKind::ReceiveMicToVirtualMic, false, reply);
         self.local_audio.auto_route = self
             .routes
             .iter()

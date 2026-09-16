@@ -256,6 +256,153 @@ impl NoiseSuppressor {
     }
 }
 
+/// Chunk of audio one feedback-analysis step looks at (10 ms at 48 kHz).
+const FEEDBACK_CHUNK: usize = 480;
+/// Shortest and longest autocorrelation lag examined: 4 kHz down to 200 Hz.
+const FEEDBACK_MIN_LAG: usize = 12;
+const FEEDBACK_MAX_LAG: usize = 240;
+/// How long a howl has to persist before it is reported (0.8 s).
+const FEEDBACK_CHUNKS: u32 = 80;
+
+/// Detects an acoustic feedback loop ("howl") in a microphone that is played back on the same
+/// device's speakers (plan §8.2).
+///
+/// A howl is a loud, near-sinusoidal tone that holds its pitch while its level builds up. Speech
+/// is periodic too, but its pitch moves and voiced parts are broken by consonants and pauses, so
+/// a run never lasts long enough. Fans, keyboards and room noise have no periodicity at all.
+#[derive(Default)]
+pub struct FeedbackDetector {
+    /// Samples collected towards the next analysis chunk.
+    buffer: Vec<f32>,
+    /// Consecutive chunks that looked like a howl, and the level the run started at.
+    run: u32,
+    run_start_rms: f32,
+    detected: bool,
+}
+
+impl FeedbackDetector {
+    pub fn new() -> Self {
+        Self {
+            buffer: Vec::with_capacity(FEEDBACK_CHUNK * 2),
+            ..Self::default()
+        }
+    }
+
+    /// Feed mono audio. Returns true while a feedback loop is being heard.
+    pub fn process(&mut self, mono: &[f32]) -> bool {
+        // A caller feeding much more than one chunk at a time must not make the buffer grow.
+        if self.buffer.len() > FEEDBACK_CHUNK {
+            self.buffer.clear();
+        }
+        self.buffer.extend_from_slice(mono);
+        while self.buffer.len() >= FEEDBACK_CHUNK {
+            let chunk: Vec<f32> = self.buffer.drain(..FEEDBACK_CHUNK).collect();
+            self.analyze(&chunk);
+        }
+        self.detected
+    }
+
+    /// Forget the current state (the monitor stopped, or the user has been told).
+    pub fn reset(&mut self) {
+        self.buffer.clear();
+        self.run = 0;
+        self.run_start_rms = 0.0;
+        self.detected = false;
+    }
+
+    fn analyze(&mut self, chunk: &[f32]) {
+        let energy: f32 = chunk.iter().map(|s| s * s).sum();
+        let rms = (energy / chunk.len() as f32).sqrt();
+        // Quiet audio is never feedback, however periodic it looks.
+        if rms < db_to_gain(-35.0) || periodicity(chunk) < 0.9 {
+            self.run = 0;
+            self.detected = false;
+            return;
+        }
+        if self.run == 0 {
+            self.run_start_rms = rms;
+        }
+        self.run += 1;
+        // Either the level built up the way a loop does, or it is already howling loudly.
+        let grew = rms > self.run_start_rms * 1.5 || rms > db_to_gain(-12.0);
+        self.detected = self.run >= FEEDBACK_CHUNKS && grew;
+    }
+}
+
+/// Highest normalized autocorrelation over the examined lags (1.0 = perfectly periodic).
+fn periodicity(chunk: &[f32]) -> f32 {
+    let window = chunk.len().saturating_sub(FEEDBACK_MAX_LAG);
+    let power: f32 = chunk[..window].iter().map(|s| s * s).sum();
+    if power <= f32::EPSILON {
+        return 0.0;
+    }
+    let mut best = 0.0f32;
+    for lag in FEEDBACK_MIN_LAG..=FEEDBACK_MAX_LAG {
+        let mut num = 0.0f32;
+        let mut den = 0.0f32;
+        for (i, a) in chunk[..window].iter().enumerate() {
+            let b = chunk[i + lag];
+            num += a * b;
+            den += b * b;
+        }
+        if den > f32::EPSILON {
+            best = best.max(num / (power * den).sqrt());
+        }
+    }
+    best
+}
+
+/// Far-end level (dBFS) above which the microphone is ducked.
+const DUCK_THRESHOLD_DB: f32 = -45.0;
+/// How far the microphone is lowered while the far side is heard.
+const DUCK_DEPTH_DB: f32 = -18.0;
+/// Blocks the duck is held after the far side falls quiet, so word gaps do not pump.
+const DUCK_HOLD_BLOCKS: u32 = 20;
+
+/// Half-duplex echo control: lowers the microphone while this device plays the far side on its
+/// own speakers. Used where no acoustic echo canceller is available (plan §15.7 and
+/// docs/adr/0009-desktop-echo-control.md).
+pub struct DuckGate {
+    gain: Gain,
+    target: f32,
+    hold: u32,
+}
+
+impl Default for DuckGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DuckGate {
+    pub fn new() -> Self {
+        Self {
+            gain: Gain::new(1.0),
+            target: 1.0,
+            hold: 0,
+        }
+    }
+
+    /// Apply the duck to one block. `far_db` is what this device is playing right now.
+    pub fn process(&mut self, samples: &mut [f32], far_db: f32) {
+        if far_db > DUCK_THRESHOLD_DB {
+            self.target = db_to_gain(DUCK_DEPTH_DB);
+            self.hold = DUCK_HOLD_BLOCKS;
+        } else if self.hold > 0 {
+            self.hold -= 1;
+        } else {
+            self.target = 1.0;
+        }
+        self.gain.set(self.target);
+        self.gain.process(samples);
+    }
+
+    /// The gain the gate is heading for (1.0 = open). For tests and diagnostics.
+    pub fn target(&self) -> f32 {
+        self.target
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +485,104 @@ mod tests {
             .collect();
         ns.process(&mut buf);
         assert!(buf.iter().all(|s| s.is_finite()));
+    }
+
+    /// A rising tone the way a room builds up a howl.
+    fn howl(seconds: f32) -> Vec<f32> {
+        let n = (48_000.0 * seconds) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / 48_000.0;
+                let level = (0.02 * (t * 3.0).exp()).min(0.7);
+                level * (2.0 * std::f32::consts::PI * 1_450.0 * t).sin()
+            })
+            .collect()
+    }
+
+    /// Loud speech-like audio: a harmonic stack whose pitch moves, with syllable gaps.
+    fn speech(seconds: f32) -> Vec<f32> {
+        let n = (48_000.0 * seconds) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / 48_000.0;
+                // Four syllables a second, with a gap between them.
+                let syllable = (t * 4.0).fract();
+                if syllable > 0.75 {
+                    return 0.0;
+                }
+                let envelope = 0.6 * (syllable / 0.75 * std::f32::consts::PI).sin();
+                let f0 = 140.0 + 60.0 * (2.0 * std::f32::consts::PI * 1.7 * t).sin();
+                let phase = 2.0 * std::f32::consts::PI * f0 * t;
+                envelope * (phase.sin() + 0.5 * (2.0 * phase).sin() + 0.3 * (3.0 * phase).sin())
+                    / 1.8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn feedback_detector_finds_a_howl() {
+        let mut d = FeedbackDetector::new();
+        let audio = howl(2.0);
+        let mut fired = false;
+        for block in audio.chunks(240) {
+            fired |= d.process(block);
+        }
+        assert!(fired, "a building 1.45 kHz tone is a feedback loop");
+        d.reset();
+        assert!(!d.process(&[0.0; 480]));
+    }
+
+    #[test]
+    fn feedback_detector_ignores_speech_and_noise() {
+        let mut d = FeedbackDetector::new();
+        for block in speech(5.0).chunks(240) {
+            assert!(
+                !d.process(block),
+                "loud speech must not warn about feedback"
+            );
+        }
+
+        let mut d = FeedbackDetector::new();
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let noise: Vec<f32> = (0..48_000 * 3)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                (seed >> 40) as f32 / 8_388_608.0 - 1.0
+            })
+            .collect();
+        for block in noise.chunks(240) {
+            assert!(!d.process(block), "loud noise must not warn about feedback");
+        }
+    }
+
+    #[test]
+    fn duck_gate_lowers_the_microphone_while_the_far_side_talks() {
+        let mut gate = DuckGate::new();
+        let mut buf = vec![1.0f32; 480];
+        // Far side quiet: the microphone passes through.
+        gate.process(&mut buf, -80.0);
+        assert!((gate.target() - 1.0).abs() < 1e-6);
+        assert!(buf.iter().all(|s| (*s - 1.0).abs() < 1e-5));
+
+        // Far side talking: ducked, and held through a short gap.
+        for _ in 0..4 {
+            buf.fill(1.0);
+            gate.process(&mut buf, -20.0);
+        }
+        assert!(gate.target() < 0.2);
+        assert!(buf[479] < 0.2, "ducked sample {}", buf[479]);
+        buf.fill(1.0);
+        gate.process(&mut buf, -80.0);
+        assert!(gate.target() < 0.2, "the duck is held over word gaps");
+
+        // Far side quiet for longer: the microphone opens again.
+        for _ in 0..40 {
+            buf.fill(1.0);
+            gate.process(&mut buf, -80.0);
+        }
+        assert!((gate.target() - 1.0).abs() < 1e-6);
+        assert!(buf[479] > 0.9);
     }
 }

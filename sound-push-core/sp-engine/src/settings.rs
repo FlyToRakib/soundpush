@@ -17,7 +17,9 @@ use sp_media::profile::{LatencyProfile, Quality};
 use sp_security::secretbox::write_atomic;
 
 /// 2: `savedRoutes[].keep` is always written; microphone high-pass filter.
-pub const SETTINGS_VERSION: u32 = 2;
+/// 3: `stream.redundancy` (and its per-device override) became `redundancyMode`, which can also
+///    say "never", so the old boolean is translated rather than left to a serde default.
+pub const SETTINGS_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +86,20 @@ pub enum MicMode {
     Mic,
 }
 
+/// The "Resilient" setting (plan §15.6): each packet can carry the previous frame again, so a
+/// single lost packet is inaudible. It costs roughly twice the bitrate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum RedundancyMode {
+    /// Switched on while the connection loses packets, off again once it is clean.
+    #[default]
+    Auto,
+    /// Always on.
+    On,
+    /// Never on, whatever the connection does.
+    Off,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct StreamSettings {
@@ -93,7 +109,7 @@ pub struct StreamSettings {
     pub quality: QualityMode,
     /// Used when `quality == Opus`.
     pub opus_bitrate: u32,
-    pub redundancy: bool,
+    pub redundancy: RedundancyMode,
 }
 
 impl Default for StreamSettings {
@@ -104,12 +120,22 @@ impl Default for StreamSettings {
             custom_max_ms: 120,
             quality: QualityMode::Auto,
             opus_bitrate: 128_000,
-            redundancy: false,
+            redundancy: RedundancyMode::Auto,
         }
     }
 }
 
 impl StreamSettings {
+    /// Whether every packet carries redundancy from the start (`RedundancyMode::On`).
+    pub fn redundancy_always(&self) -> bool {
+        self.redundancy == RedundancyMode::On
+    }
+
+    /// Whether the engine may switch redundancy on by itself when the connection loses packets.
+    pub fn redundancy_auto(&self) -> bool {
+        self.redundancy == RedundancyMode::Auto
+    }
+
     pub fn latency_profile(&self) -> LatencyProfile {
         match self.latency {
             LatencyMode::LowLatency => LatencyProfile::LowLatency,
@@ -163,6 +189,19 @@ impl Default for OutputSettings {
     }
 }
 
+/// Which device runs noise suppression on a microphone stream (plan §4.3, §15.7). The user picks
+/// where the CPU is spent; the microphone's own device decides for the routes it feeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DenoiseAt {
+    /// On this device, before the audio is encoded (the original behaviour).
+    #[default]
+    Sender,
+    /// On the device that plays the microphone. Falls back to this device for peers that are too
+    /// old to understand it (`FEATURE_RECEIVER_DENOISE`).
+    Receiver,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MicSettings {
@@ -170,6 +209,8 @@ pub struct MicSettings {
     pub device: Option<String>,
     pub gain_db: f32,
     pub noise_suppression: bool,
+    /// Where noise suppression runs when it is on.
+    pub noise_suppression_at: DenoiseAt,
     pub mode: MicMode,
     pub system_agc: bool,
     pub system_noise_suppression: bool,
@@ -177,6 +218,24 @@ pub struct MicSettings {
     pub monitor: bool,
     /// 80 Hz high-pass before noise suppression (rumble, handling and wind noise; plan §15.7).
     pub high_pass: bool,
+    /// Lower this device's microphone while it plays the other side on its speakers, so the other
+    /// side does not hear itself back. Desktops have no acoustic echo canceller
+    /// (docs/adr/0009-desktop-echo-control.md); Android uses the platform one instead.
+    pub echo_ducking: bool,
+}
+
+impl MicSettings {
+    /// Where noise suppression runs for a microphone stream sent to one peer, as
+    /// (this device, the other device). Peers that do not advertise
+    /// `FEATURE_RECEIVER_DENOISE` cannot do it, so this device does it instead and the setting
+    /// still does what it says on the tin.
+    pub fn denoise_placement(&self, peer_can_denoise: bool) -> (bool, bool) {
+        match (self.noise_suppression, self.noise_suppression_at) {
+            (false, _) => (false, false),
+            (true, DenoiseAt::Receiver) if peer_can_denoise => (false, true),
+            (true, _) => (true, false),
+        }
+    }
 }
 
 impl Default for MicSettings {
@@ -185,12 +244,14 @@ impl Default for MicSettings {
             device: None,
             gain_db: 0.0,
             noise_suppression: false,
+            noise_suppression_at: DenoiseAt::Sender,
             mode: MicMode::VoiceCommunication,
             system_agc: false,
             system_noise_suppression: true,
             system_echo_cancellation: true,
             monitor: false,
             high_pass: true,
+            echo_ducking: false,
         }
     }
 }
@@ -289,7 +350,7 @@ pub struct DeviceProfile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opus_bitrate: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub redundancy: Option<bool>,
+    pub redundancy: Option<RedundancyMode>,
 }
 
 /// Paired devices can each have a profile; more than this is a hand-edited file.
@@ -554,12 +615,35 @@ fn migrate(doc: &mut Value, from: u32) -> bool {
                 }
             }
         }
+        if version == 2 {
+            // 2 → 3: `redundancy: true` meant "always on"; false meant "when the connection
+            // needs it", which is now "auto". Both the global setting and every device profile.
+            redundancy_bool_to_mode(doc.get_mut("stream"));
+            if let Some(profiles) = doc.get_mut("deviceProfiles").and_then(Value::as_object_mut) {
+                for profile in profiles.values_mut() {
+                    redundancy_bool_to_mode(Some(profile));
+                }
+            }
+        }
         version += 1;
     }
     if let Some(obj) = doc.as_object_mut() {
         obj.insert("version".into(), Value::from(version));
     }
     true
+}
+
+/// Rewrite a schema-2 `redundancy` boolean as a [`RedundancyMode`] string in place.
+fn redundancy_bool_to_mode(holder: Option<&mut Value>) {
+    let Some(obj) = holder.and_then(Value::as_object_mut) else {
+        return;
+    };
+    if let Some(on) = obj.get("redundancy").and_then(Value::as_bool) {
+        obj.insert(
+            "redundancy".into(),
+            Value::from(if on { "on" } else { "auto" }),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -606,6 +690,8 @@ mod tests {
         assert!(s.saved_routes[0].keep);
         assert!(!s.saved_routes[1].keep, "explicit values are kept");
         assert!(s.mic.high_pass, "new fields take their defaults");
+        assert_eq!(s.mic.noise_suppression_at, DenoiseAt::Sender);
+        assert!(!s.mic.echo_ducking);
 
         let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(written["version"], SETTINGS_VERSION);
@@ -617,6 +703,61 @@ mod tests {
         assert!(!migrate(&mut newer, SETTINGS_VERSION + 1));
         let mut current = written;
         assert!(!migrate(&mut current, SETTINGS_VERSION));
+    }
+
+    #[test]
+    fn noise_suppression_runs_where_the_user_chose() {
+        let mut mic = MicSettings::default();
+        assert_eq!(mic.denoise_placement(true), (false, false), "off is off");
+
+        // The default is unchanged behaviour: this device denoises.
+        mic.noise_suppression = true;
+        assert_eq!(mic.denoise_placement(true), (true, false));
+        assert_eq!(mic.denoise_placement(false), (true, false));
+
+        // Moved to the other device, which does it only if it understands the request.
+        mic.noise_suppression_at = DenoiseAt::Receiver;
+        assert_eq!(mic.denoise_placement(true), (false, true));
+        assert_eq!(
+            mic.denoise_placement(false),
+            (true, false),
+            "an older peer cannot, so this device does it after all"
+        );
+
+        mic.noise_suppression = false;
+        assert_eq!(mic.denoise_placement(true), (false, false));
+    }
+
+    #[test]
+    fn redundancy_boolean_becomes_a_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            br#"{"version":2,"stream":{"redundancy":true},
+                 "deviceProfiles":{"0123456789abcdef0123456789abcdef":{"redundancy":false}}}"#,
+        )
+        .unwrap();
+        let (s, recovered) = SettingsStore::new(dir.path()).load();
+        assert!(!recovered);
+        assert_eq!(
+            s.stream.redundancy,
+            RedundancyMode::On,
+            "\"always on\" is kept"
+        );
+        assert!(s.stream.redundancy_always() && !s.stream.redundancy_auto());
+        let profile = &s.device_profiles["0123456789abcdef0123456789abcdef"];
+        assert_eq!(
+            profile.redundancy,
+            Some(RedundancyMode::Auto),
+            "false meant \"when the connection needs it\""
+        );
+        // The migrated file is written back, and a fresh install defaults to Auto.
+        let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written["version"], SETTINGS_VERSION);
+        assert_eq!(written["stream"]["redundancy"], "on");
+        let fresh = Settings::default();
+        assert!(fresh.stream.redundancy_auto() && !fresh.stream.redundancy_always());
     }
 
     #[test]
@@ -705,7 +846,7 @@ mod tests {
         s.device_profiles.insert(
             "not-a-device".into(),
             DeviceProfile {
-                redundancy: Some(true),
+                redundancy: Some(RedundancyMode::On),
                 ..DeviceProfile::default()
             },
         );

@@ -23,6 +23,15 @@ pub struct EngineState {
     pub capabilities: LocalCapabilities,
     pub audio_devices: Vec<AudioDeviceView>,
     pub mic_level_db: f32,
+    /// The microphone is loud enough that the limiter is working (plan §8.3): the level meter
+    /// shows a clip indicator so the user can lower the volume boost.
+    pub mic_clipping: bool,
+    /// A feedback loop was heard while monitoring the microphone on this device's speakers
+    /// (plan §8.2). Cleared once the monitor stops or the loop has been gone for a while.
+    pub mic_feedback: bool,
+    /// Noise suppression turned itself off because the computer could not keep up (plan §8.3).
+    /// The setting is untouched and comes back when capture is healthy again.
+    pub noise_suppression_suspended: bool,
     /// Running or last network self-test per device.
     pub network_tests: Vec<crate::nettest::NetworkTestView>,
     /// Microphone mute (tray, global shortcuts): silences every microphone route on this device.
@@ -239,6 +248,8 @@ pub struct RouteStats {
     pub underruns: u64,
     pub drift_ppm: i32,
     pub level_db: f32,
+    /// The soft limiter after the volume boost is working on this stream (plan §8.3).
+    pub clipping: bool,
     /// Estimated parts of `latency_ms` (connection details): capture period, codec frame,
     /// half the round trip, and the playback device. The jitter buffer is `buffer_ms`.
     pub capture_ms: f64,

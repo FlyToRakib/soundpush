@@ -280,7 +280,7 @@ fn qr_pairing_route_and_audio() {
 
     // Phone asks to hear the desk's system audio.
     let route_id = rt
-        .block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+        .block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
         .unwrap();
     wait_for(&desk, "desk route active", |s| {
         s.routes
@@ -314,7 +314,7 @@ fn qr_pairing_route_and_audio() {
         let phone_id = phone_id.clone();
         move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(desk.start_route(phone_id, RouteKind::ReceiveMicToSpeaker))
+            rt.block_on(desk.start_route(phone_id, RouteKind::ReceiveMicToSpeaker, false))
         }
     });
     let prompt = wait_for(&phone, "mic permission prompt", |s| !s.requests.is_empty());
@@ -449,7 +449,7 @@ fn lost_connection_resumes_routes_without_asking_again() {
         let phone_id = phone_id.clone();
         move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(desk.start_route(phone_id, RouteKind::ReceiveMicToSpeaker))
+            rt.block_on(desk.start_route(phone_id, RouteKind::ReceiveMicToSpeaker, false))
         }
     });
     let prompt = wait_for(&phone, "first prompt", |s| !s.requests.is_empty());
@@ -517,10 +517,10 @@ fn one_capture_serves_two_receivers() {
     pair(&rt, &desk, &phone2);
 
     let r1 = rt
-        .block_on(phone1.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+        .block_on(phone1.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
         .unwrap();
     let r2 = rt
-        .block_on(phone2.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+        .block_on(phone2.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
         .unwrap();
     wait_for(&desk, "two active send routes", |s| {
         s.routes
@@ -554,7 +554,7 @@ fn one_capture_serves_two_receivers() {
     phone2.stop_route(r2).unwrap();
     wait_for(&desk, "no routes", |s| s.routes.is_empty());
     std::thread::sleep(Duration::from_millis(300));
-    rt.block_on(phone1.start_route(desk_id, RouteKind::ReceiveSystemAudio))
+    rt.block_on(phone1.start_route(desk_id, RouteKind::ReceiveSystemAudio, false))
         .unwrap();
     rec1.lock().unwrap().clear();
     wait_for_audio(&rec1, "phone 1 plays again");
@@ -576,7 +576,7 @@ fn device_profile_switches_codec_on_a_running_route() {
     let (desk_id, _) = pair(&rt, &desk, &phone);
 
     let route_id = rt
-        .block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+        .block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
         .unwrap();
     wait_for_audio(&recorded, "opus audio");
 
@@ -672,7 +672,7 @@ fn usb_tcp_transport_pairs_streams_and_measures() {
         "connected over TCP"
     );
 
-    rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+    rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
         .unwrap();
     wait_for_audio(&recorded, "audio over TCP");
 
@@ -716,7 +716,7 @@ fn routes_resume_after_restart_when_enabled() {
     let mut settings = phone.state().settings.clone();
     settings.resume_routes_on_start = true;
     rt.block_on(phone.update_settings(settings)).unwrap();
-    rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+    rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
         .unwrap();
     wait_for(&phone, "route saved for restart", |s| {
         s.settings
@@ -756,7 +756,7 @@ fn flapping_connection_falls_back_to_stable() {
     let phone = start(&phone_dir, "Phone", recorder().0);
     let rt = tokio::runtime::Runtime::new().unwrap();
     let (desk_id, phone_id) = pair(&rt, &desk, &phone);
-    rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+    rt.block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio, false))
         .unwrap();
 
     // More than five drops within two minutes (plan §20).
@@ -787,4 +787,63 @@ fn flapping_connection_falls_back_to_stable() {
             })
         },
     );
+}
+
+/// Only one device at a time feeds the virtual microphone (plan §8.2, §15.8). A second one is
+/// refused until its user confirms "Replace current microphone source?".
+#[test]
+fn a_second_phone_must_confirm_before_taking_the_virtual_microphone() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let one_dir = tempfile::tempdir().unwrap();
+    let two_dir = tempfile::tempdir().unwrap();
+    let desk = start(&desk_dir, "Desk", Arc::new(NullBackend::default()));
+    let one = start(&one_dir, "Phone One", sine());
+    let two = start(&two_dir, "Phone Two", sine());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    // Give the desk a virtual microphone: the default hook uses the configured device.
+    let mut settings = desk.state().settings.clone();
+    settings.desktop.virtual_mic_device = Some("SoundPush Cable".into());
+    rt.block_on(desk.update_settings(settings)).unwrap();
+    wait_for(&desk, "the desk has a virtual microphone", |s| {
+        s.capabilities.virtual_mic
+    });
+
+    let (desk_id, one_id) = pair(&rt, &desk, &one);
+    let (_, two_id) = pair(&rt, &desk, &two);
+
+    let feeds = |s: &EngineState| -> Vec<String> {
+        s.routes
+            .iter()
+            .filter(|r| {
+                r.kind == RouteKind::ReceiveMicToVirtualMic && r.status == RouteStatus::Active
+            })
+            .map(|r| r.peer_id.clone())
+            .collect()
+    };
+
+    rt.block_on(one.start_route(desk_id.clone(), RouteKind::SendMicToVirtualMic, false))
+        .unwrap();
+    wait_for(&desk, "the first phone is the microphone", |s| {
+        feeds(s) == [one_id.clone()]
+    });
+
+    // The second phone is refused, and the first keeps the microphone.
+    let refused = rt
+        .block_on(two.start_route(desk_id.clone(), RouteKind::SendMicToVirtualMic, false))
+        .expect_err("a second microphone feed needs confirmation");
+    assert_eq!(refused.key(), "error.audio.virtualMicBusy");
+    assert_eq!(feeds(&desk.state()), [one_id.clone()]);
+
+    // The user confirms, so it takes over and the first feed ends.
+    rt.block_on(two.start_route(desk_id, RouteKind::SendMicToVirtualMic, true))
+        .unwrap();
+    wait_for(&desk, "the second phone took the microphone", |s| {
+        feeds(s) == [two_id.clone()]
+    });
+    wait_for(&one, "the first phone's route ended", |s| {
+        !s.routes
+            .iter()
+            .any(|r| r.kind == RouteKind::SendMicToVirtualMic)
+    });
 }

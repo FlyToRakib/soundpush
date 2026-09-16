@@ -207,6 +207,11 @@ pub struct StreamProfile {
     pub redundancy: bool,
     #[prost(bool, tag = "8")]
     pub adaptive_bitrate: bool,
+    /// The device that plays this stream suppresses noise in it. Set by the microphone's own
+    /// device when the user chose "on the other device" and the peer advertises
+    /// `FEATURE_RECEIVER_DENOISE`; the source then skips its own denoiser (plan §15.7).
+    #[prost(bool, tag = "9")]
+    pub denoise: bool,
 }
 
 /// Ask the peer to start a route. The requester may be either the source or the sink side.
@@ -225,6 +230,11 @@ pub struct RouteRequest {
     pub requester_is_source: bool,
     #[prost(message, optional, tag = "5")]
     pub profile: Option<StreamProfile>,
+    /// Take an endpoint that only accepts one feed (the virtual microphone) away from the route
+    /// using it. Set after the user confirmed "Replace current microphone source?" (plan §8.2).
+    /// Peers from before this field have no such check and ignore it.
+    #[prost(bool, tag = "6")]
+    pub replace: bool,
 }
 
 #[derive(Clone, PartialEq, Message)]

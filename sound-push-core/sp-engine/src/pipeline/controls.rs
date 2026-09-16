@@ -20,6 +20,28 @@ impl AtomicF32 {
     }
 }
 
+/// Level of what this device is playing on its own speakers, in dBFS, updated by every receiver
+/// that renders there. Microphone captures read it to duck while the other side is talking, which
+/// is the desktop's stand-in for acoustic echo cancellation (plan §15.7).
+#[derive(Debug)]
+pub struct EchoReference(AtomicF32);
+
+impl Default for EchoReference {
+    fn default() -> Self {
+        Self(AtomicF32::new(-120.0))
+    }
+}
+
+impl EchoReference {
+    pub fn set_level_db(&self, db: f32) {
+        self.0.set(db);
+    }
+
+    pub fn level_db(&self) -> f32 {
+        self.0.get()
+    }
+}
+
 #[derive(Debug)]
 pub struct SenderControls {
     pub muted: AtomicBool,
@@ -27,6 +49,8 @@ pub struct SenderControls {
     pub noise_suppression: AtomicBool,
     /// 80 Hz high-pass ahead of noise suppression (microphone groups).
     pub high_pass: AtomicBool,
+    /// Lower this microphone while the device plays the other side on its speakers.
+    pub echo_ducking: AtomicBool,
     /// Requested Opus bitrate (bits/s); applied by the encoder thread when it changes.
     pub bitrate: AtomicU32,
     pub expected_loss_pct: AtomicU32,
@@ -48,6 +72,7 @@ impl SenderControls {
             gain_db: AtomicF32::new(gain_db),
             noise_suppression: AtomicBool::new(noise_suppression),
             high_pass: AtomicBool::new(false),
+            echo_ducking: AtomicBool::new(false),
             bitrate: AtomicU32::new(bitrate),
             expected_loss_pct: AtomicU32::new(0),
             redundancy: AtomicBool::new(false),
@@ -68,6 +93,9 @@ pub struct ReceiverControls {
     pub balance: AtomicF32,
     pub mono: AtomicBool,
     pub av_offset_ms: AtomicI32,
+    /// Suppress noise in this incoming microphone stream, because its own device asked us to
+    /// ("Noise suppression → on the other device", plan §15.7). Mono streams only.
+    pub noise_suppression: AtomicBool,
     /// Jitter-buffer bounds (live profile changes).
     pub jitter_min_ms: AtomicU32,
     pub jitter_max_ms: AtomicU32,
@@ -96,6 +124,7 @@ impl ReceiverControls {
             balance: AtomicF32::new(0.0),
             mono: AtomicBool::new(false),
             av_offset_ms: AtomicI32::new(0),
+            noise_suppression: AtomicBool::new(false),
             jitter_min_ms: AtomicU32::new(jitter_min_ms),
             jitter_max_ms: AtomicU32::new(jitter_max_ms),
             packets_received: AtomicU64::new(0),

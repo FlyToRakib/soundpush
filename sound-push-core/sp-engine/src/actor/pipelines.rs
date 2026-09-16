@@ -54,7 +54,7 @@ impl EncoderKey {
         }
     }
 
-    fn is_mic(&self) -> bool {
+    pub(crate) fn is_mic(&self) -> bool {
         matches!(self.source, SourceKey::Mic(_))
     }
 }
@@ -100,12 +100,13 @@ impl Actor {
         route: &mut Route,
         profile: StreamProfile,
     ) -> Result<bool, EngineError> {
-        let target = match route.kind.endpoints().1 {
-            "virtual-mic" => self
-                .hooks
+        let virtual_mic = route.kind.endpoints().1 == "virtual-mic";
+        let target = if virtual_mic {
+            self.hooks
                 .virtual_mic_target(self.settings.desktop.virtual_mic_device.as_deref())
-                .ok_or(EngineError::VirtualMicMissing)?,
-            _ => self.speaker_target(),
+                .ok_or(EngineError::VirtualMicMissing)?
+        } else {
+            self.speaker_target()
         };
         // A rebuild (codec change) keeps the route's controls, so volume and mute survive it.
         let controls = match &route.receiver_controls {
@@ -141,6 +142,12 @@ impl Actor {
                 c
             }
         };
+        // Noise suppression the sending device asked us to run for it (plan §15.7).
+        controls
+            .noise_suppression
+            .store(profile.denoise, Ordering::Relaxed);
+        // Only audio going to this device's own speakers can be picked up by its microphone.
+        let echo = (!virtual_mic).then(|| self.echo.clone());
 
         let start_id = self.next_start_id();
         route.start_id = start_id;
@@ -158,7 +165,11 @@ impl Actor {
         tokio::task::spawn_blocking(move || {
             let result = Receiver::start(
                 backend.as_ref(),
-                ReceiverConfig { profile, target },
+                ReceiverConfig {
+                    profile,
+                    target,
+                    echo,
+                },
                 controls,
                 on_error,
             );
@@ -230,7 +241,7 @@ impl Actor {
                     } else {
                         0.0
                     },
-                    is_mic && self.settings.mic.noise_suppression,
+                    is_mic && self.denoise_here(&profile),
                     profile.bitrate,
                 ));
                 group
@@ -239,6 +250,11 @@ impl Actor {
                 group
                     .high_pass
                     .store(is_mic && self.settings.mic.high_pass, Ordering::Relaxed);
+                group
+                    .echo_ducking
+                    .store(is_mic && self.settings.mic.echo_ducking, Ordering::Relaxed);
+                // Only a microphone can pick up this device's own speakers.
+                let echo = is_mic.then(|| self.echo.clone());
                 let failed_tx = self.internal_tx.clone();
                 let failed_key = key.clone();
                 let on_error = Box::new(move |e: sp_audio_io::AudioError| {
@@ -268,6 +284,7 @@ impl Actor {
                             profile,
                             application,
                             source,
+                            echo,
                         },
                         group,
                         on_error,
@@ -561,24 +578,38 @@ impl Actor {
         }
     }
 
+    /// Whether this device denoises a microphone stream itself: the setting is on, the user did
+    /// not move it to the other device, and noise suppression has not switched itself off because
+    /// the machine could not keep up (plan §8.3).
+    pub(super) fn denoise_here(&self, profile: &StreamProfile) -> bool {
+        self.settings.mic.noise_suppression && !profile.denoise && !self.denoise.suspended()
+    }
+
     /// Push microphone settings to running microphone groups.
     pub(super) fn update_mic_groups(&self) {
         for (key, slot) in &self.encoders {
-            if let (true, EncoderSlot::Running(sender)) = (key.is_mic(), slot) {
-                sender.controls.gain_db.set(self.settings.mic.gain_db);
-                sender
-                    .controls
-                    .noise_suppression
-                    .store(self.settings.mic.noise_suppression, Ordering::Relaxed);
-                sender
-                    .controls
-                    .high_pass
-                    .store(self.settings.mic.high_pass, Ordering::Relaxed);
-                sender
-                    .controls
-                    .muted
-                    .store(self.mic_muted, Ordering::Relaxed);
-            }
+            let (true, EncoderSlot::Running(sender)) = (key.is_mic(), slot) else {
+                continue;
+            };
+            // A group is shared by every route with the same encoding. It denoises here unless
+            // every route it feeds is denoised by the device that plays it.
+            let denoise = self
+                .routes
+                .iter()
+                .filter(|r| r.encoder.as_ref() == Some(key))
+                .filter_map(|r| r.profile.as_ref())
+                .fold(None, |acc: Option<bool>, p| {
+                    Some(acc.unwrap_or(false) || self.denoise_here(p))
+                })
+                .unwrap_or(self.settings.mic.noise_suppression && !self.denoise.suspended());
+            let c = &sender.controls;
+            c.gain_db.set(self.settings.mic.gain_db);
+            c.noise_suppression.store(denoise, Ordering::Relaxed);
+            c.high_pass
+                .store(self.settings.mic.high_pass, Ordering::Relaxed);
+            c.echo_ducking
+                .store(self.settings.mic.echo_ducking, Ordering::Relaxed);
+            c.muted.store(self.mic_muted, Ordering::Relaxed);
         }
     }
 }

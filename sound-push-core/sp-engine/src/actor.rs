@@ -33,6 +33,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
 use crate::audit::{AuditEntry, AuditKind, AuditLog, permission_name, policy_name};
+use crate::denoise::{DenoiseChange, DenoiseSupervisor};
 use crate::error::{ErrorView, Severity};
 use crate::health::LinkHealth;
 use crate::net::{local_addresses, resolve, sort_candidates};
@@ -41,7 +42,7 @@ use crate::pairing_limit::{Decision, PairingLimiter};
 use crate::pipeline::monitor::MicMonitor;
 use crate::pipeline::receiver::{PacketSink, Receiver, ReceiverConfig};
 use crate::pipeline::sender::{Sender, SenderConfig, Subscriber, Subscription};
-use crate::pipeline::{ReceiverControls, SenderControls};
+use crate::pipeline::{EchoReference, ReceiverControls, SenderControls};
 use crate::platform::{KeepAlive, PlatformHooks};
 use crate::reconnect::{Backoff, FlapDetector};
 use crate::resume::ResumeTokens;
@@ -73,6 +74,10 @@ const REFUSED_AUDIT_INTERVAL: Duration = Duration::from_secs(600);
 /// Anti-flap (plan §20): a device held on the Stable profile returns to its own latency setting
 /// after this long without another reconnect.
 const STABLE_HOLD: Duration = Duration::from_secs(600);
+/// A feedback loop is reported at most this often, however long it goes on.
+const FEEDBACK_NOTICE_INTERVAL: Duration = Duration::from_secs(60);
+/// How long the "you have a feedback loop" banner stays after the last howl.
+const FEEDBACK_BANNER: Duration = Duration::from_secs(20);
 
 pub(crate) enum Command {
     StartPairing(Reply<String>),
@@ -122,6 +127,8 @@ pub(crate) enum Command {
     StartRoute {
         device_id: String,
         kind: RouteKind,
+        /// Take the virtual microphone away from whatever feeds it now (plan §8.2).
+        replace: bool,
         reply: Reply<String>,
     },
     StopRoute {
@@ -378,6 +385,12 @@ pub(crate) struct Actor {
     next_notice_id: u64,
     mic_muted: bool,
     monitor: Option<MicMonitor>,
+    /// How loud this device's own speakers are, for the microphone echo duck (plan §15.7).
+    echo: Arc<EchoReference>,
+    /// Switches noise suppression off while capture cannot keep up (plan §8.3).
+    denoise: DenoiseSupervisor,
+    /// When a microphone feedback loop was last heard while monitoring (plan §8.2).
+    mic_feedback_at: Option<Instant>,
     audio_devices: Vec<AudioDeviceView>,
     keep_alive: KeepAlive,
     foreground: bool,
@@ -502,6 +515,9 @@ pub(crate) async fn spawn(
         next_notice_id: 1,
         mic_muted: false,
         monitor: None,
+        echo: Arc::new(EchoReference::default()),
+        denoise: DenoiseSupervisor::default(),
+        mic_feedback_at: None,
         audio_devices: Vec::new(),
         keep_alive: KeepAlive::default(),
         foreground: true,
@@ -704,7 +720,8 @@ impl Actor {
             .with(Capabilities::FEATURE_SESSION_RESUME)
             .with(Capabilities::FEATURE_NETWORK_TEST)
             .with(Capabilities::FEATURE_ROUTE_RECONFIGURE)
-            .with(Capabilities::FEATURE_DTX);
+            .with(Capabilities::FEATURE_DTX)
+            .with(Capabilities::FEATURE_RECEIVER_DENOISE);
         if self.tcp.as_ref().is_some_and(|t| t.local_port() != 0) {
             bits = bits.with(Capabilities::TRANSPORT_TCP);
         }
@@ -1076,9 +1093,10 @@ impl Actor {
             Command::StartRoute {
                 device_id,
                 kind,
+                replace,
                 reply,
             } => match parse_device(&device_id) {
-                Ok(id) => self.start_route(id, kind, reply),
+                Ok(id) => self.start_route(id, kind, replace, reply),
                 Err(e) => {
                     let _ = reply.send(Err(e));
                 }
@@ -1259,6 +1277,10 @@ impl Actor {
                 c.av_offset_ms
                     .store(self.settings.output.av_offset_ms, Ordering::Relaxed);
             }
+        }
+        // Switching noise suppression off clears a suspension, so turning it on again really does.
+        if old.mic.noise_suppression != self.settings.mic.noise_suppression {
+            self.denoise.reset();
         }
         self.update_mic_groups();
         // "Mute this computer's speakers while sending" also applies to a stream already running.
@@ -2126,9 +2148,10 @@ impl Actor {
                     let err = match reason {
                         StopReason::PermissionDenied => EngineError::PeerDenied,
                         StopReason::UnsupportedEndpoint => EngineError::VirtualMicMissing,
-                        StopReason::AudioDeviceLost | StopReason::DeviceBusy => {
-                            EngineError::AudioDevice("remote".into())
-                        }
+                        // Another device already feeds the peer's virtual microphone; the app
+                        // offers to replace it (plan §8.2).
+                        StopReason::DeviceBusy => EngineError::VirtualMicBusy,
+                        StopReason::AudioDeviceLost => EngineError::AudioDevice("remote".into()),
                         _ => EngineError::PeerDenied,
                     };
                     if let Some(reply) = route.reply.take() {
@@ -2233,7 +2256,13 @@ impl Actor {
 
     // ============================================================ routes
 
-    fn start_route(&mut self, peer: DeviceId, kind: RouteKind, reply: Reply<String>) {
+    fn start_route(
+        &mut self,
+        peer: DeviceId,
+        kind: RouteKind,
+        replace: bool,
+        reply: Reply<String>,
+    ) {
         if let Err(e) = self.check_local_capability(kind) {
             let _ = reply.send(Err(e));
             return;
@@ -2245,6 +2274,20 @@ impl Actor {
         {
             let _ = reply.send(Ok(existing.key()));
             return;
+        }
+        // Only one device at a time can be the virtual microphone (plan §15.8). The app asks
+        // "Replace current microphone source?" and starts again with `replace`.
+        if kind == RouteKind::ReceiveMicToVirtualMic {
+            match self.virtual_mic_feed(Some(peer)) {
+                Some(key) if replace => {
+                    self.stop_route_by_key(&key, StopReason::Superseded, true);
+                }
+                Some(_) => {
+                    let _ = reply.send(Err(EngineError::VirtualMicBusy));
+                    return;
+                }
+                None => {}
+            }
         }
         let profile = self.profile_for(kind, &peer);
         let Some(session) = self.sessions.get_mut(&peer) else {
@@ -2263,6 +2306,7 @@ impl Actor {
             sink_endpoint: sink.into(),
             requester_is_source: kind.local_is_source(),
             profile: Some(profile.clone()),
+            replace,
         }));
         let mut route = new_route(peer, id, kind, true, self.settings.output.volume);
         route.status = RouteStatus::Requesting;
@@ -2270,6 +2314,19 @@ impl Actor {
         route.reply = Some(reply);
         route.deadline = Some(Instant::now() + Duration::from_secs(35));
         self.routes.push(route);
+    }
+
+    /// The route that feeds this device's virtual microphone now, if any, ignoring routes with
+    /// `except` (the device asking for it). Only one feed is allowed at a time (plan §15.8).
+    fn virtual_mic_feed(&self, except: Option<DeviceId>) -> Option<String> {
+        self.routes
+            .iter()
+            .find(|r| {
+                r.kind == RouteKind::ReceiveMicToVirtualMic
+                    && r.status != RouteStatus::Stopped
+                    && Some(r.peer) != except
+            })
+            .map(Route::key)
     }
 
     fn check_local_capability(&self, kind: RouteKind) -> Result<(), EngineError> {
@@ -2300,12 +2357,31 @@ impl Actor {
             s.latency = LatencyMode::Stable;
         }
         let channels = if kind.is_mic() { 1 } else { 2 };
-        let mut p = build_profile(s.latency_profile(), s.quality(), channels, s.redundancy);
+        let mut p = build_profile(
+            s.latency_profile(),
+            s.quality(),
+            channels,
+            s.redundancy_always(),
+        );
         if kind.is_mic() && p.frame_us < 10_000 {
             // Noise suppression works on 10 ms frames.
             p.frame_us = 10_000;
         }
+        p.denoise = self.denoise_at_peer(kind, peer);
         p
+    }
+
+    /// Whether the peer should suppress noise in a microphone stream this device sends it
+    /// ("Noise suppression → on the other device", plan §4.3/§15.7). False towards peers that do
+    /// not understand it, so this device denoises instead and the setting still does something.
+    fn denoise_at_peer(&self, kind: RouteKind, peer: &DeviceId) -> bool {
+        if !kind.is_mic() || !kind.local_is_source() {
+            return false;
+        }
+        let peer_can = self.sessions.get(peer).is_some_and(|s| {
+            Capabilities(s.hello.capabilities).has(Capabilities::FEATURE_RECEIVER_DENOISE)
+        });
+        self.settings.mic.denoise_placement(peer_can).1
     }
 
     fn on_route_request(&mut self, peer: DeviceId, req: RouteRequest) {
@@ -2323,6 +2399,17 @@ impl Actor {
             };
             self.reject(peer, req.route, reason);
             return;
+        }
+        // A second device asking for the virtual microphone is refused until its user confirms
+        // "Replace current microphone source?" and asks again with `replace` (plan §8.2).
+        if kind == RouteKind::ReceiveMicToVirtualMic
+            && let Some(current) = self.virtual_mic_feed(Some(peer))
+        {
+            if !req.replace {
+                self.reject(peer, req.route, StopReason::DeviceBusy);
+                return;
+            }
+            self.stop_route_by_key(&current, StopReason::Superseded, true);
         }
         let permission = if local_is_source {
             if kind.is_mic() {
@@ -2425,7 +2512,10 @@ impl Actor {
             .clone()
             .unwrap_or_else(|| self.profile_for(kind, &peer));
         sanitize_profile(&mut profile);
-        if !kind.local_is_source() {
+        if kind.local_is_source() {
+            // Where this device's microphone is denoised is its own setting, not the requester's.
+            profile.denoise = self.denoise_at_peer(kind, &peer);
+        } else {
             // The receiving side's latency preference wins.
             let local = self.profile_for(kind, &peer);
             profile.jitter_min_ms = local.jitter_min_ms;
@@ -2614,7 +2704,8 @@ impl Actor {
         }
         for kind in kinds {
             let (tx, _rx) = oneshot::channel();
-            self.start_route(peer, kind, tx);
+            // Restoring a saved route never takes the virtual microphone from a live one.
+            self.start_route(peer, kind, false, tx);
             if let Some(r) = self
                 .routes
                 .iter_mut()
@@ -2739,6 +2830,8 @@ impl Actor {
 
     fn on_stats(&mut self, peer: DeviceId, stats: StatsReport) {
         let key = route_key(&peer, stats.route as u8);
+        // "Resilient: Auto" may switch redundancy on by itself; "Always" and "Off" may not.
+        let auto = self.settings.stream_for(&peer.to_hex()).redundancy_auto();
         let Some(r) = self.routes.iter_mut().find(|r| r.key() == key) else {
             return;
         };
@@ -2770,8 +2863,9 @@ impl Actor {
                 }
             }
         }
-        // Automatic redundancy: on above 1 % loss, off after 10 clean seconds (unless forced by the profile).
-        if let (Some(c), Some(p)) = (&r.sender_controls, &r.profile) {
+        // Automatic redundancy (plan §15.6): on above 1 % loss, off after 10 clean seconds.
+        // "Always" keeps it on through the profile instead, and "Off" never turns it on.
+        if let (true, Some(c), Some(p)) = (auto, &r.sender_controls, &r.profile) {
             if r.loss_pct > 1.0 {
                 c.redundancy.store(true, Ordering::Relaxed);
                 r.clean_secs = 0;
@@ -2881,6 +2975,8 @@ impl Actor {
         }
 
         self.check_virtual_mic_use();
+        self.check_capture_health();
+        self.check_mic_feedback(now);
 
         // Pending prompts expire.
         let expired_requests: Vec<u64> = self
@@ -2934,6 +3030,56 @@ impl Actor {
             for id in candidates {
                 self.try_dial_trusted(id);
             }
+        }
+    }
+
+    /// Let noise suppression switch itself off while the machine cannot keep up (plan §8.3).
+    fn check_capture_health(&mut self) {
+        let overruns: u64 = self
+            .encoders
+            .iter()
+            .filter(|(k, _)| k.is_mic())
+            .filter_map(|(_, slot)| match slot {
+                pipelines::EncoderSlot::Running(s) => {
+                    Some(s.controls.capture_overruns.load(Ordering::Relaxed))
+                }
+                pipelines::EncoderSlot::Starting { .. } => None,
+            })
+            .sum();
+        let change = self
+            .denoise
+            .step(overruns, self.settings.mic.noise_suppression);
+        let Some(change) = change else { return };
+        self.update_mic_groups();
+        match change {
+            DenoiseChange::Suspended => {
+                warn!("capture is missing deadlines; noise suppression switched itself off");
+                self.notice("notice.denoiseSuspended", vec![], Severity::Warning, None);
+            }
+            DenoiseChange::Resumed => info!("capture is keeping up; noise suppression back on"),
+        }
+    }
+
+    /// Warn once when monitoring the microphone on this device's speakers starts to howl
+    /// (plan §8.2). The detector only runs while the monitor does.
+    fn check_mic_feedback(&mut self, now: Instant) {
+        if self.monitor.as_ref().is_some_and(MicMonitor::take_feedback) {
+            let fresh = self
+                .mic_feedback_at
+                .is_none_or(|t| now.duration_since(t) > FEEDBACK_NOTICE_INTERVAL);
+            self.mic_feedback_at = Some(now);
+            if fresh {
+                warn!("microphone feedback loop detected while monitoring");
+                self.notice("notice.micFeedback", vec![], Severity::Warning, None);
+            }
+        }
+        // The banner goes away once the loop has been quiet for a while, or the monitor stopped.
+        if self
+            .mic_feedback_at
+            .is_some_and(|t| now.duration_since(t) > FEEDBACK_BANNER)
+            || self.monitor.is_none()
+        {
+            self.mic_feedback_at = None;
         }
     }
 
@@ -3062,6 +3208,7 @@ impl Actor {
                 }
                 if let Some(c) = &r.sender_controls {
                     stats.level_db = c.level_db.get();
+                    stats.clipping = c.clipping.load(Ordering::Relaxed);
                     if let Some(remote) = &r.remote_stats {
                         stats.buffer_ms = remote.buffer_ms as f64;
                         stats.jitter_ms = remote.jitter_us as f64 / 1000.0;
@@ -3127,12 +3274,16 @@ impl Actor {
             })
             .collect();
 
-        let mic_level_db = self
-            .routes
-            .iter()
-            .filter(|r| r.kind.is_mic())
-            .filter_map(|r| r.sender_controls.as_ref().map(|c| c.level_db.get()))
+        let mic_controls = || {
+            self.routes
+                .iter()
+                .filter(|r| r.kind.is_mic())
+                .filter_map(|r| r.sender_controls.as_ref())
+        };
+        let mic_level_db = mic_controls()
+            .map(|c| c.level_db.get())
             .fold(-120.0f32, f32::max);
+        let mic_clipping = mic_controls().any(|c| c.clipping.load(Ordering::Relaxed));
 
         let state = EngineState {
             revision: self.revision,
@@ -3155,6 +3306,9 @@ impl Actor {
             capabilities: self.local_capabilities(),
             audio_devices: self.audio_devices.clone(),
             mic_level_db,
+            mic_clipping,
+            mic_feedback: self.mic_feedback_at.is_some(),
+            noise_suppression_suspended: self.denoise.suspended(),
             network_tests: self.network_test_views(),
             mic_muted: self.mic_muted,
         };

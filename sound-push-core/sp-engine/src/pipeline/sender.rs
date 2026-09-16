@@ -13,14 +13,14 @@ use bytes::{Bytes, BytesMut};
 use sp_audio_io::{AudioBackend, AudioStream, CaptureSource, ErrorCallback};
 use sp_media::codec::{Encoder, OpusApplication, encoder_for};
 use sp_media::dsp::{
-    Gain, HighPass, LevelMeter, NoiseSuppressor, SoftLimiter, db_to_gain, is_silent,
+    DuckGate, Gain, HighPass, LevelMeter, NoiseSuppressor, SoftLimiter, db_to_gain, is_silent,
 };
 use sp_media::samples_per_frame;
 use sp_protocol::control::StreamProfile;
 use sp_protocol::{Codec, MediaFlags, MediaHeader, MediaPacket};
 use tracing::{debug, warn};
 
-use super::controls::SenderControls;
+use super::controls::{EchoReference, SenderControls};
 use crate::EngineError;
 
 /// Silence (every sample below −60 dBFS) lasting this long starts DTX. The hangover keeps word
@@ -52,6 +52,8 @@ pub struct SenderConfig {
     pub profile: StreamProfile,
     pub application: OpusApplication,
     pub source: CaptureSource,
+    /// What this device plays on its own speakers, for the echo duck (microphone groups).
+    pub echo: Option<Arc<EchoReference>>,
 }
 
 /// One route receiving a group's packets.
@@ -149,6 +151,7 @@ impl Sender {
             let controls = controls.clone();
             let fanout = fanout.clone();
             let codec = encoder.codec();
+            let echo = config.echo.clone();
             std::thread::Builder::new()
                 .name("sp-encode".into())
                 .spawn(move || {
@@ -161,6 +164,7 @@ impl Sender {
                         codec,
                         channels,
                         frame,
+                        echo.as_deref(),
                     )
                 })
                 .map_err(|e| EngineError::Internal(e.to_string()))?
@@ -247,6 +251,7 @@ fn encode_loop(
     codec: Codec,
     channels: usize,
     frame: usize,
+    echo: Option<&EchoReference>,
 ) {
     let mut buf = vec![0.0f32; frame * channels];
     let mut packet = Vec::with_capacity(1500);
@@ -257,6 +262,7 @@ fn encode_loop(
     let mut meter = LevelMeter::default();
     let mut denoiser: Option<NoiseSuppressor> = None;
     let mut high_pass: Option<HighPass> = None;
+    let mut duck = DuckGate::new();
     let mut applied_bitrate = 0u32;
     let mut applied_loss = u32::MAX;
     let mut timestamp: u64 = 0;
@@ -324,6 +330,11 @@ fn encode_loop(
             denoiser = None;
         }
         gain.process(&mut buf);
+        // Half-duplex echo control: while this device plays the other side on its speakers, the
+        // microphone is lowered so the other side does not hear itself back (plan §15.7).
+        if let Some(echo) = echo.filter(|_| controls.echo_ducking.load(Ordering::Relaxed)) {
+            duck.process(&mut buf, echo.level_db());
+        }
         let clipped = limiter.process(&mut buf);
         meter.process(&buf);
         let level = meter.peak_db();
@@ -529,6 +540,7 @@ mod tests {
                 profile: profile.clone(),
                 application: OpusApplication::LowDelay,
                 source: CaptureSource::SystemLoopback(None),
+                echo: None,
             },
             Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
             Box::new(|_| {}),
@@ -609,6 +621,7 @@ mod tests {
                 profile: profile.clone(),
                 application: OpusApplication::Voip,
                 source: CaptureSource::DefaultInput,
+                echo: None,
             },
             controls(),
             Box::new(|_| {}),
