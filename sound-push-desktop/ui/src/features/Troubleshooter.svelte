@@ -86,6 +86,10 @@
       case "visibilityTrusted":
         updateSettings((x) => (x.visibility = "trustedOnly"));
         break;
+      case "openUsb":
+        // Devices is where USB over adb is set up, the way past a network that isolates clients.
+        ui.page = "devices";
+        break;
     }
   }
 </script>

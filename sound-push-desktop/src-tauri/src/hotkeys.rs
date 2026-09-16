@@ -69,6 +69,94 @@ pub fn plugin() -> TauriPlugin<Wry> {
         .build()
 }
 
+/// Set once the desktop portal owns the shortcuts (plan §26.2). The portal shows its own dialog
+/// and the keys are then changed in the system's keyboard settings, so SoundPush registers
+/// nothing itself and has no "these keys are taken" error to report.
+#[cfg(target_os = "linux")]
+static PORTAL_SHORTCUTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the desktop portal handles the shortcuts instead of SoundPush.
+pub fn portal_owned() -> bool {
+    #[cfg(target_os = "linux")]
+    return PORTAL_SHORTCUTS.load(std::sync::atomic::Ordering::Relaxed);
+    #[allow(unreachable_code)]
+    false
+}
+
+/// On a sandboxed or Wayland desktop, hand the shortcuts to `xdg-desktop-portal` and forward what
+/// it reports to the engine. Does nothing (and changes nothing) anywhere else, or when the portal
+/// has no GlobalShortcuts interface.
+#[cfg(target_os = "linux")]
+pub fn use_portal(app: &AppHandle, mute: Option<&str>, push_to_talk: Option<&str>) {
+    use crate::portals::{self, ShortcutEvent as PortalEvent};
+
+    if !portals::preferred() {
+        return;
+    }
+    // The portal shows these next to the keys in the system's shortcut settings. They cannot come
+    // from the interface translations: the shortcuts are bound before any window exists.
+    let wanted = vec![
+        (
+            "toggle-microphone-mute",
+            "Mute or unmute the microphone".to_string(),
+            mute.map(portal_trigger),
+        ),
+        (
+            "push-to-talk",
+            "Talk while the keys are held".to_string(),
+            push_to_talk.map(portal_trigger),
+        ),
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    if !portals::bind_shortcuts(wanted, tx) {
+        return;
+    }
+    PORTAL_SHORTCUTS.store(true, std::sync::atomic::Ordering::Relaxed);
+    let app = app.clone();
+    let forwarded = std::thread::Builder::new()
+        .name("sp-portal-hotkeys".into())
+        .spawn(move || {
+            while let Ok(event) = rx.recv() {
+                let Some(engine) = app
+                    .try_state::<AppState>()
+                    .and_then(|s| s.engine.get().cloned())
+                else {
+                    continue;
+                };
+                let result = match event {
+                    PortalEvent::MutePressed => engine.set_mic_muted(!engine.state().mic_muted),
+                    PortalEvent::PushToTalkPressed => engine.set_mic_muted(false),
+                    PortalEvent::PushToTalkReleased => engine.set_mic_muted(true),
+                };
+                if let Err(e) = result {
+                    warn!(error = %e, "portal shortcut could not change the microphone mute");
+                }
+            }
+        });
+    if let Err(e) = forwarded {
+        warn!(error = %e, "could not forward portal shortcuts");
+    }
+}
+
+/// An accelerator in the portal's syntax: uppercase modifiers, the key as it is written
+/// ("Ctrl+Shift+M" → "CTRL+SHIFT+m").
+#[cfg(target_os = "linux")]
+fn portal_trigger(accelerator: &str) -> String {
+    accelerator
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| match part.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" | "commandorcontrol" => "CTRL".to_string(),
+            "shift" => "SHIFT".to_string(),
+            "alt" | "option" => "ALT".to_string(),
+            "super" | "meta" | "cmd" | "command" => "SUPER".to_string(),
+            key => key.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
     let (Some(state), Some(hotkeys)) = (app.try_state::<AppState>(), app.try_state::<Hotkeys>())
     else {
@@ -139,6 +227,10 @@ pub fn set(app: &AppHandle, kind: Kind, accelerator: Option<&str>) -> Result<(),
 
 /// Register the shortcuts saved in settings (at start-up and after every settings change).
 pub fn apply(app: &AppHandle, mute: Option<&str>, push_to_talk: Option<&str>) {
+    // The portal already has them, and the keys themselves belong to the desktop's settings.
+    if portal_owned() {
+        return;
+    }
     let Some(hotkeys) = app.try_state::<Hotkeys>() else {
         return;
     };

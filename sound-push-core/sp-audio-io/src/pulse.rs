@@ -485,6 +485,18 @@ impl Pulse {
         })
     }
 
+    /// The other half of [`Self::set_default_sink`], for "make SoundPush the default devices".
+    pub fn set_default_source(&mut self, source: &str) -> Result<(), AudioError> {
+        let ok = Rc::new(Cell::new(false));
+        let result = ok.clone();
+        let op = self
+            .context
+            .set_default_source(source, move |s| result.set(s));
+        self.confirm(op, &ok, || {
+            format!("the sound server could not make {source} the default input")
+        })
+    }
+
     /// Report device changes until the connection ends (see [`watch_devices`]).
     fn follow_devices(&mut self, on_change: &mut dyn FnMut(bool, bool)) -> Result<(), AudioError> {
         // (a device was added or removed, the server changed)
@@ -533,10 +545,13 @@ impl Drop for Pulse {
     }
 }
 
+/// Cached answer of [`available`], so capability checks on every state change do not each
+/// connect to the sound server.
+static AVAILABLE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+
 /// Whether a sound server answers. Cached briefly: capability checks run on every state change.
 pub fn available() -> bool {
-    static LAST: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
-    let Ok(mut last) = LAST.lock() else {
+    let Ok(mut last) = AVAILABLE.lock() else {
         return false;
     };
     if let Some((at, ok)) = *last
@@ -547,6 +562,13 @@ pub fn available() -> bool {
     let ok = Pulse::connect().is_ok();
     *last = Some((Instant::now(), ok));
     ok
+}
+
+/// Forget the cached answer of [`available`] (the engine's idle pass, plan §13.5).
+pub fn forget_availability() {
+    if let Ok(mut last) = AVAILABLE.lock() {
+        *last = None;
+    }
 }
 
 /// Call `on_change(default_input_changed, default_output_changed)` whenever the sound server adds

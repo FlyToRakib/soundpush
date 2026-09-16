@@ -337,6 +337,12 @@ pub struct DesktopSettings {
     pub auto_start_mic: bool,
     /// Device the phone microphone was last used with; `auto_start_mic` prefers it.
     pub last_mic_peer: Option<String>,
+    /// Keep the window's webview in memory while SoundPush sits in the tray, so reopening is
+    /// instant (plan §13.1). Off releases it when the window closes and costs a moment on reopen.
+    pub keep_window_in_memory: bool,
+    /// Make SoundPush the computer's default input and output while a route is active, and put the
+    /// previous defaults back afterwards (plan §23.2 headset flow).
+    pub default_devices_while_active: bool,
 }
 
 impl Default for DesktopSettings {
@@ -351,7 +357,48 @@ impl Default for DesktopSettings {
             virtual_mic_device: None,
             auto_start_mic: false,
             last_mic_peer: None,
+            keep_window_in_memory: false,
+            default_devices_while_active: false,
         }
+    }
+}
+
+/// Hidden troubleshooting overrides (plan §4.3 "EventSync / continuous capture", §24.7).
+///
+/// The capture engine decides all of this by itself; these exist only so support can switch a
+/// behaviour off on a machine where a driver misbehaves. Defaults are the automatic behaviour,
+/// so a file without this section behaves exactly as before. Documented in `docs/advanced.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AdvancedSettings {
+    /// Keep encoding and sending while the source is silent instead of switching to DTX
+    /// (plan §15.2). Costs bandwidth; helps drivers that stall when a stream goes quiet.
+    pub continuous_capture: bool,
+    /// Keep audio devices open while nothing streams instead of closing them after
+    /// [`AUDIO_IDLE_SECS`] (plan §13.5). Helps devices that are slow or unreliable to reopen.
+    pub keep_audio_devices_open: bool,
+    /// Ask the OS for real-time priority on capture and playback threads (plan §13.3, §12.3).
+    /// Off leaves them at normal priority, which some virtual drivers prefer.
+    pub realtime_audio_priority: bool,
+}
+
+/// Audio devices close after this long without an active route (plan §13.5, §22.2).
+pub const AUDIO_IDLE_SECS: u64 = 60;
+
+impl Default for AdvancedSettings {
+    fn default() -> Self {
+        Self {
+            continuous_capture: false,
+            keep_audio_devices_open: false,
+            realtime_audio_priority: true,
+        }
+    }
+}
+
+impl AdvancedSettings {
+    /// True while every override is at its automatic default (the UI then stays collapsed).
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 }
 
@@ -483,6 +530,8 @@ pub struct Settings {
     pub debug_logging: bool,
     /// When debug logging switches itself off (unix seconds; 0 while off). Set by the engine.
     pub debug_logging_until_unix: u64,
+    /// Hidden troubleshooting overrides; see [`AdvancedSettings`].
+    pub advanced: AdvancedSettings,
 }
 
 /// Desktop update channel.
@@ -528,6 +577,7 @@ impl Default for Settings {
             update_channel: UpdateChannel::Stable,
             debug_logging: false,
             debug_logging_until_unix: 0,
+            advanced: AdvancedSettings::default(),
         }
     }
 }
@@ -918,6 +968,38 @@ mod tests {
         };
         zero.sanitize();
         assert_eq!(zero.max_receivers, 1);
+    }
+
+    #[test]
+    fn advanced_overrides_default_to_the_automatic_behaviour() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(dir.path());
+        let d = Settings::default();
+        assert!(d.advanced.is_default());
+        assert!(!d.advanced.continuous_capture);
+        assert!(!d.advanced.keep_audio_devices_open);
+        assert!(d.advanced.realtime_audio_priority, "on unless overridden");
+        assert!(!d.desktop.keep_window_in_memory);
+        assert!(!d.desktop.default_devices_while_active);
+
+        // Files written before the overrides existed keep the automatic behaviour, and one
+        // override does not reset the others.
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"deviceName":"Desk","advanced":{"continuousCapture":true}}"#,
+        )
+        .unwrap();
+        let (loaded, recovered) = store.load();
+        assert!(!recovered);
+        assert!(loaded.advanced.continuous_capture);
+        assert!(loaded.advanced.realtime_audio_priority);
+        assert!(!loaded.advanced.is_default());
+
+        let mut changed = Settings::default();
+        changed.advanced.keep_audio_devices_open = true;
+        changed.desktop.keep_window_in_memory = true;
+        store.save(&changed).unwrap();
+        assert_eq!(store.load().0, changed);
     }
 
     #[test]

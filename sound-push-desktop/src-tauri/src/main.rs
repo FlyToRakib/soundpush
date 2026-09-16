@@ -2,7 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod crash_dump;
 mod cues;
+mod default_devices;
 mod device_watch;
 mod hooks;
 mod hotkeys;
@@ -10,12 +12,15 @@ mod hotkeys;
 mod macos;
 mod network;
 mod os_events;
+#[cfg(target_os = "linux")]
+mod portals;
 mod power;
 mod system;
 mod tethering;
 mod tray;
 mod usb;
 mod virtual_mic;
+mod webview2;
 mod window_state;
 
 use std::path::PathBuf;
@@ -51,6 +56,14 @@ const ENGINE_WAIT: Duration = Duration::from_millis(1500);
 /// Settings tip id recorded once the "SoundPush keeps running" hint was shown.
 const CLOSE_HINT_TIP: &str = "closeToTray";
 
+/// Whether the OS started SoundPush at sign-in rather than the user opening it. The update check
+/// waits half a minute in that case (plan §24), so signing in stays quiet.
+static AUTOSTARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn autostarted() -> bool {
+    AUTOSTARTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Size-rotated log files, 5 × 10 MB (plan §28.1). The engine raises the level to `debug` while
 /// the "Debug logging" setting is on.
 fn init_logging(dir: &std::path::Path) -> Option<sp_engine::logging::LogGuard> {
@@ -62,10 +75,25 @@ pub fn show_main_window(app: &AppHandle) {
     // Several threads may ask at once (first launch, engine failure, tray); create one window.
     static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _opening = OPENING.lock();
+    // Building the window would fail with a bare "webview error"; check first so the user is
+    // told what to install (plan §10.3). Nothing else in SoundPush needs the webview.
+    if !webview2::available() {
+        warn!("no WebView2 runtime; the window cannot open");
+        missing_webview(app);
+        return;
+    }
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        // A window kept in memory received no snapshots while it was hidden (see
+        // `forward_state`), so it starts from the current one.
+        if let Some(engine) = app
+            .try_state::<AppState>()
+            .and_then(|s| s.engine.get().cloned())
+        {
+            let _ = app.emit("engine://state", &*engine.state());
+        }
         return;
     }
     let theme = app
@@ -91,8 +119,27 @@ pub fn show_main_window(app: &AppHandle) {
             let _ = window.show();
             let _ = window.set_focus();
         }
-        Err(e) => error!(error = %e, "failed to open window"),
+        Err(e) => {
+            error!(error = %e, "failed to open window");
+            // Windows: almost always a missing or damaged WebView2 runtime. Say so and offer the
+            // installer instead of leaving the user with nothing (plan §10.3, G9).
+            missing_webview(app);
+        }
     }
+}
+
+/// Explain a webview that will not start, at most once per run. The engine and the tray keep
+/// working without it, so this never stops SoundPush.
+fn missing_webview(app: &AppHandle) {
+    static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if ASKED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    tray::show_error(
+        app,
+        "The interface could not open; SoundPush is still running.",
+    );
+    webview2::offer_install(app);
 }
 
 fn window_theme(state: &EngineState) -> Option<tauri::Theme> {
@@ -108,8 +155,10 @@ fn main() {
     let log_dir = data_dir.join("logs");
     let _log_guard = init_logging(&log_dir);
     // Panics leave a redacted report in the data folder (never uploaded); the engine mentions it
-    // once on the next start and diagnostics exports include it.
+    // once on the next start and diagnostics exports include it. A crash the panic hook cannot
+    // see (access violation, SIGSEGV in a driver) leaves a note and a local minidump instead.
     sp_engine::crash::install(&data_dir, env!("CARGO_PKG_VERSION"));
+    crash_dump::install(&data_dir, env!("CARGO_PKG_VERSION"));
     info!(version = env!("CARGO_PKG_VERSION"), "SoundPush starting");
 
     let app = tauri::Builder::default()
@@ -137,6 +186,7 @@ fn main() {
             });
             app.manage(hotkeys::Hotkeys::default());
             app.manage(window_state::WindowState::load(&data_dir));
+            app.manage(Arc::new(default_devices::DefaultDevices::new(&data_dir)));
             if let Err(e) = tray::create(app) {
                 // A desktop without tray support must not stop SoundPush; the window stays reachable.
                 warn!(error = %e, "could not create the tray icon");
@@ -153,6 +203,7 @@ fn main() {
             // A macOS login item (SMAppService) starts without arguments.
             #[cfg(target_os = "macos")]
             let autostarted = autostarted || macos::launched_at_login();
+            AUTOSTARTED.store(autostarted, std::sync::atomic::Ordering::Relaxed);
             let (ready, engine_ready) = std::sync::mpsc::channel::<()>();
             if !autostarted {
                 let handle = handle.clone();
@@ -179,6 +230,14 @@ fn main() {
                             }
                             let _ = ready.send(());
                             let settings = engine.state().settings.clone();
+                            // Sandboxed and Wayland desktops hand the shortcuts to the portal
+                            // before any window exists (plan §26.2).
+                            #[cfg(target_os = "linux")]
+                            hotkeys::use_portal(
+                                &handle,
+                                settings.desktop.mute_hotkey.as_deref(),
+                                settings.desktop.push_to_talk_hotkey.as_deref(),
+                            );
                             sync_autostart(&handle, settings.desktop.launch_at_login);
                             if autostarted {
                                 // Plan §24: after sign-in the window opens only when asked to or
@@ -265,6 +324,7 @@ fn main() {
             commands::network_status,
             commands::fix_firewall,
             commands::system_status,
+            commands::update_conditions,
             commands::request_microphone,
             commands::open_system_settings,
             commands::list_audio_apps,
@@ -296,6 +356,10 @@ fn main() {
             if let Some(saved) = app.try_state::<window_state::WindowState>() {
                 saved.save();
             }
+            // Give the computer its own default input and output back before leaving.
+            if let Some(devices) = app.try_state::<Arc<default_devices::DefaultDevices>>() {
+                devices.restore();
+            }
             if let Some(engine) = app
                 .try_state::<AppState>()
                 .and_then(|s| s.engine.get().cloned())
@@ -319,10 +383,18 @@ fn main() {
     });
 }
 
+/// "Keep window in memory for instant reopen" (plan §13.1), off by default.
+pub fn keeps_window_in_memory(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .and_then(|s| s.engine.get().map(|e| e.state()))
+        .is_some_and(|s| s.settings.desktop.keep_window_in_memory)
+}
+
 /// Closing the window (plan §24): quits when "Keep running when the window is closed" is off.
-/// Otherwise the webview is destroyed, freeing its memory, and SoundPush stays in the tray. The
-/// first time the window stays open for a one-time explanation; on desktops without a tray the
-/// window is minimized instead of disappearing.
+/// Otherwise the webview is destroyed, freeing its memory, and SoundPush stays in the tray — or,
+/// with "Keep window in memory for instant reopen" on, the window is only hidden and keeps its
+/// webview loaded. The first time the window stays open for a one-time explanation; on desktops
+/// without a tray the window is minimized instead of disappearing.
 fn on_close_requested(app: &AppHandle, api: &tauri::CloseRequestApi) {
     if let Some(saved) = app.try_state::<window_state::WindowState>() {
         saved.save();
@@ -351,7 +423,13 @@ fn on_close_requested(app: &AppHandle, api: &tauri::CloseRequestApi) {
         if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
             let _ = window.minimize();
         }
+    } else if state.settings.desktop.keep_window_in_memory {
+        api.prevent_close();
+        if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            let _ = window.hide();
+        }
     }
+    // Otherwise the close goes ahead and the webview is released with the window.
 }
 
 /// Push engine state to the UI and tray; apply desktop-side settings.
@@ -362,6 +440,7 @@ fn forward_state(app: AppHandle, engine: EngineHandle, hooks: Arc<hooks::Desktop
         let mut last_theme = None;
         let mut last_streaming = false;
         let mut last_hotkeys = None;
+        let mut last_defaults: Option<(Option<String>, Option<String>)> = None;
         let mut previous: Option<Arc<EngineState>> = None;
         while rx.changed().await.is_ok() {
             let state = rx.borrow_and_update().clone();
@@ -387,7 +466,12 @@ fn forward_state(app: AppHandle, engine: EngineHandle, hooks: Arc<hooks::Desktop
                     hotkeys::apply(&handle, wanted.0.as_deref(), wanted.1.as_deref())
                 });
             }
-            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            // Snapshots go to the webview only while a window exists (plan §13.1) and is on
+            // screen: a window kept in memory but hidden is caught up by `show_main_window`.
+            if let Some(window) = app
+                .get_webview_window(MAIN_WINDOW)
+                .filter(|w| w.is_visible().unwrap_or(true))
+            {
                 if let Err(e) = app.emit("engine://state", &*state) {
                     warn!(error = %e, "emit failed");
                 }
@@ -417,8 +501,50 @@ fn forward_state(app: AppHandle, engine: EngineHandle, hooks: Arc<hooks::Desktop
                 hooks.set_prevent_sleep(prevent);
                 last_streaming = prevent;
             }
+
+            // "Make SoundPush the default input and output while active" (plan §23.2). Setting a
+            // default takes a moment on every platform, so it runs only when the answer changes.
+            let wanted = wanted_defaults(&state);
+            if last_defaults.as_ref() != Some(&wanted) {
+                last_defaults = Some(wanted.clone());
+                if let Some(devices) = app
+                    .try_state::<Arc<default_devices::DefaultDevices>>()
+                    .map(|s| s.inner().clone())
+                {
+                    tauri::async_runtime::spawn_blocking(move || {
+                        devices.apply(wanted.0.as_deref(), wanted.1.as_deref());
+                    });
+                }
+            }
         }
     });
+}
+
+/// Which devices "Make SoundPush the default input and output while active" wants right now
+/// (plan §23.2): `(input, output)`, each `None` when SoundPush should not touch that direction.
+///
+/// The recording default becomes the virtual microphone while the phone feeds it, so apps pick
+/// the phone up without being set up one by one. The playback default is only ever moved to a
+/// virtual cable SoundPush captures: pointing it at a real speaker would change nothing.
+fn wanted_defaults(state: &EngineState) -> (Option<String>, Option<String>) {
+    use sp_engine::state::{RouteKind, RouteStatus};
+    if !state.settings.desktop.default_devices_while_active {
+        return (None, None);
+    }
+    let active = |kind: RouteKind| {
+        state
+            .routes
+            .iter()
+            .any(|r| r.status == RouteStatus::Active && r.kind == kind)
+    };
+    let input = active(RouteKind::ReceiveMicToVirtualMic)
+        .then(|| state.capabilities.virtual_mic_input.clone())
+        .flatten();
+    let output = active(RouteKind::SendSystemAudio)
+        .then(|| state.settings.capture.system_device.clone())
+        .flatten()
+        .filter(|device| hooks::is_virtual_cable(device));
+    (input, output)
 }
 
 /// Re-check the firewall and network profile now and every minute, so connection errors can
@@ -441,6 +567,41 @@ fn watch_network(hooks: Arc<hooks::DesktopHooks>) {
 }
 
 fn sync_autostart(app: &AppHandle, enabled: bool) {
+    // Inside a Flatpak an XDG autostart file written by the app is not seen by the session; the
+    // portal writes one outside the sandbox and asks the user once (plan §26.2, §24).
+    #[cfg(target_os = "linux")]
+    if portals::sandboxed() {
+        let command = std::env::current_exe()
+            .map(|exe| vec![exe.to_string_lossy().to_string(), "--autostart".into()])
+            .unwrap_or_else(|_| vec!["soundpush".into(), "--autostart".into()]);
+        match portals::request_background(
+            "Keep streaming to your phone while the window is closed",
+            enabled,
+            &command,
+        ) {
+            Some(granted) if granted == enabled => return,
+            // The user said no, or said no earlier: the setting must show what is really true.
+            Some(granted) => {
+                warn!(
+                    wanted = enabled,
+                    granted, "the portal decided about launch at sign-in"
+                );
+                if let Some(engine) = app
+                    .try_state::<AppState>()
+                    .and_then(|s| s.engine.get().cloned())
+                {
+                    let mut settings = engine.state().settings.clone();
+                    settings.desktop.launch_at_login = granted;
+                    tauri::async_runtime::spawn(async move {
+                        let _ = engine.update_settings(settings).await;
+                    });
+                }
+                return;
+            }
+            // No Background interface: fall through to the ordinary XDG autostart file.
+            None => {}
+        }
+    }
     let launcher = app.autolaunch();
     // macOS 13+: an SMAppService login item. The LaunchAgent that earlier versions wrote through
     // the autostart plugin (~/Library/LaunchAgents/SoundPush.plist) is removed, so SoundPush

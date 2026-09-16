@@ -17,6 +17,7 @@ pub mod macos_tap;
 pub mod null;
 #[cfg(all(target_os = "linux", feature = "pulse"))]
 pub mod pulse;
+pub mod rt_priority;
 #[cfg(windows)]
 pub mod wasapi_process;
 
@@ -105,6 +106,10 @@ pub trait AudioBackend: Send + Sync {
         on_audio: RenderCallback,
         on_error: ErrorCallback,
     ) -> Result<Box<dyn AudioStream>, AudioError>;
+
+    /// Release whatever the backend keeps between streams. Called once the engine has had no
+    /// audio for a while (plan §13.5); opening a stream afterwards must work with no other step.
+    fn close_idle(&self) {}
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]

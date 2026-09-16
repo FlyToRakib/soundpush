@@ -21,6 +21,9 @@ const system: SystemStatus = {
   bluetoothOutputs: [],
   defaultOutput: "Speakers",
   appCapture: true,
+  webview2Version: "131.0.2903.112",
+  audioEnhancements: [],
+  vpn: { capturesInternet: false, name: null },
 };
 
 async function baseState(): Promise<EngineState> {
@@ -65,5 +68,66 @@ describe("troubleshooter", () => {
     state.settings.output.device = "USB Headset";
     const steps = diagnose("noSound", { state, network, system, virtualMicInstalled: null });
     expect(steps.find((s) => s.key === "trouble.check.deviceMissing")?.args).toEqual(["USB Headset"]);
+  });
+
+  it("warns about a VPN that carries the whole connection", async () => {
+    const state = await baseState();
+    const vpn = { ...system, vpn: { capturesInternet: true, name: "NordLynx" } };
+    for (const topic of ["noDevices", "disconnects"] as const) {
+      const steps = diagnose(topic, { state, network, system: vpn, virtualMicInstalled: null });
+      expect(steps.find((s) => s.key === "trouble.check.vpn")?.args).toEqual(["NordLynx"]);
+    }
+    // A VPN with a route of its own leaves the local network alone and is not mentioned.
+    const steps = diagnose("noDevices", { state, network, system, virtualMicInstalled: null });
+    expect(steps.some((s) => s.key === "trouble.check.vpn")).toBe(false);
+  });
+
+  it("diagnoses a network that isolates its clients instead of the static tip", async () => {
+    const state = await baseState();
+    state.local.addresses = ["192.168.1.5"];
+    // Paired, known to be on this very network, and still unreachable.
+    state.peers = state.peers.map((p) => ({
+      ...p,
+      trusted: true,
+      online: false,
+      connection: "waitingForDevice",
+      addresses: ["192.168.1.42"],
+    }));
+    const steps = diagnose("noDevices", { state, network, system, virtualMicInstalled: null });
+    expect(steps.some((s) => s.key === "trouble.check.isolated" && s.action === "openUsb")).toBe(true);
+    expect(steps.some((s) => s.key === "trouble.check.guestNetwork")).toBe(false);
+
+    // The same picture with a blocked firewall has a better answer, so isolation is not claimed.
+    const blocked = diagnose("noDevices", { state, network: { ...network, blocked: true }, system, virtualMicInstalled: null });
+    expect(blocked.some((s) => s.key === "trouble.check.isolated")).toBe(false);
+    expect(blocked.some((s) => s.key === "trouble.check.guestNetwork")).toBe(true);
+  });
+
+  it("keeps the static guest-network tip when the devices are on another network", async () => {
+    const state = await baseState();
+    state.local.addresses = ["192.168.1.5"];
+    state.peers = state.peers.map((p) => ({
+      ...p,
+      trusted: true,
+      online: false,
+      connection: "waitingForDevice",
+      // A different subnet: the phone is elsewhere, not isolated.
+      addresses: ["10.0.0.9"],
+    }));
+    const steps = diagnose("noDevices", { state, network, system, virtualMicInstalled: null });
+    expect(steps.some((s) => s.key === "trouble.check.isolated")).toBe(false);
+    expect(steps.some((s) => s.key === "trouble.check.guestNetwork")).toBe(true);
+  });
+
+  it("mentions audio enhancement software when sound is missing or crackling", async () => {
+    const state = await baseState();
+    const nahimic = { ...system, audioEnhancements: ["Nahimic", "Sonic Studio 3"] };
+    for (const topic of ["noSound", "crackles", "micApps"] as const) {
+      const steps = diagnose(topic, { state, network, system: nahimic, virtualMicInstalled: true });
+      expect(steps.find((s) => s.key === "trouble.check.audioEnhancements")?.args).toEqual(["Nahimic, Sonic Studio 3"]);
+    }
+    // Nothing of the sort running: no advice about software the user does not have.
+    const steps = diagnose("noSound", { state, network, system, virtualMicInstalled: null });
+    expect(steps.some((s) => s.key === "trouble.check.audioEnhancements")).toBe(false);
   });
 });

@@ -69,6 +69,23 @@ First public preview. Nothing has been released yet; everything below is new.
   optional "Reduce echo on speakers" for desktops without echo cancellation (ADR-0020).
 - **"Replace current microphone source?"** when a second device asks to be a computer’s microphone.
 - **Android**: balance, the 80 Hz low-cut filter, and a “Recommended” badge on the microphone mode list.
+- **Keep window in memory for instant reopen** (Settings → General, off): closing the window normally frees the memory
+  it used; keep it loaded to reopen instantly.
+- **Make SoundPush the default input and output while active** (Settings → General, off): while your phone is in use,
+  apps pick it up without being set up one by one, and your usual devices come back when the stream stops.
+- **Real-time audio priority** for capture and playback, so a busy computer causes fewer dropouts: MMCSS "Pro Audio"
+  on Windows, the thread time-constraint policy on macOS, `SCHED_RR` on Linux. Fails softly where it is not allowed.
+- **Crash reports for crashes a Rust panic hook cannot see** (an access violation, a fault inside an audio driver):
+  a minidump and a short note, stored on your computer next to the existing reports. Nothing is uploaded, and the
+  diagnostics export still carries only the text.
+- **WebView2 check on Windows**: a missing or damaged runtime is found before the window is built, and SoundPush
+  offers Microsoft's installer instead of showing a blank window. Streaming and the tray keep working meanwhile.
+- **Troubleshooter**: a VPN that carries your whole connection, a network that blocks devices from talking to each
+  other, and audio-enhancement software that is running and is known to break recording.
+- **Advanced settings** (Settings → Help & support): continuous capture, keep audio devices open and real-time audio
+  priority, folded away and explained in [`docs/advanced.md`](docs/advanced.md).
+- **Flatpak and Wayland**: global shortcuts, launch at sign-in and "keep the computer awake" go through
+  `xdg-desktop-portal`, which is the only way they can work there.
 
 ### Changed
 
@@ -86,6 +103,13 @@ First public preview. Nothing has been released yet; everything below is new.
   only, spend the administrator prompt and leave the phone just as blocked. It now offers to move that network to the
   Private profile, or to allow SoundPush on public networks, and does either in the same single prompt.
 - The "Windows Firewall blocks other devices" notice no longer stays up while a paired device is connected.
+- Windows firewall fix, hardened: the system directory now comes from Windows itself rather than an environment
+  variable, the tools it runs are named by their full path, and the elevated step starts in the system folder — so
+  nothing on the computer can decide what the administrator prompt actually runs.
+- Update checks stay out of the way: the first one waits half a minute when Windows, macOS or Linux started SoundPush
+  at sign-in, and a metered connection is left alone. "Check for updates" always works.
+- Audio devices no longer stay claimed after the last stream: what SoundPush keeps between streams is released a
+  minute later, and the phone-microphone check no longer polls when no connected device could supply one.
 - Windows build: dual-stack UDP socket and COM feature flags.
 - Repeated handshake failures and stuck dials between engines.
 - Desktop: the engine stops cleanly on quit (speakers unmuted, peers told), and start failures are shown instead of

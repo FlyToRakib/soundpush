@@ -50,6 +50,8 @@ const settings: Settings = {
     virtualMicDevice: null,
     autoStartMic: false,
     lastMicPeer: null,
+    keepWindowInMemory: false,
+    defaultDevicesWhileActive: false,
   },
   mobile: { stayAvailable: false, remindAfterRestart: true },
   autoConnectTrusted: true,
@@ -300,7 +302,12 @@ export const mockEngine = {
           bluetoothOutputs: [],
           defaultOutput: "Speakers",
           appCapture: true,
+          webview2Version: "131.0.2903.112",
+          audioEnhancements: [],
+          vpn: { capturesInternet: false, name: null },
         } as T;
+      case "update_conditions":
+        return { autostarted: false, metered: false } as T;
       case "tethering_status":
         return { active: false, internetViaPhone: false, peers: [] } as T;
       case "hotkey_status":

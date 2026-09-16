@@ -26,6 +26,45 @@ pub struct SystemStatus {
     /// Per-app capture of "this computer's audio" works here (Windows 10 2004+, or Linux with a
     /// PipeWire or PulseAudio sound server).
     pub app_capture: bool,
+    /// Installed Microsoft Edge WebView2 runtime (Windows); `None` when it is missing, which is
+    /// what turns the window into a white screen (plan §10.3). Always `None` on other platforms.
+    pub webview2_version: Option<String>,
+    /// Audio-enhancement or overlay software that is running and is known to break capture
+    /// (plan §8.3). Friendly names, for the troubleshooter. Windows only.
+    pub audio_enhancements: Vec<String>,
+    /// A VPN carries this computer's whole internet connection, which usually blocks the local
+    /// network as well (plan §8.1).
+    pub vpn: crate::tethering::VpnStatus,
+}
+
+/// What decides whether an automatic update check runs now (plan §24 "Startup performance").
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateConditions {
+    /// SoundPush was started by the OS at sign-in, so the first check waits half a minute and
+    /// leaves the machine to finish signing in.
+    pub autostarted: bool,
+    /// The connection is metered (a phone hotspot, a mobile dongle, a capped plan). Update checks
+    /// and downloads are not worth someone's data.
+    pub metered: bool,
+}
+
+pub fn update_conditions(autostarted: bool) -> UpdateConditions {
+    UpdateConditions {
+        autostarted,
+        metered: metered_connection(),
+    }
+}
+
+/// Whether the connection SoundPush would use is metered. Windows knows for certain; elsewhere
+/// this is a best effort and false means "no reason to think so".
+fn metered_connection() -> bool {
+    #[cfg(windows)]
+    return windows::metered_connection();
+    #[cfg(target_os = "linux")]
+    return linux::metered_connection();
+    #[allow(unreachable_code)]
+    false
 }
 
 /// Microphone permission only (cheap; checked before microphone routes start).
@@ -53,6 +92,9 @@ pub fn status() -> SystemStatus {
         bluetooth_outputs: windows::bluetooth_outputs(),
         default_output: default_output(),
         app_capture: sp_audio_io::wasapi_process::process_loopback_supported(),
+        webview2_version: crate::webview2::version(),
+        audio_enhancements: windows::audio_enhancements(),
+        vpn: crate::tethering::vpn(),
     };
     #[cfg(target_os = "macos")]
     return SystemStatus {
@@ -61,6 +103,8 @@ pub fn status() -> SystemStatus {
         bluetooth_outputs: crate::macos::bluetooth_outputs(),
         default_output: default_output(),
         autostart_disabled_by_os: crate::macos::login_item_needs_approval(),
+        webview2_version: crate::webview2::version(),
+        vpn: crate::tethering::vpn(),
         ..SystemStatus::default()
     };
     #[allow(unreachable_code)]
@@ -68,6 +112,8 @@ pub fn status() -> SystemStatus {
         microphone: "unknown",
         system_audio: "unknown",
         default_output: default_output(),
+        webview2_version: crate::webview2::version(),
+        vpn: crate::tethering::vpn(),
         #[cfg(target_os = "linux")]
         app_capture: sp_audio_io::pulse::available(),
         ..SystemStatus::default()
@@ -122,6 +168,30 @@ pub fn settings_url(topic: &str) -> Option<&'static str> {
     {
         let _ = topic;
         None
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::time::Duration;
+
+    /// NetworkManager's own judgement about the connection in use: 1 = metered, 3 = probably
+    /// metered (2 and 4 are the other way round, 0 is "no idea"). A desktop without
+    /// NetworkManager simply says nothing, and the check falls back to "not metered".
+    pub fn metered_connection() -> bool {
+        use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
+
+        let Ok(connection) = dbus::blocking::Connection::new_system() else {
+            return false;
+        };
+        let proxy = connection.with_proxy(
+            "org.freedesktop.NetworkManager",
+            "/org/freedesktop/NetworkManager",
+            Duration::from_secs(2),
+        );
+        proxy
+            .get::<u32>("org.freedesktop.NetworkManager", "Metered")
+            .is_ok_and(|metered| metered == 1 || metered == 3)
     }
 }
 
@@ -270,6 +340,107 @@ mod windows {
         })
     }
 
+    /// Windows' own answer to "is this connection metered", the one the Store and Windows Update
+    /// use. `NLM_CONNECTION_COST_FIXED` and `_VARIABLE` are the metered plans; the extra flags
+    /// mean the plan is already over its limit or roaming, which is metered by any measure.
+    pub fn metered_connection() -> bool {
+        use windows::Win32::Networking::NetworkListManager::{
+            INetworkCostManager, NLM_CONNECTION_COST_FIXED, NLM_CONNECTION_COST_OVERDATALIMIT,
+            NLM_CONNECTION_COST_ROAMING, NLM_CONNECTION_COST_VARIABLE, NetworkListManager,
+        };
+
+        // SAFETY: COM initialised for this call only; the object is released before CoUninitialize.
+        unsafe {
+            let init = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let cost = (|| -> windows::core::Result<u32> {
+                let manager: INetworkCostManager =
+                    CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL)?;
+                let mut cost = 0u32;
+                // A null destination address asks about the connection used by default.
+                manager.GetCost(&mut cost, std::ptr::null())?;
+                Ok(cost)
+            })()
+            .unwrap_or(0);
+            if init.is_ok() {
+                CoUninitialize();
+            }
+            let metered = NLM_CONNECTION_COST_FIXED.0
+                | NLM_CONNECTION_COST_VARIABLE.0
+                | NLM_CONNECTION_COST_OVERDATALIMIT.0
+                | NLM_CONNECTION_COST_ROAMING.0;
+            cost & metered.unsigned_abs() != 0
+        }
+    }
+
+    /// Audio-enhancement and overlay software known to break WASAPI capture (plan §8.3): they sit
+    /// in the audio path as an APO or hook the endpoints, and a loopback or microphone stream then
+    /// opens and delivers silence, or fails outright. Matched on the running process, because
+    /// what matters is whether it is active now, not whether it was ever installed.
+    ///
+    /// (process name in lower case without `.exe`, what to call it)
+    const AUDIO_ENHANCEMENTS: &[(&str, &str)] = &[
+        ("nahimicservice", "Nahimic"),
+        ("nahimicsvc32", "Nahimic"),
+        ("nahimicsvc64", "Nahimic"),
+        ("nahimic3", "Nahimic"),
+        ("nahimicmsiosd", "Nahimic"),
+        ("a-volute.nahimic", "Nahimic"),
+        ("sonicstudio3", "Sonic Studio 3"),
+        ("sonicradar3", "Sonic Radar 3"),
+        ("asusaudiocenter", "ASUS Audio Center (Sonic Studio)"),
+        ("nvidiarttheatreservice", "NVIDIA RTX Voice"),
+        ("thxspatialaudio", "THX Spatial Audio"),
+        ("razersynapseservice", "Razer Synapse"),
+        ("voicemod", "Voicemod"),
+        ("voicemeeter", "Voicemeeter"),
+        ("clownfish", "Clownfish Voice Changer"),
+        ("boomaudio", "Boom 3D"),
+        ("dolbyDAX2API", "Dolby Access"),
+        ("waves.maxxaudio", "Waves MaxxAudio"),
+        ("wavesvc", "Waves MaxxAudio"),
+    ];
+
+    /// Which of [`AUDIO_ENHANCEMENTS`] are running, by their friendly name, each named once.
+    pub fn audio_enhancements() -> Vec<String> {
+        use windows::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+            TH32CS_SNAPPROCESS,
+        };
+
+        let mut found: Vec<String> = Vec::new();
+        // SAFETY: the snapshot handle is used only while open and closed by its own `Drop`
+        // (`HANDLE` from this API is an owned handle in windows-rs).
+        unsafe {
+            let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+                return found;
+            };
+            let mut entry = PROCESSENTRY32W {
+                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                ..Default::default()
+            };
+            let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+            while more {
+                let end = entry
+                    .szExeFile
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..end]).to_ascii_lowercase();
+                let name = name.strip_suffix(".exe").unwrap_or(&name);
+                if let Some((_, friendly)) = AUDIO_ENHANCEMENTS
+                    .iter()
+                    .find(|(process, _)| name.starts_with(&process.to_ascii_lowercase()))
+                    && !found.iter().any(|f| f == friendly)
+                {
+                    found.push((*friendly).to_string());
+                }
+                more = Process32NextW(snapshot, &mut entry).is_ok();
+            }
+            let _ = windows::Win32::Foundation::CloseHandle(snapshot);
+        }
+        found
+    }
+
     pub fn capture_device_in_use(input: &str) -> bool {
         let own = std::process::id();
         with_devices(eCapture, |devices| {
@@ -305,6 +476,29 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn running_audio_enhancements_are_listed_once_each() {
+            // Whatever is on this machine, the list must be clean: no duplicates and no empties.
+            let found = audio_enhancements();
+            let mut sorted = found.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(sorted.len(), found.len(), "{found:?}");
+            assert!(found.iter().all(|f| !f.is_empty()));
+            assert!(
+                AUDIO_ENHANCEMENTS
+                    .iter()
+                    .all(|(p, _)| !p.is_empty() && !p.ends_with(".exe")),
+                "process names are matched without the extension"
+            );
+        }
+
+        #[test]
+        fn the_connection_cost_is_read_without_admin() {
+            // Whatever this machine is on, the call must answer rather than hang or fail.
+            let _ = metered_connection();
+        }
 
         #[test]
         fn reads_system_state_without_admin() {

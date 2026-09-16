@@ -24,6 +24,8 @@ const IN_USE_POLL: Duration = Duration::from_secs(2);
 const AUTO_MIC_IDLE: Duration = Duration::from_secs(15);
 /// A route whose audio fails again this soon after being reopened is not reopened again.
 const REOPEN_BACKOFF: Duration = Duration::from_secs(3);
+/// Audio backends are closed after this long without audio (plan §13.5, §22.2).
+const AUDIO_IDLE: Duration = Duration::from_secs(crate::settings::AUDIO_IDLE_SECS);
 
 #[derive(Default)]
 pub(super) struct LocalAudio {
@@ -35,6 +37,49 @@ pub(super) struct LocalAudio {
     idle_since: Option<Instant>,
     /// When each route's audio was last reopened on a new device.
     reopened: HashMap<String, Instant>,
+    audio_idle: IdleAudio,
+}
+
+/// Tracks how long no route has used the audio devices, so the backends can be closed while
+/// SoundPush only listens on the network (plan §13.5). Timing only, so it is unit-tested.
+#[derive(Debug, Default)]
+pub(super) struct IdleAudio {
+    /// When audio last stopped being used; `None` while it is in use.
+    since: Option<Instant>,
+    /// The backends have been told to release what they hold.
+    closed: bool,
+}
+
+/// What [`IdleAudio::update`] asks the caller to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IdleChange {
+    /// Release everything the audio backends keep open.
+    Close,
+    /// Audio is needed again; caches may be filled once more.
+    Reopen,
+}
+
+impl IdleAudio {
+    /// Report whether audio is in use right now. Returns the one transition to act on, at most
+    /// once per state change: `Close` once `after` has passed without audio, `Reopen` as soon as
+    /// audio is used again. `after` of [`Duration::MAX`] never closes (the advanced override).
+    pub(super) fn update(
+        &mut self,
+        in_use: bool,
+        now: Instant,
+        after: Duration,
+    ) -> Option<IdleChange> {
+        if in_use {
+            self.since = None;
+            return std::mem::take(&mut self.closed).then_some(IdleChange::Reopen);
+        }
+        let since = *self.since.get_or_insert(now);
+        if self.closed || now.saturating_duration_since(since) < after {
+            return None;
+        }
+        self.closed = true;
+        Some(IdleChange::Close)
+    }
 }
 
 /// Whether a route's audio on this device uses the system default device of a changed direction.
@@ -168,6 +213,45 @@ impl Actor {
         }
     }
 
+    /// Called every tick: closes the audio backends once nothing has used them for
+    /// [`AUDIO_IDLE`], and lets them be filled again as soon as a route needs audio (plan §13.5).
+    /// Capture and playback devices themselves are already released when a route stops, so this
+    /// only drops what the backends and the shell cache between streams.
+    pub(super) fn check_audio_idle(&mut self, now: Instant) {
+        // Anything that can deliver or play audio right now: running encoder groups (shared
+        // captures), route playback, and the microphone monitor.
+        let in_use = self.monitor.is_some()
+            || !self.encoders.is_empty()
+            || self
+                .routes
+                .iter()
+                .any(|r| r.status != RouteStatus::Stopped || r.receiver_controls.is_some());
+        let after = if self.settings.advanced.keep_audio_devices_open {
+            Duration::MAX
+        } else {
+            AUDIO_IDLE
+        };
+        match self.local_audio.audio_idle.update(in_use, now, after) {
+            Some(IdleChange::Close) => {
+                tracing::debug!("no audio for a minute; closing the audio backends");
+                self.backend.close_idle();
+                self.hooks.audio_idle(true);
+            }
+            Some(IdleChange::Reopen) => self.hooks.audio_idle(false),
+            None => {}
+        }
+    }
+
+    /// Whether a connected device could supply the microphone for "start the phone microphone
+    /// when an app opens the virtual microphone". Without one there is nothing to start, so the
+    /// OS is not asked every couple of seconds (plan §13.5: no wakeups while idle).
+    fn has_mic_candidate(&self) -> bool {
+        self.sessions.iter().any(|(id, s)| {
+            self.trust.get(id).is_some_and(|d| !d.blocked)
+                && Capabilities(s.hello.capabilities).has(Capabilities::SOURCE_MICROPHONE)
+        })
+    }
+
     /// Called every tick: remembers the phone used as microphone, and (when enabled) starts it
     /// while another app has the virtual microphone open, stopping it again afterwards.
     pub(super) fn check_virtual_mic_use(&mut self) {
@@ -178,6 +262,11 @@ impl Actor {
             return;
         }
         let now = Instant::now();
+        // Nothing could be started and nothing is running: skip the OS poll entirely.
+        if self.local_audio.auto_route.is_none() && !self.has_mic_candidate() {
+            self.local_audio.handled_use = false;
+            return;
+        }
         if self
             .local_audio
             .last_poll
@@ -330,5 +419,68 @@ mod tests {
             true,
             true
         ));
+    }
+
+    #[test]
+    fn audio_backends_close_once_after_a_minute_without_audio() {
+        let mut idle = IdleAudio::default();
+        let start = Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+
+        // Audio in use: nothing to do, and the timer is not running.
+        assert_eq!(idle.update(true, at(0), AUDIO_IDLE), None);
+        // Idle, but not long enough.
+        assert_eq!(idle.update(false, at(1), AUDIO_IDLE), None);
+        assert_eq!(idle.update(false, at(60), AUDIO_IDLE), None);
+        // Exactly a minute after the last audio.
+        assert_eq!(
+            idle.update(false, at(61), AUDIO_IDLE),
+            Some(IdleChange::Close)
+        );
+        // Closing happens once, however long the idle lasts.
+        assert_eq!(idle.update(false, at(62), AUDIO_IDLE), None);
+        assert_eq!(idle.update(false, at(6000), AUDIO_IDLE), None);
+        // A route starts: reopen once, then stay quiet.
+        assert_eq!(
+            idle.update(true, at(6001), AUDIO_IDLE),
+            Some(IdleChange::Reopen)
+        );
+        assert_eq!(idle.update(true, at(6002), AUDIO_IDLE), None);
+        // The timer restarts from the moment audio stopped again.
+        assert_eq!(idle.update(false, at(6003), AUDIO_IDLE), None);
+        assert_eq!(idle.update(false, at(6060), AUDIO_IDLE), None);
+        assert_eq!(
+            idle.update(false, at(6064), AUDIO_IDLE),
+            Some(IdleChange::Close)
+        );
+    }
+
+    #[test]
+    fn short_gaps_between_routes_never_close_the_backends() {
+        let mut idle = IdleAudio::default();
+        let start = Instant::now();
+        for i in 0..20u64 {
+            // Ten seconds of silence between routes, twenty times over: never closed, so a route
+            // that stops and starts again keeps its devices.
+            assert_eq!(
+                idle.update(false, start + Duration::from_secs(i * 20), AUDIO_IDLE),
+                None
+            );
+            assert_eq!(
+                idle.update(true, start + Duration::from_secs(i * 20 + 10), AUDIO_IDLE),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn the_advanced_override_keeps_the_devices_open() {
+        let mut idle = IdleAudio::default();
+        let start = Instant::now();
+        assert_eq!(idle.update(false, start, Duration::MAX), None);
+        assert_eq!(
+            idle.update(false, start + Duration::from_secs(86_400), Duration::MAX),
+            None
+        );
     }
 }

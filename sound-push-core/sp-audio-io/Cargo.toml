@@ -47,8 +47,10 @@ objc2-core-media = { version = "0.3", default-features = false, features = ["std
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSError", "NSProcessInfo", "NSString", "NSUUID", "NSValue"] }
 objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "SCShareableContent", "SCStream", "block2", "dispatch2", "objc2-core-media"] }
 
-# Linux system-audio capture from sink monitors (works on PipeWire through pipewire-pulse).
+# Linux system-audio capture from sink monitors (works on PipeWire through pipewire-pulse), and
+# SCHED_RR / nice for the audio threads (rt_priority.rs).
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 libpulse-binding = { version = "2.30", optional = true }
 libpulse-simple-binding = { version = "2.29", optional = true }
 

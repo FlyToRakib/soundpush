@@ -677,6 +677,16 @@ pub async fn system_status() -> CmdResult<crate::system::SystemStatus> {
         .map_err(|e| EngineError::Internal(e.to_string()).into())
 }
 
+/// Whether an automatic update check should run now: not right after signing in, and not on a
+/// metered connection (plan §24). Reads the connection cost, so off the UI thread.
+#[tauri::command]
+pub async fn update_conditions() -> CmdResult<crate::system::UpdateConditions> {
+    let autostarted = crate::autostarted();
+    tauri::async_runtime::spawn_blocking(move || crate::system::update_conditions(autostarted))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
 /// Ask the OS for microphone access (macOS shows its prompt only while undecided).
 #[tauri::command]
 pub async fn request_microphone(state: State<'_, AppState>) -> CmdResult<()> {
@@ -771,7 +781,13 @@ pub async fn close_main_window(app: AppHandle) {
         if let Some(saved) = app.try_state::<crate::window_state::WindowState>() {
             saved.save();
         }
-        let _ = window.destroy();
+        // "Keep window in memory for instant reopen" hides the window instead of releasing the
+        // webview with it (plan §13.1).
+        if crate::keeps_window_in_memory(&app) {
+            let _ = window.hide();
+        } else {
+            let _ = window.destroy();
+        }
     } else {
         let _ = window.minimize();
     }

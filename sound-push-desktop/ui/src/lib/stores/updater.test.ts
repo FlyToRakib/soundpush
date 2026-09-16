@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { UpdateConditions } from "../engine/types";
 import type { AvailableUpdate } from "../engine/updater";
-import { CHECK_INTERVAL_MS, UpdaterStore } from "./updater.svelte";
+import { AUTOSTART_DELAY_MS, CHECK_INTERVAL_MS, UpdaterStore } from "./updater.svelte";
+
+/** The ordinary case: opened by the user, on a connection nobody pays by the megabyte. */
+const openedByUser = async (): Promise<UpdateConditions> => ({ autostarted: false, metered: false });
 
 function fakeUpdate(overrides: Partial<AvailableUpdate> = {}): AvailableUpdate {
   return {
@@ -97,7 +101,7 @@ describe("UpdaterStore", () => {
   it("checks in the background at most once a day", async () => {
     let now = 1_000_000_000_000;
     const checker = vi.fn(() => Promise.resolve(null));
-    const store = new UpdaterStore(checker, async () => {}, () => now);
+    const store = new UpdaterStore(checker, async () => {}, () => now, openedByUser);
     await store.checkIfDue();
     await store.checkIfDue();
     expect(checker).toHaveBeenCalledTimes(1);
@@ -109,7 +113,7 @@ describe("UpdaterStore", () => {
   it("does not retry a failed background check until the interval has passed", async () => {
     let now = 1_000_000_000_000;
     const checker = vi.fn(() => Promise.reject(new Error("no update feed yet")));
-    const store = new UpdaterStore(checker, async () => {}, () => now);
+    const store = new UpdaterStore(checker, async () => {}, () => now, openedByUser);
     await store.checkIfDue();
     await store.checkIfDue();
     await store.checkIfDue();
@@ -123,11 +127,90 @@ describe("UpdaterStore", () => {
     vi.useFakeTimers();
     try {
       const checker = vi.fn(() => Promise.resolve(null));
-      const store = new UpdaterStore(checker);
+      const store = new UpdaterStore(checker, async () => {}, Date.now, openedByUser);
       store.setAutomatic(true);
       // Nothing may run synchronously: the caller is a component effect that must not track it.
       expect(checker).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(0);
+      expect(checker).toHaveBeenCalledTimes(1);
+      store.setAutomatic(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits half a minute before the first check when the OS started SoundPush", async () => {
+    vi.useFakeTimers();
+    try {
+      const checker = vi.fn(() => Promise.resolve(null));
+      const autostarted = async () => ({ autostarted: true, metered: false });
+      const store = new UpdaterStore(checker, async () => {}, Date.now, autostarted);
+      store.setAutomatic(true);
+      await vi.advanceTimersByTimeAsync(0);
+      // Signing in is busy enough without SoundPush reaching for the network (plan §24).
+      expect(checker).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(AUTOSTART_DELAY_MS - 1);
+      expect(checker).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(checker).toHaveBeenCalledTimes(1);
+      store.setAutomatic(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops the delayed first check when automatic checks are switched off meanwhile", async () => {
+    vi.useFakeTimers();
+    try {
+      const checker = vi.fn(() => Promise.resolve(null));
+      const autostarted = async () => ({ autostarted: true, metered: false });
+      const store = new UpdaterStore(checker, async () => {}, Date.now, autostarted);
+      store.setAutomatic(true);
+      await vi.advanceTimersByTimeAsync(0);
+      store.setAutomatic(false);
+      await vi.advanceTimersByTimeAsync(AUTOSTART_DELAY_MS * 2);
+      expect(checker).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a metered connection alone, and does not count the skip as a check", async () => {
+    let now = 1_000_000_000_000;
+    let metered = true;
+    const checker = vi.fn(() => Promise.resolve(null));
+    const store = new UpdaterStore(checker, async () => {}, () => now, async () => ({
+      autostarted: false,
+      metered,
+    }));
+    await store.checkIfDue();
+    await store.checkIfDue();
+    expect(checker).not.toHaveBeenCalled();
+    // Back on Wi-Fi: the check that was skipped happens at once, without waiting a day.
+    metered = false;
+    await store.checkIfDue();
+    expect(checker).toHaveBeenCalledTimes(1);
+  });
+
+  it("still checks on a metered connection when the user asks", async () => {
+    const checker = vi.fn(() => Promise.resolve(null));
+    const store = new UpdaterStore(checker, async () => {}, Date.now, async () => ({
+      autostarted: true,
+      metered: true,
+    }));
+    await store.check(true);
+    expect(checker).toHaveBeenCalledTimes(1);
+    expect(store.status).toBe("upToDate");
+  });
+
+  it("checks once per hour of polling at most, however often the effect re-runs", async () => {
+    // The runaway-check bug: setAutomatic used to leave its timers behind.
+    vi.useFakeTimers();
+    try {
+      const checker = vi.fn(() => Promise.resolve(null));
+      const store = new UpdaterStore(checker, async () => {}, Date.now, openedByUser);
+      for (let i = 0; i < 50; i++) store.setAutomatic(true);
+      await vi.advanceTimersByTimeAsync(45_000);
       expect(checker).toHaveBeenCalledTimes(1);
       store.setAutomatic(false);
     } finally {

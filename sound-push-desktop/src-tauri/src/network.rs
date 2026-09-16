@@ -11,6 +11,20 @@
 //! as Public, so the same elevated step can also move that network to the Private profile when
 //! the user says it is their own. Without that, "Allow SoundPush" would spend the UAC prompt and
 //! leave the phone just as blocked.
+//!
+//! Everything that runs elevated is named by its absolute path under the real system directory,
+//! taken from the OS and not from `%SystemRoot%`, and the elevated process starts in that
+//! directory. An environment variable or a planted `netsh.exe` next to SoundPush must never be
+//! able to decide what an administrator's approval actually runs. Inputs that reach the command
+//! line are validated first: adapter ids only in `{8-4-4-4-12}` hex form, and a program path
+//! without the few characters `cmd.exe` still acts on inside quotes.
+//!
+//! Plan §13.6 asks for a separate signed helper instead of this. SoundPush installs per user
+//! (`installMode: "currentUser"`), so such a helper would live in a folder the user — and
+//! anything running as the user — can write to, while being the binary an administrator
+//! approves. That is a worse position than elevating a binary in the protected system directory
+//! with a command line SoundPush builds itself, so the helper waits for a per-machine install.
+//! See `docs/advanced.md`.
 
 use serde::Serialize;
 
@@ -89,6 +103,7 @@ mod windows {
         CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     };
     use windows::Win32::System::Ole::IEnumVARIANT;
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
     use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
     use windows::Win32::UI::Shell::{
         SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -128,6 +143,29 @@ mod windows {
             "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
             g.data1, g.data2, g.data3, d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]
         )
+    }
+
+    /// The real system directory, read from the OS. `%SystemRoot%` comes from the environment of
+    /// this process, which an unprivileged program can set, and it would otherwise choose which
+    /// `cmd.exe` an administrator approves.
+    fn system_dir() -> String {
+        let mut buf = [0u16; 260];
+        // SAFETY: the buffer is passed with its length; the call only writes into it and returns
+        // how many characters it wrote (or the size it needs, which is why the length is checked).
+        let len = unsafe { GetSystemDirectoryW(Some(&mut buf)) } as usize;
+        match len {
+            0 => r"C:\Windows\System32".into(),
+            len if len < buf.len() => String::from_utf16_lossy(&buf[..len]),
+            _ => r"C:\Windows\System32".into(),
+        }
+    }
+
+    /// Whether a path can be embedded in a quoted `cmd.exe` argument unchanged. Quotes end the
+    /// argument, `%` is replaced from the environment before the command runs even inside quotes,
+    /// and a line break ends the command; `&`, `^` and the redirection characters are literal
+    /// there, so a path like `C:\Users\A&B\…` stays fine.
+    fn safe_in_command(path: &str) -> bool {
+        !path.is_empty() && !path.contains(['"', '%', '\r', '\n'])
     }
 
     /// Only ids in exactly that shape reach a command line, so nothing else ever can.
@@ -339,18 +377,27 @@ mod windows {
     /// rule and then, when `private_adapters` is not empty, moves those adapters' networks to the
     /// Private profile. The rule is what the user asked for, so failing it stops the chain; the
     /// profile change is best effort and the check that follows reports what actually landed.
-    pub(super) fn commands(exe: &str, include_public: bool, private_adapters: &[String]) -> String {
+    ///
+    /// `system` is the real system directory: both tools are named by their absolute path so the
+    /// elevated shell cannot pick up a `netsh.exe` or `powershell.exe` from somewhere else.
+    pub(super) fn commands(
+        exe: &str,
+        include_public: bool,
+        private_adapters: &[String],
+        system: &str,
+    ) -> String {
         let profiles = if include_public {
             "private,domain,public"
         } else {
             "private,domain"
         };
+        let netsh = format!(r#""{system}\netsh.exe""#);
         // Deleting by program also removes the block rules Windows adds when its firewall prompt
         // is dismissed; netsh fails that step harmlessly when there is nothing to delete.
         let mut cmd = format!(
-            "netsh advfirewall firewall delete rule name=all dir=in program=\"{exe}\" & \
-             netsh advfirewall firewall delete rule name=\"{RULE_NAME}\" & \
-             netsh advfirewall firewall add rule name=\"{RULE_NAME}\" dir=in action=allow protocol=UDP \
+            "{netsh} advfirewall firewall delete rule name=all dir=in program=\"{exe}\" & \
+             {netsh} advfirewall firewall delete rule name=\"{RULE_NAME}\" & \
+             {netsh} advfirewall firewall add rule name=\"{RULE_NAME}\" dir=in action=allow protocol=UDP \
              program=\"{exe}\" profile={profiles} enable=yes || exit /b 1"
         );
         // Ids are validated, so the PowerShell literal below can only ever hold adapter ids.
@@ -361,8 +408,10 @@ mod windows {
             .collect();
         if !ids.is_empty() {
             let list = ids.join(",");
+            // -NoProfile matters as much as the absolute path: a profile script lives in a folder
+            // the user can write to and would otherwise run with the administrator's approval.
             cmd.push_str(&format!(
-                " & powershell -NoProfile -NonInteractive -Command \
+                " & \"{system}\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -Command \
                  \"$ids = @({list}); \
                  foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue)) {{ \
                  if ($ids -contains $a.InterfaceGuid) {{ \
@@ -376,7 +425,9 @@ mod windows {
     pub fn fix(include_public: bool, make_private: bool) -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe = exe.to_string_lossy().to_string();
-        if exe.contains('"') {
+        if !safe_in_command(&exe) {
+            // Nothing sensible can be built for such a path, and guessing would be worse than
+            // saying so: the troubleshooter's manual steps still work.
             return Err("unexpected program path".into());
         }
         let adapters = if make_private {
@@ -384,19 +435,23 @@ mod windows {
         } else {
             Vec::new()
         };
-        let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-        let cmd = HSTRING::from(format!(r"{system}\System32\cmd.exe"));
+        let system = system_dir();
+        let cmd = HSTRING::from(format!(r"{system}\cmd.exe"));
         // /s strips only the outer quotes, so the quoted program path inside stays intact.
         let parameters = HSTRING::from(format!(
             "/d /s /c \"{}\"",
-            commands(&exe, include_public, &adapters)
+            commands(&exe, include_public, &adapters, &system)
         ));
+        // Start in the system directory: cmd.exe looks in the current directory first, so a
+        // writable working directory would decide which `netsh.exe` an administrator approves.
+        let directory = HSTRING::from(system);
         let mut info = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
             fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
             lpVerb: w!("runas"),
             lpFile: PCWSTR(cmd.as_ptr()),
             lpParameters: PCWSTR(parameters.as_ptr()),
+            lpDirectory: PCWSTR(directory.as_ptr()),
             nShow: SW_HIDE.0,
             ..Default::default()
         };
@@ -431,32 +486,33 @@ mod windows {
         use super::*;
 
         const ADAPTER: &str = "{B32206DB-B03B-4AF1-90CE-2DB037227D4A}";
+        const SYS: &str = r"C:\Windows\System32";
 
         #[test]
         fn fix_is_scoped_to_the_program_and_private_networks() {
-            let c = commands(r"C:\Users\A&B\SoundPush\soundpush.exe", false, &[]);
+            let c = commands(r"C:\Users\A&B\SoundPush\soundpush.exe", false, &[], SYS);
             assert!(c.contains(r#"program="C:\Users\A&B\SoundPush\soundpush.exe""#));
             assert!(c.contains("protocol=UDP"));
             assert!(c.contains("profile=private,domain enable=yes"));
-            assert!(commands("x.exe", true, &[]).contains("profile=private,domain,public"));
+            assert!(commands("x.exe", true, &[], SYS).contains("profile=private,domain,public"));
         }
 
         #[test]
         fn a_failed_rule_stops_the_chain() {
             // Otherwise the profile change would run although the rule never landed, and cmd
             // would report that last command's success as the whole fix's.
-            assert!(commands("x.exe", false, &[]).ends_with("|| exit /b 1"));
-            let c = commands("x.exe", false, &[ADAPTER.into()]);
+            assert!(commands("x.exe", false, &[], SYS).ends_with("|| exit /b 1"));
+            let c = commands("x.exe", false, &[ADAPTER.into()], SYS);
             assert!(c.contains("enable=yes || exit /b 1 &"));
         }
 
         #[test]
         fn the_profile_change_names_only_the_adapters_asked_for() {
-            let c = commands("x.exe", false, &[ADAPTER.into()]);
+            let c = commands("x.exe", false, &[ADAPTER.into()], SYS);
             assert!(c.contains(&format!("$ids = @('{ADAPTER}')")));
             assert!(c.contains("-NetworkCategory Private"));
             // Nothing to move means nothing to run.
-            assert!(!commands("x.exe", false, &[]).contains("powershell"));
+            assert!(!commands("x.exe", false, &[], SYS).contains("powershell"));
         }
 
         #[test]
@@ -469,9 +525,41 @@ mod windows {
                 "",
             ] {
                 assert!(!is_adapter_id(bad), "{bad} should be rejected");
-                assert!(!commands("x.exe", false, &[bad.into()]).contains("powershell"));
+                assert!(!commands("x.exe", false, &[bad.into()], SYS).contains("powershell"));
             }
             assert!(is_adapter_id(ADAPTER));
+        }
+
+        #[test]
+        fn everything_elevated_is_named_by_its_absolute_path() {
+            // Neither PATH nor the working directory may decide what runs as administrator.
+            let c = commands("x.exe", false, &[ADAPTER.into()], SYS);
+            assert_eq!(c.matches(&format!(r#""{SYS}\netsh.exe""#)).count(), 3);
+            assert!(!c.contains(" netsh "), "no bare tool name is left");
+            assert!(c.contains(&format!(r#""{SYS}\WindowsPowerShell\v1.0\powershell.exe""#)));
+            assert!(
+                c.contains("-NoProfile"),
+                "a profile script must not run elevated"
+            );
+            // And the directory itself comes from the OS, not from %SystemRoot%.
+            let dir = system_dir();
+            assert!(dir.to_ascii_lowercase().ends_with(r"\system32"), "{dir}");
+        }
+
+        #[test]
+        fn a_program_path_cmd_would_rewrite_is_refused() {
+            // `%` is replaced from the environment even inside quotes, so a path holding one
+            // could turn into another command; `&` inside quotes is literal and stays allowed.
+            assert!(safe_in_command(r"C:\Users\A&B\SoundPush\soundpush.exe"));
+            assert!(safe_in_command(r"C:\Program Files\SoundPush\soundpush.exe"));
+            for bad in [
+                r"C:\%USERPROFILE%\soundpush.exe",
+                "C:\\a\r\nnetsh advfirewall reset",
+                r#"C:\a" & calc & "\x.exe"#,
+                "",
+            ] {
+                assert!(!safe_in_command(bad), "{bad} should be refused");
+            }
         }
 
         #[test]

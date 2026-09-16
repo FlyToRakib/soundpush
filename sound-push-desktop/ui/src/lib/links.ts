@@ -23,6 +23,8 @@ const DOCS = {
   virtualMicrophone: { site: "virtual-microphone/", github: `${REPO}/blob/HEAD/docs/virtual-microphone.md` },
   privacy: { site: "privacy/", github: LINKS.privacy },
   translating: { site: "translating/", github: `${REPO}/blob/HEAD/docs/translating.md` },
+  /** The hidden troubleshooting overrides in Settings → Help → Advanced. */
+  advanced: { site: "advanced/", github: `${REPO}/blob/HEAD/docs/advanced.md` },
 } as const;
 
 export type DocsPage = keyof typeof DOCS;

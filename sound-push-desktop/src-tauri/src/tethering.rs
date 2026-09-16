@@ -22,13 +22,91 @@ pub struct TetheringStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Adapter {
     pub usb_tethering: bool,
+    /// A VPN's virtual adapter (plan §8.1 "VPN active on PC or phone").
+    pub vpn: bool,
+    /// What the adapter is called, for the VPN warning.
+    pub name: String,
     /// Carries the default route.
     pub default_route: bool,
     /// Addresses with their on-link prefix length.
     pub networks: Vec<(IpAddr, u8)>,
 }
 
+/// A VPN carrying this computer's whole internet connection (plan §8.1 "VPN active on PC or
+/// phone"). Only that is worth warning about: a VPN with a route of its own leaves the local
+/// network alone, and so do mesh VPNs unless everything was routed through them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnStatus {
+    /// A VPN adapter is up and carries the default route.
+    pub captures_internet: bool,
+    /// What it is called, for the explanation.
+    pub name: Option<String>,
+}
+
 /// Checks the adapters now; takes a moment, so call it off the UI thread.
+pub fn vpn() -> VpnStatus {
+    evaluate_vpn(&adapters())
+}
+
+pub fn evaluate_vpn(adapters: &[Adapter]) -> VpnStatus {
+    match adapters.iter().find(|a| a.vpn && a.default_route) {
+        Some(a) => VpnStatus {
+            captures_internet: true,
+            name: Some(a.name.clone()).filter(|n| !n.is_empty()),
+        },
+        None => VpnStatus::default(),
+    }
+}
+
+/// Adapter names and descriptions of the VPN clients people actually run. The tunnel and PPP
+/// interface types already cover Windows' built-in VPNs; these are the clients that install an
+/// ordinary-looking Ethernet adapter instead, plus the usual interface names on Linux and macOS.
+const VPN_NAMES: &[&str] = &[
+    "tap-windows",
+    "tap-nordvpn",
+    "wireguard",
+    "openvpn",
+    "nordlynx",
+    "mullvad",
+    "protonvpn",
+    "expressvpn",
+    "surfshark",
+    "cyberghost",
+    "private internet access",
+    "anyconnect",
+    "pulse secure",
+    "globalprotect",
+    "forticlient",
+    "sonicwall",
+    "tailscale",
+    "zerotier",
+    "hamachi",
+    "tun",
+    "tap",
+    "ppp",
+    "utun",
+    "ipsec",
+    "wg",
+];
+
+/// Whether an adapter name or description belongs to a VPN. Short interface names match only at
+/// the start and only when the rest is a number, so "Realtek PCIe GbE Family Controller" and
+/// "Intel(R) Wi-Fi 6 AX201" are never mistaken for one.
+fn looks_like_vpn(text: &str) -> bool {
+    let text = text.trim().to_ascii_lowercase();
+    VPN_NAMES.iter().any(|needle| match *needle {
+        "tun" | "tap" | "ppp" | "utun" | "ipsec" | "wg" => {
+            text.strip_prefix(needle).is_some_and(|rest| {
+                !rest.is_empty()
+                    && rest
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || c == '-' || c == '_')
+            })
+        }
+        _ => text.contains(needle),
+    })
+}
 pub fn status(peers: &[(String, IpAddr)]) -> TetheringStatus {
     evaluate(&adapters(), peers)
 }
@@ -171,6 +249,9 @@ fn adapters() -> Vec<Adapter> {
         GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses, GetBestInterfaceEx, IP_ADAPTER_ADDRESSES_LH,
     };
     use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+    /// `IF_TYPE_PPP` and `IF_TYPE_TUNNEL` from the IANA interface types Windows reports.
+    const IF_TYPE_PPP: u32 = 23;
+    const IF_TYPE_TUNNEL: u32 = 131;
     use windows::Win32::Networking::WinSock::{
         AF_INET, AF_INET6, AF_UNSPEC, IN_ADDR, IN_ADDR_0, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6,
         SOCKET_ADDRESS,
@@ -262,8 +343,21 @@ fn adapters() -> Vec<Adapter> {
                 }
                 unicast = u.Next.cast_const();
             }
+            // A friendly name ("NordLynx", "Ethernet 2") is what the user sees in Windows.
+            let name = a
+                .FriendlyName
+                .to_string()
+                .ok()
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| description.clone());
             adapters.push(Adapter {
                 usb_tethering: windows_description_is_tethering(&description),
+                // The tunnel and PPP interface types are Windows' own VPNs; a client that
+                // installs an Ethernet-looking adapter is recognised by its name.
+                vpn: matches!(a.IfType, IF_TYPE_PPP | IF_TYPE_TUNNEL)
+                    || looks_like_vpn(&description)
+                    || looks_like_vpn(&name),
+                name,
                 default_route: has_best
                     && a.Anonymous1.Anonymous.IfIndex == best
                     && !a.FirstGatewayAddress.is_null(),
@@ -345,7 +439,10 @@ fn adapters() -> Vec<Adapter> {
             let product = std::fs::read_to_string(device.join("../product")).unwrap_or_default();
             Adapter {
                 usb_tethering: linux_driver_is_tethering(&driver, &product),
+                // A VPN interface has no hardware device behind it, and a telling name.
+                vpn: looks_like_vpn(&name),
                 default_route: default.as_deref() == Some(name.as_str()),
+                name,
                 networks,
             }
         })
@@ -367,15 +464,30 @@ fn adapters() -> Vec<Adapter> {
     let default = run("/sbin/route", &["-n", "get", "default"])
         .lines()
         .find_map(|l| l.trim().strip_prefix("interface: ").map(str::to_string));
-    parse_hardware_ports(&run("/usr/sbin/networksetup", &["-listallhardwareports"]))
-        .into_iter()
-        .filter(|(port, _)| macos_port_is_tethering(port))
-        .map(|(_, device)| Adapter {
-            usb_tethering: true,
-            default_route: default.as_deref() == Some(device.as_str()),
+    let mut adapters: Vec<Adapter> =
+        parse_hardware_ports(&run("/usr/sbin/networksetup", &["-listallhardwareports"]))
+            .into_iter()
+            .filter(|(port, _)| macos_port_is_tethering(port))
+            .map(|(_, device)| Adapter {
+                usb_tethering: true,
+                vpn: false,
+                default_route: default.as_deref() == Some(device.as_str()),
+                networks: parse_ifconfig(&run("/sbin/ifconfig", &[&device])),
+                name: device,
+            })
+            .collect();
+    // VPNs have no hardware port, so the default route's own interface is checked by name
+    // ("utun3", "ppp0"): that is the one that would capture the local network.
+    if let Some(device) = default.filter(|d| looks_like_vpn(d)) {
+        adapters.push(Adapter {
+            usb_tethering: false,
+            vpn: true,
+            default_route: true,
             networks: parse_ifconfig(&run("/sbin/ifconfig", &[&device])),
-        })
-        .collect()
+            name: device,
+        });
+    }
+    adapters
 }
 
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
@@ -395,11 +507,15 @@ mod tests {
     fn peers_on_the_tethering_network_and_mobile_data_are_found() {
         let wifi = Adapter {
             usb_tethering: false,
+            vpn: false,
+            name: "Wi-Fi".into(),
             default_route: false,
             networks: vec![(ip("192.168.1.10"), 24)],
         };
         let phone = Adapter {
             usb_tethering: true,
+            vpn: false,
+            name: "Ethernet 3".into(),
             default_route: true,
             networks: vec![(ip("192.168.42.100"), 24), (ip("fe80::1"), 64)],
         };
@@ -445,6 +561,63 @@ mod tests {
 
         assert!(macos_port_is_tethering("iPhone USB"));
         assert!(!macos_port_is_tethering("Wi-Fi"));
+    }
+
+    #[test]
+    fn a_vpn_is_only_reported_when_it_carries_the_internet() {
+        let adapter = |name: &str, vpn: bool, default_route: bool| Adapter {
+            usb_tethering: false,
+            vpn,
+            name: name.into(),
+            default_route,
+            networks: vec![(ip("10.8.0.2"), 24)],
+        };
+        let wifi = adapter("Wi-Fi", false, true);
+        let split_tunnel = adapter("Tailscale", true, false);
+        assert_eq!(
+            evaluate_vpn(&[wifi.clone(), split_tunnel.clone()]),
+            VpnStatus::default(),
+            "a VPN on a route of its own leaves the local network alone"
+        );
+        let full_tunnel = adapter("NordLynx", true, true);
+        let status = evaluate_vpn(&[adapter("Wi-Fi", false, false), full_tunnel]);
+        assert!(status.captures_internet);
+        assert_eq!(status.name.as_deref(), Some("NordLynx"));
+        assert_eq!(evaluate_vpn(&[wifi]), VpnStatus::default());
+    }
+
+    #[test]
+    fn vpn_adapters_are_told_apart_from_ordinary_ones() {
+        for name in [
+            "TAP-Windows Adapter V9",
+            "WireGuard Tunnel",
+            "NordLynx",
+            "Mullvad",
+            "ProtonVPN TUN",
+            "Cisco AnyConnect Secure Mobility Client Virtual Miniport Adapter",
+            "tun0",
+            "wg0",
+            "utun3",
+            "ppp0",
+            "ipsec0",
+            "tailscale0",
+            "ZeroTier One [8056c2e21c000001]",
+        ] {
+            assert!(looks_like_vpn(name), "{name} is a VPN adapter");
+        }
+        for name in [
+            "Intel(R) Wi-Fi 6E AX211 160MHz",
+            "Realtek PCIe GbE Family Controller",
+            "Ethernet 2",
+            "eth0",
+            "wlp3s0",
+            "enp0s31f6",
+            "Remote NDIS based Internet Sharing Device",
+            "Hyper-V Virtual Ethernet Adapter",
+            "",
+        ] {
+            assert!(!looks_like_vpn(name), "{name} is not a VPN adapter");
+        }
     }
 
     #[test]

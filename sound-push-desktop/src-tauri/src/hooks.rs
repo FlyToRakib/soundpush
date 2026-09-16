@@ -50,6 +50,12 @@ const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
     ("Loopback Audio", None),
 ];
 
+/// Whether a playback device is a virtual cable (something apps can record from) rather than a
+/// real speaker. Used by "make SoundPush the default devices" to leave real speakers alone.
+pub fn is_virtual_cable(output: &str) -> bool {
+    cable_input_name(output).is_some()
+}
+
 /// Recording-side name for a virtual cable's playback device; `None` for real speakers.
 fn cable_input_name(output: &str) -> Option<String> {
     VIRTUAL_CABLES
@@ -219,6 +225,15 @@ impl PlatformHooks for DesktopHooks {
     fn audio_devices_changed(&self) {
         if let Ok(mut cache) = self.outputs_cache.lock() {
             cache.0 = None;
+        }
+    }
+
+    fn audio_idle(&self, idle: bool) {
+        // Nothing streams any more: drop the cached device list so the OS enumerator objects go
+        // away and a cable installed meanwhile is seen at once. Filling it again is one
+        // enumeration, which the next route start or status query does anyway.
+        if idle && let Ok(mut cache) = self.outputs_cache.lock() {
+            *cache = (None, Vec::new());
         }
     }
 

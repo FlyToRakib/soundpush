@@ -27,6 +27,14 @@ dirs = "6"
 gethostname = "0.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 rand = "0.8"
+# Local minidumps for crashes the Rust panic hook cannot see (crash_dump.rs, plan §13.2).
+# Nothing is uploaded: `minidumper`'s out-of-process monitor would mean a second SoundPush
+# process running at all times, which is not worth it for a report we only store.
+crash-handler = "0.8"
+minidump-writer = "0.13"
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-core = "0.58"
@@ -44,11 +52,13 @@ windows = { version = "0.58", features = [
     "Win32_Networking_WinSock",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_LibraryLoader",
     "Win32_System_Ole",
     "Win32_System_Power",
     "Win32_System_Recovery",
     "Win32_System_Registry",
+    "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_System_Variant",
     "Win32_UI_Shell",

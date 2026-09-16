@@ -103,6 +103,12 @@ fn drop_off_actor<T: Send + 'static>(value: T) {
     tokio::task::spawn_blocking(move || drop(value));
 }
 
+/// Whether silence is sent as header-only DTX packets to this peer (plan §15.2): only when the
+/// peer understands them and the "continuous capture" override is off.
+fn dtx(session: &Session, continuous_capture: bool) -> bool {
+    !continuous_capture && Capabilities(session.hello.capabilities).has(Capabilities::FEATURE_DTX)
+}
+
 impl Actor {
     fn next_start_id(&mut self) -> u64 {
         self.next_start_id += 1;
@@ -247,6 +253,9 @@ impl Actor {
         if route.kind == RouteKind::SendSystemAudio && self.settings.capture.mute_local_speakers {
             self.hooks.set_speakers_muted(true);
         }
+        // Read before the encoder map is borrowed; the "continuous capture" override keeps
+        // silence on the wire for receivers whose driver dislikes a stream that stops.
+        let continuous = self.settings.advanced.continuous_capture;
 
         match self.encoders.get_mut(&key) {
             Some(EncoderSlot::Running(sender)) => {
@@ -257,7 +266,7 @@ impl Actor {
                 route.subscription = Some(sender.subscribe(Subscriber {
                     route: route.id,
                     sink: Arc::new(session.conn.clone()),
-                    dtx: Capabilities(session.hello.capabilities).has(Capabilities::FEATURE_DTX),
+                    dtx: dtx(session, continuous),
                     controls,
                 }));
                 Ok(true)
@@ -359,6 +368,7 @@ impl Actor {
         let Some(EncoderSlot::Starting { waiting, .. }) = self.encoders.remove(&key) else {
             return;
         };
+        let continuous = self.settings.advanced.continuous_capture;
         match result {
             Ok(sender) => {
                 let mut ready = Vec::new();
@@ -376,16 +386,12 @@ impl Actor {
                     else {
                         continue;
                     };
-                    r.subscription =
-                        Some(
-                            sender.subscribe(Subscriber {
-                                route: id,
-                                sink: Arc::new(session.conn.clone()),
-                                dtx: Capabilities(session.hello.capabilities)
-                                    .has(Capabilities::FEATURE_DTX),
-                                controls,
-                            }),
-                        );
+                    r.subscription = Some(sender.subscribe(Subscriber {
+                        route: id,
+                        sink: Arc::new(session.conn.clone()),
+                        dtx: dtx(session, continuous),
+                        controls,
+                    }));
                     ready.push((peer, id));
                 }
                 self.encoders.insert(key, EncoderSlot::Running(sender));
