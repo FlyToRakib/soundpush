@@ -166,8 +166,9 @@
 
   onMount(() => () => {
     clearTimeout(micTestTimer);
-    // Never leave the monitor running because the page was left mid-test.
-    if (micTest) void engine.setMicMonitor(s.mic.monitor).catch(() => {});
+    // Never leave the monitor running because the page was left mid-test. Read the setting from
+    // the store rather than a derived: this runs after the component is gone.
+    if (micTest) void engine.setMicMonitor(store.state?.settings.mic.monitor ?? false).catch(() => {});
   });
 </script>
 
