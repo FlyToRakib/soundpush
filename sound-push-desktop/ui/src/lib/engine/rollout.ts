@@ -23,12 +23,7 @@ export function rolloutBucket(installId: string, version: string): number {
 }
 
 /** Whether to offer the update in `rawJson` to this install. */
-export function offerUpdate(
-  rawJson: Record<string, unknown>,
-  installId: string,
-  version: string,
-  manual: boolean,
-): boolean {
+export function offerUpdate(rawJson: Record<string, unknown>, installId: string, version: string, manual: boolean): boolean {
   const percent = rolloutPercent(rawJson);
   if (percent <= 0) return false;
   if (manual || percent >= 100) return true;

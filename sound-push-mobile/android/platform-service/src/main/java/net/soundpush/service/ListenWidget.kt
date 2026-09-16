@@ -36,8 +36,7 @@ class ListenWidget : AppWidgetProvider() {
     companion object {
         private const val LISTEN_KIND = "receiveSystemAudio"
 
-        internal fun listeningRoutes(state: EngineState?): List<RouteView> =
-            state?.routes?.filter { it.kind == LISTEN_KIND && it.status != "stopped" }.orEmpty()
+        internal fun listeningRoutes(state: EngineState?): List<RouteView> = state?.routes?.filter { it.kind == LISTEN_KIND && it.status != "stopped" }.orEmpty()
 
         fun snapshot(state: EngineState?): Snapshot {
             val listening = listeningRoutes(state)

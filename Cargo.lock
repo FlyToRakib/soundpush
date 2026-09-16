@@ -5242,6 +5242,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "soundpush-latency-probe"
+version = "0.1.0"
+dependencies = [
+ "sp-media",
+ "sp-testkit",
+]
+
+[[package]]
+name = "soundpush-netsim"
+version = "0.1.0"
+dependencies = [
+ "sp-testkit",
+]
+
+[[package]]
 name = "soundpush-soak"
 version = "0.1.0"
 dependencies = [
@@ -5326,6 +5341,7 @@ dependencies = [
  "sp-media",
  "sp-protocol",
  "sp-security",
+ "sp-testkit",
  "sp-transport",
  "tempfile",
  "thiserror 2.0.20",
@@ -5393,6 +5409,17 @@ dependencies = [
  "thiserror 2.0.20",
  "x509-parser",
  "zeroize",
+]
+
+[[package]]
+name = "sp-testkit"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "rand 0.8.8",
+ "sp-engine",
+ "sp-media",
+ "sp-protocol",
 ]
 
 [[package]]

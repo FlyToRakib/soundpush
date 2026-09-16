@@ -43,9 +43,7 @@
 
   // Per-device audio profile: "" in a select means "follow the Audio page".
   const stream = $derived(store.state?.settings.stream);
-  const profile = $derived<DeviceProfile>(
-    (selected && store.state?.settings.deviceProfiles?.[selected.deviceId]) || {},
-  );
+  const profile = $derived<DeviceProfile>((selected && store.state?.settings.deviceProfiles?.[selected.deviceId]) || {});
   const defaultLabel = (value: string) => `${t("devices.profile.default")} (${value})`;
   const latencyOptions = $derived([
     { value: "", label: defaultLabel(stream ? t(`latency.${stream.latency}`) : "") },
@@ -309,10 +307,22 @@
         {/if}
         {#if report && test?.status !== "running"}
           <dl class="results">
-            <div><dt>{t("nettest.rtt")}</dt><dd>{t("nettest.ms", report.rttMs.toFixed(1))}</dd></div>
-            <div><dt>{t("nettest.jitter")}</dt><dd>{t("nettest.ms", report.jitterMs.toFixed(1))}</dd></div>
-            <div><dt>{t("nettest.loss")}</dt><dd>{t("nettest.pct", report.lossPct.toFixed(1))}</dd></div>
-            <div><dt>{t("nettest.bitrate")}</dt><dd>{t("nettest.kbps", report.achievableKbps)}</dd></div>
+            <div>
+              <dt>{t("nettest.rtt")}</dt>
+              <dd>{t("nettest.ms", report.rttMs.toFixed(1))}</dd>
+            </div>
+            <div>
+              <dt>{t("nettest.jitter")}</dt>
+              <dd>{t("nettest.ms", report.jitterMs.toFixed(1))}</dd>
+            </div>
+            <div>
+              <dt>{t("nettest.loss")}</dt>
+              <dd>{t("nettest.pct", report.lossPct.toFixed(1))}</dd>
+            </div>
+            <div>
+              <dt>{t("nettest.bitrate")}</dt>
+              <dd>{t("nettest.kbps", report.achievableKbps)}</dd>
+            </div>
           </dl>
           {#each report.recommendation.tips as tip (tip)}
             <p class="muted">{t(tip)}</p>

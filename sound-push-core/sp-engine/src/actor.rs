@@ -11,7 +11,7 @@ use bytes::Bytes;
 use sp_audio_io::{AudioBackend, CaptureSource, DeviceKind, RenderTarget};
 use sp_discovery::{Discovery, DiscoveryConfig, DiscoveryEvent, PeerAdvert};
 use sp_media::codec::OpusApplication;
-use sp_media::profile::build_profile;
+use sp_media::profile::{Quality, build_profile};
 use sp_protocol::control::{
     ControlMsg, ControlTarget, EndpointInfo, EndpointKind, Hello, MuteSet, NetTestReady,
     NetTestStart, NetTestStop, PairRequest, PairResult, Platform, RouteAccept, RouteReject,
@@ -192,6 +192,9 @@ pub(crate) enum Command {
     NetworkChanged,
     SetForeground {
         foreground: bool,
+    },
+    PreferLossless {
+        prefer: bool,
     },
     SetDeviceProfile {
         device_id: String,
@@ -412,6 +415,9 @@ pub(crate) struct Actor {
     audio_devices: Vec<AudioDeviceView>,
     keep_alive: KeepAlive,
     foreground: bool,
+    /// What "Auto" quality resolves to (plan §14.6). The app sets this when the device is on a
+    /// charger with a link that has room for uncompressed audio; desktops leave it alone.
+    prefer_lossless: bool,
     peer_speakers_muted: HashMap<DeviceId, bool>,
     /// Peers that muted this device's speakers remotely; unmuted when the last one leaves.
     speakers_muted_by: std::collections::HashSet<DeviceId>,
@@ -531,6 +537,7 @@ pub(crate) async fn spawn(
         audio_devices: Vec::new(),
         keep_alive: KeepAlive::default(),
         foreground: true,
+        prefer_lossless: false,
         peer_speakers_muted: HashMap::new(),
         speakers_muted_by: std::collections::HashSet::new(),
         announced_caps: 0,
@@ -1300,6 +1307,22 @@ impl Actor {
                 // A backgrounded phone app may be killed without warning.
                 if !foreground {
                     self.flush_trust();
+                }
+            }
+            Command::PreferLossless { prefer } => {
+                if self.prefer_lossless != prefer {
+                    self.prefer_lossless = prefer;
+                    // "Auto" resolves differently now; re-apply it to the routes this device
+                    // proposed the codec for. Routes on a fixed quality are left alone.
+                    let keys: Vec<String> = self
+                        .routes
+                        .iter()
+                        .filter(|r| r.status == RouteStatus::Active && r.requested_locally)
+                        .map(Route::key)
+                        .collect();
+                    for key in keys {
+                        self.reconfigure_route(&key);
+                    }
                 }
             }
             Command::SetDeviceProfile { device_id, profile } => {
@@ -2627,9 +2650,15 @@ impl Actor {
             s.latency = LatencyMode::Stable;
         }
         let channels = if kind.is_mic() { 1 } else { 2 };
+        // "Auto" is Opus unless the app says the device can afford uncompressed audio right now
+        // (plan §14.6: a charger and a link with room for it). A quality the user picked stands.
+        let quality = match s.quality() {
+            Quality::Auto if self.prefer_lossless => Quality::Lossless,
+            q => q,
+        };
         let mut p = build_profile(
             s.latency_profile(),
-            s.quality(),
+            quality,
             channels,
             s.redundancy_always(),
         );

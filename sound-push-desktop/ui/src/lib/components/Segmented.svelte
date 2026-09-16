@@ -58,7 +58,9 @@
     border-radius: 6px;
     cursor: pointer;
     color: var(--color-text-secondary);
-    transition: background var(--motion-fast), color var(--motion-fast);
+    transition:
+      background var(--motion-fast),
+      color var(--motion-fast);
   }
   button[aria-checked="true"] {
     background: var(--color-surface);

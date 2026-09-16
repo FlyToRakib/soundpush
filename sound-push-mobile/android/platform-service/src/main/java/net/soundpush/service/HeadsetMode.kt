@@ -19,6 +19,5 @@ internal object HeadsetMode {
     }
 
     /** The settings the recorder opens with. */
-    fun recorderSettings(user: MicSettings, headset: Boolean): MicSettings =
-        if (headset) user.copy(mode = PRESET, systemEchoCancellation = true) else user
+    fun recorderSettings(user: MicSettings, headset: Boolean): MicSettings = if (headset) user.copy(mode = PRESET, systemEchoCancellation = true) else user
 }

@@ -76,7 +76,8 @@
     {#if !net?.canMakePrivate}
       <p class="caption">
         {t("firewall.cannotMakePrivate")}
-        <button class="link" onclick={() => run(engine.openSystemSettings("network"))}>{t("firewall.openNetworkSettings")}</button>
+        <button class="link" onclick={() => run(engine.openSystemSettings("network"))}>{t("firewall.openNetworkSettings")}</button
+        >
       </p>
     {/if}
     {#if !resolvesPublic}

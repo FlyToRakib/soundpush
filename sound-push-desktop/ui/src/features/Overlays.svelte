@@ -31,7 +31,9 @@
   const notices = $derived(app.notices.slice(-3));
 
   // Engine notices close by themselves like toasts do; nothing should need a manual close.
-  // Warnings and errors stay a little longer so they can be read.
+  // Warnings and errors stay a little longer so they can be read. Plain Set, not SvelteSet: this is
+  // the effect's own bookkeeping, and a reactive one would re-run the effect it is there to guard.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
   const scheduled = new Set<number>();
   $effect(() => {
     for (const notice of notices) {
@@ -45,12 +47,15 @@
     }
   });
 
-  // Screen readers hear when a stream starts, reconnects or stops, wherever focus is.
+  // Screen readers hear when a stream starts, reconnects or stops, wherever focus is. The route
+  // states last announced, again deliberately not reactive (see above).
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
   const known = new Map<string, { status: RouteStatus; title: string }>();
   let primed = false;
   let announcement = $state("");
   $effect(() => {
     const messages: string[] = [];
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local scratch set, never read outside this run
     const current = new Set<string>();
     for (const route of app.routes) {
       current.add(route.routeId);

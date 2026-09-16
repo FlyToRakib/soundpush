@@ -29,7 +29,11 @@ describe("connection path", () => {
   it("names USB (adb) and USB tethering paths", () => {
     expect(connectionPath(peer("127.0.0.1:50123", "tcp"))).toEqual({ transport: "tcp", family: 4, kind: "usb" });
     expect(connectionPath(peer("192.168.42.129:47650"), true).kind).toBe("usbTethering");
-    expect(connectionPath({ ...peer("1.2.3.4:1"), connection: "reconnecting" })).toEqual({ transport: "", family: null, kind: null });
+    expect(connectionPath({ ...peer("1.2.3.4:1"), connection: "reconnecting" })).toEqual({
+      transport: "",
+      family: null,
+      kind: null,
+    });
   });
 });
 

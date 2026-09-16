@@ -11,8 +11,17 @@ body {
 }
 
 body {
-  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", Cantarell,
-    "Noto Sans", Roboto, system-ui, sans-serif;
+  font-family:
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    Cantarell,
+    "Noto Sans",
+    Roboto,
+    system-ui,
+    sans-serif;
   font-size: var(--font-body-size);
   line-height: var(--font-body-line);
   color: var(--color-text-primary);

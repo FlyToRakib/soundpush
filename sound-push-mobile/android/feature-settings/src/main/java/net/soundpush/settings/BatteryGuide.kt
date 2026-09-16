@@ -7,7 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
-import android.provider.Settings as AndroidSettings
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +35,7 @@ import net.soundpush.ui.components.NavRow
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.theme.Tokens
+import android.provider.Settings as AndroidSettings
 
 /** Phone makers whose battery managers are known to stop background apps (see dontkillmyapp.com). */
 enum class PhoneMaker { Xiaomi, Samsung, Huawei, Oppo, OnePlus, Generic }
@@ -132,8 +132,7 @@ object BatteryGuides {
         }
     }
 
-    fun isUnrestricted(context: Context): Boolean =
-        context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
+    fun isUnrestricted(context: Context): Boolean = context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
 
     /**
      * Ask Android to exempt SoundPush from battery optimisation. Only offered when the user wants
@@ -151,8 +150,7 @@ object BatteryGuides {
         )
     }
 
-    fun appDetails(context: Context) =
-        Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+    fun appDetails(context: Context) = Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
 
     /** Start the first intent that opens; OEM screens may be missing or not exported. */
     fun open(context: Context, intents: List<Intent>): Boolean {

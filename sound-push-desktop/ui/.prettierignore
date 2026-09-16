@@ -1,0 +1,11 @@
+# Generated from design/tokens by `npm run tokens`.
+src/lib/theme/tokens.css
+# Generated from the Rust command surface.
+src/lib/engine/bindings.ts
+# Translations are managed in Weblate; reformatting them fights the sync.
+src/lib/i18n/*.json
+dist
+node_modules
+package-lock.json
+playwright-report
+test-results

@@ -26,7 +26,9 @@
 
 <div class="banner {severity}" role={live ? (severity === "error" ? "alert" : "status") : undefined}>
   <Icon name={severity === "info" ? "info" : "alert"} size={18} />
-  <p>{message}{#if code}<span class="support-code">{code}</span>{/if}</p>
+  <p>
+    {message}{#if code}<span class="support-code">{code}</span>{/if}
+  </p>
   {#if actionLabel && onaction}<Button variant="secondary" onclick={onaction}>{actionLabel}</Button>{/if}
   {#if ondismiss}<Button variant="ghost" icon="close" label={t("common.dismiss")} onclick={ondismiss} />{/if}
 </div>

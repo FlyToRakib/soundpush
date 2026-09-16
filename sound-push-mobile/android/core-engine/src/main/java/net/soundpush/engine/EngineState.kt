@@ -199,29 +199,13 @@ data class AuditEntry(
 )
 
 @Serializable
-data class PairingPrompt(
-    val peerId: String,
-    val peerName: String,
-    val platform: String = "",
-    val code: String,
-    val peerConfirmed: Boolean = false,
-)
+data class PairingPrompt(val peerId: String, val peerName: String, val platform: String = "", val code: String, val peerConfirmed: Boolean = false)
 
 @Serializable
-data class PairingView(
-    val qrUri: String? = null,
-    val qrExpiresUnix: Long = 0,
-    val prompts: List<PairingPrompt> = emptyList(),
-)
+data class PairingView(val qrUri: String? = null, val qrExpiresUnix: Long = 0, val prompts: List<PairingPrompt> = emptyList())
 
 @Serializable
-data class RouteRequestPrompt(
-    val requestId: Long,
-    val peerId: String,
-    val peerName: String,
-    val kind: String,
-    val expiresUnix: Long = 0,
-)
+data class RouteRequestPrompt(val requestId: Long, val peerId: String, val peerName: String, val kind: String, val expiresUnix: Long = 0)
 
 @Serializable
 data class ErrorView(
@@ -235,13 +219,7 @@ data class ErrorView(
 )
 
 @Serializable
-data class NoticeView(
-    val id: Long,
-    val key: String,
-    val args: List<String> = emptyList(),
-    val severity: String = "info",
-    val error: ErrorView? = null,
-)
+data class NoticeView(val id: Long, val key: String, val args: List<String> = emptyList(), val severity: String = "info", val error: ErrorView? = null)
 
 @Serializable
 data class StreamSettings(

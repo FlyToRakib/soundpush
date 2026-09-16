@@ -141,13 +141,19 @@ internal fun OnboardingScreen(
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm)) {
                 when (step) {
                     STEP_NOTIFICATIONS -> {
-                        Button(onClick = { onRequestNotifications(); next() }, Modifier.fillMaxWidth()) {
+                        Button(onClick = {
+                            onRequestNotifications()
+                            next()
+                        }, Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.onboarding_notif_allow))
                         }
                         TextButton(onClick = next, Modifier.fillMaxWidth()) { Text(stringResource(R.string.common_not_now)) }
                     }
                     STEP_BATTERY -> {
-                        Button(onClick = { onOpenBatteryGuide(); next() }, Modifier.fillMaxWidth()) {
+                        Button(onClick = {
+                            onOpenBatteryGuide()
+                            next()
+                        }, Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.onboarding_battery_open))
                         }
                         TextButton(onClick = next, Modifier.fillMaxWidth()) { Text(stringResource(R.string.common_not_now)) }

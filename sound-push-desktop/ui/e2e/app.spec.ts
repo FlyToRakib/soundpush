@@ -94,7 +94,10 @@ test("devices: open a device and test the connection", async ({ page }) => {
   await open(page);
   await nav(page, "Devices").click();
   await expect(page.getByRole("heading", { name: "Devices", level: 1 })).toBeVisible();
-  await page.getByRole("button", { name: /Redmi Note 9 Pro/ }).first().click();
+  await page
+    .getByRole("button", { name: /Redmi Note 9 Pro/ })
+    .first()
+    .click();
   await expect(page.getByRole("heading", { name: "Redmi Note 9 Pro", level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Test connection" }).click();
   await expect(page.getByText("Delay", { exact: true })).toBeVisible();

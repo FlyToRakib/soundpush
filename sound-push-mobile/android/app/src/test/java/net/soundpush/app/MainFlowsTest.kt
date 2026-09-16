@@ -184,6 +184,7 @@ class MainFlowsTest {
         compose.onNodeWithText(text(R.string.common_open_settings)).performClick()
         assertTrue(opened && dismissed)
     }
+
     /** Balance and the 80 Hz low-cut, which the engine and the desktop already had (plan §4.3). */
     @Test
     fun audioScreenOffersBalanceAndTheLowCutFilter() {

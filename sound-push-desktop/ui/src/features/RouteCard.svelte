@@ -64,7 +64,7 @@
       variant="ghost"
       icon="chevron"
       label={t("route.details")}
-      expanded={expanded}
+      {expanded}
       controls={detailsId}
       onclick={() => (expanded = !expanded)}
     />
@@ -117,16 +117,46 @@
         />
       </div>
       <dl class="stats caption">
-        <div class="wide"><dt>{t("stats.path")}</dt><dd>{pathText}</dd></div>
-        <div class="wide"><dt>{t("stats.address")}</dt><dd class="address">{peer?.remoteAddress || "—"}</dd></div>
-        <div><dt>{t("stats.codec")}</dt><dd>{route.stats.codec}{route.stats.bitrateKbps ? ` · ${route.stats.bitrateKbps} kb/s` : ""}</dd></div>
-        <div><dt>{t("audio.latency")}</dt><dd>{Math.round(route.stats.latencyMs)} ms</dd></div>
-        <div><dt>{t("stats.buffer")}</dt><dd>{Math.round(route.stats.bufferMs)} ms</dd></div>
-        <div><dt>{t("stats.jitter")}</dt><dd>{route.stats.jitterMs.toFixed(1)} ms</dd></div>
-        <div><dt>{t("stats.loss")}</dt><dd>{route.stats.lossPct.toFixed(1)} %</dd></div>
-        <div><dt>{t("stats.drift")}</dt><dd>{route.stats.driftPpm} ppm</dd></div>
-        <div><dt>{t("stats.dropouts")}</dt><dd>{route.stats.underruns}</dd></div>
-        <div><dt>{t("stats.rtt")}</dt><dd>{peer ? Math.round(peer.rttMs) : 0} ms</dd></div>
+        <div class="wide">
+          <dt>{t("stats.path")}</dt>
+          <dd>{pathText}</dd>
+        </div>
+        <div class="wide">
+          <dt>{t("stats.address")}</dt>
+          <dd class="address">{peer?.remoteAddress || "—"}</dd>
+        </div>
+        <div>
+          <dt>{t("stats.codec")}</dt>
+          <dd>{route.stats.codec}{route.stats.bitrateKbps ? ` · ${route.stats.bitrateKbps} kb/s` : ""}</dd>
+        </div>
+        <div>
+          <dt>{t("audio.latency")}</dt>
+          <dd>{Math.round(route.stats.latencyMs)} ms</dd>
+        </div>
+        <div>
+          <dt>{t("stats.buffer")}</dt>
+          <dd>{Math.round(route.stats.bufferMs)} ms</dd>
+        </div>
+        <div>
+          <dt>{t("stats.jitter")}</dt>
+          <dd>{route.stats.jitterMs.toFixed(1)} ms</dd>
+        </div>
+        <div>
+          <dt>{t("stats.loss")}</dt>
+          <dd>{route.stats.lossPct.toFixed(1)} %</dd>
+        </div>
+        <div>
+          <dt>{t("stats.drift")}</dt>
+          <dd>{route.stats.driftPpm} ppm</dd>
+        </div>
+        <div>
+          <dt>{t("stats.dropouts")}</dt>
+          <dd>{route.stats.underruns}</dd>
+        </div>
+        <div>
+          <dt>{t("stats.rtt")}</dt>
+          <dd>{peer ? Math.round(peer.rttMs) : 0} ms</dd>
+        </div>
       </dl>
       {#if stages.length > 0}
         <div class="stages">
@@ -138,7 +168,9 @@
           </div>
           <ul class="legend caption" aria-hidden="true">
             {#each stages as stage (stage.id)}
-              <li><span class="swatch {stage.id}"></span>{t("stats.stageValue", t(`stats.stage.${stage.id}`), Math.round(stage.ms))}</li>
+              <li>
+                <span class="swatch {stage.id}"></span>{t("stats.stageValue", t(`stats.stage.${stage.id}`), Math.round(stage.ms))}
+              </li>
             {/each}
           </ul>
         </div>

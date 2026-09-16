@@ -59,7 +59,12 @@ function firewall(ctx: Context): Step[] {
   }
   const steps: Step[] = [{ status: "ok", key: "trouble.check.firewallOk" }];
   if (n.publicNetwork && !n.allowedOnPublic) {
-    steps.push({ status: "tip", key: "trouble.check.publicNetwork", args: [n.publicNetworkName ?? ""], action: "openNetworkSettings" });
+    steps.push({
+      status: "tip",
+      key: "trouble.check.publicNetwork",
+      args: [n.publicNetworkName ?? ""],
+      action: "openNetworkSettings",
+    });
   }
   return steps;
 }
@@ -67,9 +72,7 @@ function firewall(ctx: Context): Step[] {
 /** A VPN that carries the whole connection usually blocks the local network too (plan §8.1). */
 function vpn(ctx: Context): Step[] {
   const v = ctx.system?.vpn;
-  return v?.capturesInternet
-    ? [{ status: "problem", key: "trouble.check.vpn", args: [v.name ?? ""] }]
-    : [];
+  return v?.capturesInternet ? [{ status: "problem", key: "trouble.check.vpn", args: [v.name ?? ""] }] : [];
 }
 
 /** IPv4 addresses on the same /24 look like the same home or office network. */
@@ -115,7 +118,14 @@ function bluetooth(ctx: Context): Step[] {
   const s = ctx.state.settings;
   const output = s.output.device ?? ctx.system?.defaultOutput ?? null;
   return output && ctx.system?.bluetoothOutputs.includes(output)
-    ? [{ status: "tip", key: "trouble.check.bluetooth", args: [output], action: s.stream.latency === "stable" ? undefined : "setStable" }]
+    ? [
+        {
+          status: "tip",
+          key: "trouble.check.bluetooth",
+          args: [output],
+          action: s.stream.latency === "stable" ? undefined : "setStable",
+        },
+      ]
     : [];
 }
 
@@ -130,7 +140,8 @@ export function diagnose(topic: Topic, ctx: Context): Step[] {
 
   switch (topic) {
     case "noDevices":
-      if (state.local.addresses.length === 0) steps.push({ status: "problem", key: "trouble.check.noNetwork", action: "openNetworkSettings" });
+      if (state.local.addresses.length === 0)
+        steps.push({ status: "problem", key: "trouble.check.noNetwork", action: "openNetworkSettings" });
       steps.push(...firewall(ctx));
       steps.push(...vpn(ctx));
       if (s.visibility === "hidden") steps.push({ status: "problem", key: "trouble.check.hidden", action: "visibilityTrusted" });
@@ -150,7 +161,8 @@ export function diagnose(topic: Topic, ctx: Context): Step[] {
       steps.push(...firewall(ctx).filter((step) => step.status !== "ok"));
       steps.push(...vpn(ctx));
       if (s.stream.latency !== "stable") steps.push({ status: "tip", key: "trouble.check.useStable", action: "setStable" });
-      if (!s.desktop.preventSleepWhileStreaming) steps.push({ status: "tip", key: "trouble.check.sleep", action: "preventSleep" });
+      if (!s.desktop.preventSleepWhileStreaming)
+        steps.push({ status: "tip", key: "trouble.check.sleep", action: "preventSleep" });
       if (!steps.some((step) => step.status === "problem")) steps.unshift({ status: "ok", key: "trouble.check.connectionOk" });
       break;
 
@@ -158,8 +170,10 @@ export function diagnose(topic: Topic, ctx: Context): Step[] {
       const outputs = state.audioDevices.filter((d) => !d.isInput && !d.virtualCable);
       if (active.length === 0) steps.push({ status: "tip", key: "trouble.check.noStream" });
       const muted = active.filter((r) => r.muted);
-      if (muted.length > 0) steps.push({ status: "problem", key: "trouble.check.routeMuted", args: [muted.map((r) => r.peerName).join(", ")] });
-      if (outputs.length === 0) steps.push({ status: "problem", key: "trouble.check.noOutputDevice", action: "openSoundSettings" });
+      if (muted.length > 0)
+        steps.push({ status: "problem", key: "trouble.check.routeMuted", args: [muted.map((r) => r.peerName).join(", ")] });
+      if (outputs.length === 0)
+        steps.push({ status: "problem", key: "trouble.check.noOutputDevice", action: "openSoundSettings" });
       for (const saved of [s.output.device, s.capture.systemDevice]) {
         if (saved && !outputs.some((d) => d.id === saved)) {
           steps.push({ status: "problem", key: "trouble.check.deviceMissing", args: [saved], action: "openAudio" });
@@ -169,9 +183,15 @@ export function diagnose(topic: Topic, ctx: Context): Step[] {
       if (ctx.system?.systemAudio === "denied") {
         steps.push({ status: "problem", key: "trouble.check.systemAudioDenied", action: "openSystemAudioSettings" });
       }
-      if (ctx.system?.mediaFeaturePackMissing) steps.push({ status: "problem", key: "trouble.check.mediaFeaturePack", action: "optionalFeatures" });
+      if (ctx.system?.mediaFeaturePackMissing)
+        steps.push({ status: "problem", key: "trouble.check.mediaFeaturePack", action: "optionalFeatures" });
       if (s.capture.app) {
-        steps.push({ status: "tip", key: s.capture.excludeApp ? "trouble.check.appExcluded" : "trouble.check.appOnly", args: [s.capture.app], action: "openAudio" });
+        steps.push({
+          status: "tip",
+          key: s.capture.excludeApp ? "trouble.check.appExcluded" : "trouble.check.appOnly",
+          args: [s.capture.app],
+          action: "openAudio",
+        });
       }
       steps.push(...enhancements(ctx));
       steps.push(...bluetooth(ctx));
@@ -192,10 +212,15 @@ export function diagnose(topic: Topic, ctx: Context): Step[] {
         if (chosen && chosen !== caps.virtualMicDevice) {
           steps.push({ status: "problem", key: "trouble.check.virtualMicIgnored", args: [chosen], action: "useAutoVirtualMic" });
         }
-        steps.push({ status: "ok", key: "trouble.check.chooseInput", args: [caps.virtualMicInput ?? caps.virtualMicDevice ?? ""] });
+        steps.push({
+          status: "ok",
+          key: "trouble.check.chooseInput",
+          args: [caps.virtualMicInput ?? caps.virtualMicDevice ?? ""],
+        });
       }
       if (state.micMuted) steps.push({ status: "problem", key: "trouble.check.micMuted", action: "unmuteMic" });
-      if (ctx.system?.microphone === "denied") steps.push({ status: "problem", key: "trouble.check.micDenied", action: "openMicSettings" });
+      if (ctx.system?.microphone === "denied")
+        steps.push({ status: "problem", key: "trouble.check.micDenied", action: "openMicSettings" });
       steps.push(...enhancements(ctx));
       if (!active.some((r) => r.kind === "receiveMicToVirtualMic")) steps.push({ status: "tip", key: "trouble.check.startMic" });
       break;
@@ -203,7 +228,12 @@ export function diagnose(topic: Topic, ctx: Context): Step[] {
 
     case "crackles":
       if (poor.length > 0) steps.push({ status: "problem", key: "trouble.check.weakSignal", args: [names(poor)] });
-      if (active.some((r) => r.stats.underruns > 50)) steps.push({ status: "problem", key: "trouble.check.dropouts", action: s.stream.latency === "stable" ? undefined : "setStable" });
+      if (active.some((r) => r.stats.underruns > 50))
+        steps.push({
+          status: "problem",
+          key: "trouble.check.dropouts",
+          action: s.stream.latency === "stable" ? undefined : "setStable",
+        });
       if (s.stream.latency !== "stable") steps.push({ status: "tip", key: "trouble.check.useStable", action: "setStable" });
       steps.push(...enhancements(ctx));
       steps.push(...bluetooth(ctx));

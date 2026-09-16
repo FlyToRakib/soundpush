@@ -19,7 +19,12 @@
 </script>
 
 {#if net?.firewallEnabled && net.blocked && !connected}
-  <Banner severity="warning" message={t("banner.firewall")} actionLabel={t("banner.firewall.fix")} onaction={() => (ui.firewallFix = true)} />
+  <Banner
+    severity="warning"
+    message={t("banner.firewall")}
+    actionLabel={t("banner.firewall.fix")}
+    onaction={() => (ui.firewallFix = true)}
+  />
 {/if}
 {#if sys?.systemAudio === "denied"}
   <Banner

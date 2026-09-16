@@ -2,9 +2,28 @@
 import type { AuditEntry, DeviceProfile, EngineState, NetworkReport, RouteKind, Settings } from "./types";
 
 const auditLog: AuditEntry[] = [
-  { timeUnix: Date.now() / 1000 - 60, kind: "routeStarted", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", route: "sendSystemAudio", detail: "peer" },
-  { timeUnix: Date.now() / 1000 - 3600, kind: "permissionChanged", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", detail: "useMyMicrophone=ask" },
-  { timeUnix: Date.now() / 1000 - 7200, kind: "pairingSucceeded", peerName: "Pixel 8", peerCode: "SP-7F3A-19C2-4B8E", detail: "" },
+  {
+    timeUnix: Date.now() / 1000 - 60,
+    kind: "routeStarted",
+    peerName: "Pixel 8",
+    peerCode: "SP-7F3A-19C2-4B8E",
+    route: "sendSystemAudio",
+    detail: "peer",
+  },
+  {
+    timeUnix: Date.now() / 1000 - 3600,
+    kind: "permissionChanged",
+    peerName: "Pixel 8",
+    peerCode: "SP-7F3A-19C2-4B8E",
+    detail: "useMyMicrophone=ask",
+  },
+  {
+    timeUnix: Date.now() / 1000 - 7200,
+    kind: "pairingSucceeded",
+    peerName: "Pixel 8",
+    peerCode: "SP-7F3A-19C2-4B8E",
+    detail: "",
+  },
 ];
 
 const settings: Settings = {
@@ -256,7 +275,13 @@ export const mockEngine = {
       case "get_audit_log":
         return [...auditLog] as T;
       case "clear_audit_log":
-        auditLog.splice(0, auditLog.length, { timeUnix: Date.now() / 1000, kind: "logCleared", peerName: "", peerCode: "", detail: "" });
+        auditLog.splice(0, auditLog.length, {
+          timeUnix: Date.now() / 1000,
+          kind: "logCleared",
+          peerName: "",
+          peerCode: "",
+          detail: "",
+        });
         return undefined as T;
       case "preview_diagnostics":
         return {
@@ -278,13 +303,24 @@ export const mockEngine = {
       case "run_network_test": {
         const peerId = String(args?.deviceId);
         const others = state.networkTests.filter((t) => t.peerId !== peerId);
-        emit({ networkTests: [...others, { peerId, status: "done", progress: 1, report: mockReport, error: null, startedUnix: Date.now() / 1000 }] });
+        emit({
+          networkTests: [
+            ...others,
+            { peerId, status: "done", progress: 1, report: mockReport, error: null, startedUnix: Date.now() / 1000 },
+          ],
+        });
         return mockReport as T;
       }
       case "usb_status":
-        return { adbFound: true, devices: [{ serial: "mock123", model: "Redmi Note 9 Pro", authorized: true }], tcpPort: state.local.tcpPort } as T;
+        return {
+          adbFound: true,
+          devices: [{ serial: "mock123", model: "Redmi Note 9 Pro", authorized: true }],
+          tcpPort: state.local.tcpPort,
+        } as T;
       case "set_peer_speakers_muted":
-        emit({ peers: state.peers.map((p) => (p.deviceId === args?.deviceId ? { ...p, speakersMuted: Boolean(args?.muted) } : p)) });
+        emit({
+          peers: state.peers.map((p) => (p.deviceId === args?.deviceId ? { ...p, speakersMuted: Boolean(args?.muted) } : p)),
+        });
         return undefined as T;
       case "set_mic_muted":
         emit({ micMuted: Boolean(args?.muted) });
@@ -321,7 +357,13 @@ export const mockEngine = {
         return undefined as T;
       }
       case "list_audio_apps":
-        return { supported: true, apps: [{ process: "spotify.exe", active: true }, { process: "chrome.exe", active: false }] } as T;
+        return {
+          supported: true,
+          apps: [
+            { process: "spotify.exe", active: true },
+            { process: "chrome.exe", active: false },
+          ],
+        } as T;
       case "virtual_mic_status":
         return { supported: true, installed: mockDriverInstalled, provider: "soundpush" } as T;
       case "install_virtual_mic":
@@ -329,11 +371,24 @@ export const mockEngine = {
         mockDriverInstalled = cmd === "install_virtual_mic";
         const input = mockDriverInstalled ? "SoundPush Microphone" : null;
         emit({
-          capabilities: { ...state.capabilities, virtualMic: mockDriverInstalled, virtualMicDevice: input, virtualMicInput: input },
+          capabilities: {
+            ...state.capabilities,
+            virtualMic: mockDriverInstalled,
+            virtualMicDevice: input,
+            virtualMicInput: input,
+          },
           audioDevices: [
             ...state.audioDevices.filter((d) => !d.virtualCable),
             ...(mockDriverInstalled
-              ? [{ id: "SoundPush Microphone", name: "SoundPush Microphone", isInput: false, isDefault: false, virtualCable: true }]
+              ? [
+                  {
+                    id: "SoundPush Microphone",
+                    name: "SoundPush Microphone",
+                    isInput: false,
+                    isDefault: false,
+                    virtualCable: true,
+                  },
+                ]
               : []),
           ],
         });

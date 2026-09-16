@@ -107,8 +107,10 @@ class StreamingService : Service() {
                 syncAppAudioCapture(state)
             }
         }
-        // The notification names the current output (speaker, headphones, Bluetooth).
+        // The notification names the current output (speaker, headphones, Bluetooth), and says so
+        // while another app has taken the microphone (plan §8.3).
         scope.launch { DeviceStatus.output.collect { updateNotification() } }
+        scope.launch { DeviceStatus.micSilenced.collect { updateNotification() } }
         // A chosen output (Settings → Audio) follows its device as it connects and disconnects.
         scope.launch {
             combine(OutputPreference.target, DeviceStatus.output) { _, _ -> }.collect {
@@ -242,8 +244,7 @@ class StreamingService : Service() {
     }
 
     /** The connected device for the output the user chose, or null to follow Android's routing. */
-    private fun preferredOutput() =
-        getSystemService(AudioManager::class.java)?.let { OutputPreference.device(it, OutputPreference.target.value) }
+    private fun preferredOutput() = getSystemService(AudioManager::class.java)?.let { OutputPreference.device(it, OutputPreference.target.value) }
 
     private fun appVisible() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
@@ -294,15 +295,15 @@ class StreamingService : Service() {
         syncPlatformPlayback(SoundPush.state.value)
     }
 
-    private fun buildNotification() =
-        Notifications.streaming(
-            this,
-            SoundPush.state.value,
-            types.microphone,
-            session?.sessionToken,
-            types.listenStarting,
-            DeviceStatus.output.value,
-        )
+    private fun buildNotification() = Notifications.streaming(
+        this,
+        SoundPush.state.value,
+        types.microphone,
+        session?.sessionToken,
+        types.listenStarting,
+        DeviceStatus.output.value,
+        DeviceStatus.micSilenced.value,
+    )
 
     /** Run the microphone recorder exactly while the engine needs mic input. */
     private fun updateMicCapture() {
@@ -319,8 +320,7 @@ class StreamingService : Service() {
     }
 
     /** The user's microphone settings, with the voice-call preset and echo cancellation during the headset task. */
-    private fun recorderMicSettings(state: EngineState?): MicSettings? =
-        state?.let { HeadsetMode.recorderSettings(it.settings.mic, HeadsetMode.active(it.routes)) }
+    private fun recorderMicSettings(state: EngineState?): MicSettings? = state?.let { HeadsetMode.recorderSettings(it.settings.mic, HeadsetMode.active(it.routes)) }
 
     /**
      * The recorder's source and platform effects are fixed when it opens: reopen it when they change
@@ -537,8 +537,10 @@ class StreamingService : Service() {
     private fun addModeListener(): Any? {
         val am = getSystemService(AudioManager::class.java) ?: return null
         val listener = AudioManager.OnModeChangedListener { mode ->
-            val inCall = mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION ||
-                mode == AudioManager.MODE_RINGTONE || mode == AudioManager.MODE_CALL_SCREENING
+            val inCall = mode == AudioManager.MODE_IN_CALL ||
+                mode == AudioManager.MODE_IN_COMMUNICATION ||
+                mode == AudioManager.MODE_RINGTONE ||
+                mode == AudioManager.MODE_CALL_SCREENING
             scope.launch {
                 if (inCall && !mutedByCall) {
                     mutedByCall = true
@@ -608,6 +610,7 @@ class StreamingService : Service() {
         private const val CUSTOM_ACTION_STOP = "net.soundpush.session.STOP"
         private const val LISTEN_KIND = "receiveSystemAudio"
         private const val LISTEN_WAIT_MS = 20_000L
+
         /** Output level while another app briefly asks us to lower the volume (about −10 dB). */
         private const val DUCK_GAIN = 0.3f
 

@@ -11,14 +11,7 @@ export type AudioFocusMode = "pause" | "duck" | "mix" | "mixDuringCalls";
 export type RedundancyMode = "auto" | "on" | "off";
 /** Which device suppresses microphone noise (plan §15.7). */
 export type DenoiseAt = "sender" | "receiver";
-export type MicMode =
-  | "default"
-  | "voiceCommunication"
-  | "raw"
-  | "voicePerformance"
-  | "voiceRecognition"
-  | "camcorder"
-  | "mic";
+export type MicMode = "default" | "voiceCommunication" | "raw" | "voicePerformance" | "voiceRecognition" | "camcorder" | "mic";
 
 export type RouteKind =
   | "sendSystemAudio"

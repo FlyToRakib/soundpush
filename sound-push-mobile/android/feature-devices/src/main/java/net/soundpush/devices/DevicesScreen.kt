@@ -48,8 +48,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import java.util.Locale
-import kotlin.math.roundToInt
 import net.soundpush.engine.DeviceProfile
 import net.soundpush.engine.EngineJson
 import net.soundpush.engine.EngineState
@@ -61,15 +59,17 @@ import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.IconTile
 import net.soundpush.ui.components.Labels
 import net.soundpush.ui.components.LocalWidthClass
-import net.soundpush.ui.components.WidthClass
-import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.QualityBadge
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingChoice
 import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
+import net.soundpush.ui.components.WidthClass
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.Tokens
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun DevicesScreen(state: EngineState, onScan: () -> Unit, onShowMessage: (String) -> Unit) {
@@ -306,7 +306,9 @@ private fun ProfileCard(peer: PeerView, profile: DeviceProfile) {
                 Choice("on", stringResource(R.string.audio_redundancy_on)),
                 Choice("off", stringResource(R.string.audio_redundancy_off)),
             ),
-        ) { v -> setProfile(peer.deviceId, profile.copy(redundancy = v.ifEmpty { null })) }
+        ) { v ->
+            setProfile(peer.deviceId, profile.copy(redundancy = v.ifEmpty { null }))
+        }
     }
 }
 
@@ -384,13 +386,7 @@ private fun DeviceSheet(peer: PeerView, profile: DeviceProfile, test: NetworkTes
 
 /** Everything about one paired device: the bottom sheet on phones, the detail pane on wide windows. */
 @Composable
-private fun DeviceDetail(
-    peer: PeerView,
-    profile: DeviceProfile,
-    test: NetworkTestView?,
-    onForgotten: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun DeviceDetail(peer: PeerView, profile: DeviceProfile, test: NetworkTestView?, onForgotten: () -> Unit, modifier: Modifier = Modifier) {
     var confirmForget by remember { mutableStateOf(false) }
     var alias by remember(peer.deviceId) { mutableStateOf(peer.name) }
     val policies = listOf(

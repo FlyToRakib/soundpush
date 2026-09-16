@@ -38,8 +38,7 @@ object OutputPreference {
     fun fromKey(key: String?): Target = Target.entries.firstOrNull { it.key == key } ?: Target.Automatic
 
     /** Output kinds connected right now, in a stable order. */
-    fun available(am: AudioManager): List<Target> =
-        am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).mapNotNull { targetFor(it.type) }.distinct().sorted()
+    fun available(am: AudioManager): List<Target> = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).mapNotNull { targetFor(it.type) }.distinct().sorted()
 
     /** The connected device for [target], or null to let Android route (Automatic, or not connected). */
     fun device(am: AudioManager, target: Target): AudioDeviceInfo? =

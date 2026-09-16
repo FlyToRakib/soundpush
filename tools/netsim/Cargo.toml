@@ -1,0 +1,18 @@
+[package]
+name = "soundpush-netsim"
+description = "Network impairment profiles: simulated in sp-testkit, applied for real with tc netem or clumsy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "netsim"
+path = "src/main.rs"
+
+[dependencies]
+sp-testkit = { path = "../../sound-push-core/sp-testkit" }
+
+[lints]
+workspace = true

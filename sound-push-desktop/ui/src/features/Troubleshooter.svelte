@@ -114,7 +114,9 @@
         {/each}
       </ol>
       <div class="again">
-        <Button variant="ghost" disabled={checking} onclick={check}>{t(checking ? "trouble.checking" : "trouble.checkAgain")}</Button>
+        <Button variant="ghost" disabled={checking} onclick={check}
+          >{t(checking ? "trouble.checking" : "trouble.checkAgain")}</Button
+        >
       </div>
     {/if}
   {/each}

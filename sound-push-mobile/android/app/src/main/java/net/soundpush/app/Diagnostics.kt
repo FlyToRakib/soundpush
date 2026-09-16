@@ -7,14 +7,14 @@ import android.net.Uri
 import android.os.Build
 import android.os.Process
 import androidx.core.content.FileProvider
-import java.io.File
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineJson
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.SoundPush
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * Diagnostics bundle, like the desktop's export: app/OS/device info, the engine state with remote
@@ -24,6 +24,9 @@ import net.soundpush.engine.SoundPush
 object Diagnostics {
     private const val LOG_LINES = 1000
     private const val LOG_BYTES = 512L * 1024
+
+    /** An export older than this is certainly not being read by the app the user shared it with. */
+    private val EXPORT_KEEP_MS = TimeUnit.MINUTES.toMillis(10)
 
     /** Build the report file. Reads the log and files: runs on the IO dispatcher. */
     suspend fun export(context: Context): Uri? = withContext(Dispatchers.IO) {
@@ -35,6 +38,17 @@ object Diagnostics {
             file.writeText(report(context, SoundPush.state.value))
             FileProvider.getUriForFile(context, "${context.packageName}.files", file)
         }.getOrNull()
+    }
+
+    /**
+     * Drop exports left in the cache when Android is short of memory (plan §8.4). A just-shared
+     * file is left alone: the app it went to may still be reading it through the content URI.
+     */
+    fun clearOldExports(context: Context) {
+        val stale = System.currentTimeMillis() - EXPORT_KEEP_MS
+        File(context.cacheDir, "diagnostics").listFiles()?.forEach { file ->
+            if (file.lastModified() < stale) file.delete()
+        }
     }
 
     fun share(context: Context, uri: Uri) {

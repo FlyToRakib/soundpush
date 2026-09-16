@@ -23,6 +23,8 @@ rootProject.name = "SoundPush"
 
 include(
     ":app",
+    // Startup and jank measurements; runs on a device, not in the PR gate (docs/testing-guide.md).
+    ":benchmark",
     ":core-engine",
     ":core-ui",
     ":feature-home",

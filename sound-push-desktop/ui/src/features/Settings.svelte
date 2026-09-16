@@ -38,8 +38,7 @@
   };
   const advanced = $derived({ ...ADVANCED_DEFAULTS, ...s.advanced });
   const changedCount = $derived(
-    (Object.keys(ADVANCED_DEFAULTS) as (keyof AdvancedSettings)[]).filter((k) => advanced[k] !== ADVANCED_DEFAULTS[k])
-      .length,
+    (Object.keys(ADVANCED_DEFAULTS) as (keyof AdvancedSettings)[]).filter((k) => advanced[k] !== ADVANCED_DEFAULTS[k]).length,
   );
   const advancedChanged = $derived(changedCount > 0);
   // Something left off its default must not stay hidden — but only the first time, so "Hide
@@ -59,9 +58,10 @@
   // Pseudo-locales appear in development builds, or once chosen (e.g. set by a tester).
   const languages = $derived([
     { value: "system", label: t("theme.system") },
-    ...availableLanguages(import.meta.env.DEV || s.language === PSEUDO_LONG || s.language === PSEUDO_RTL).map(
-      (tag) => ({ value: tag, label: languageName(tag) }),
-    ),
+    ...availableLanguages(import.meta.env.DEV || s.language === PSEUDO_LONG || s.language === PSEUDO_RTL).map((tag) => ({
+      value: tag,
+      label: languageName(tag),
+    })),
   ]);
 
   const updateText = $derived.by(() => {
@@ -135,30 +135,48 @@
       {#if startupBlocked}
         <Button variant="ghost" onclick={() => run(engine.openSystemSettings("startup"))}>{t("common.openSettings")}</Button>
       {/if}
-      <Toggle checked={s.desktop.launchAtLogin} label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
-        onchange={(v) => updateSettings((x) => (x.desktop.launchAtLogin = v))} />
+      <Toggle
+        checked={s.desktop.launchAtLogin}
+        label={isMac ? t("settings.launchAtLogin.mac") : t("settings.launchAtLogin")}
+        onchange={(v) => updateSettings((x) => (x.desktop.launchAtLogin = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.startMinimized")}>
-      <Toggle checked={s.desktop.startMinimized} label={t("settings.startMinimized")}
-        onchange={(v) => updateSettings((x) => (x.desktop.startMinimized = v))} />
+      <Toggle
+        checked={s.desktop.startMinimized}
+        label={t("settings.startMinimized")}
+        onchange={(v) => updateSettings((x) => (x.desktop.startMinimized = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.closeToTray")}>
-      <Toggle checked={s.desktop.closeToTray} label={t("settings.closeToTray")}
-        onchange={(v) => updateSettings((x) => (x.desktop.closeToTray = v))} />
+      <Toggle
+        checked={s.desktop.closeToTray}
+        label={t("settings.closeToTray")}
+        onchange={(v) => updateSettings((x) => (x.desktop.closeToTray = v))}
+      />
     </SettingRow>
     {#if s.desktop.closeToTray}
       <SettingRow label={t("settings.keepWindowInMemory")} description={t("settings.keepWindowInMemory.desc")}>
-        <Toggle checked={s.desktop.keepWindowInMemory} label={t("settings.keepWindowInMemory")}
-          onchange={(v) => updateSettings((x) => (x.desktop.keepWindowInMemory = v))} />
+        <Toggle
+          checked={s.desktop.keepWindowInMemory}
+          label={t("settings.keepWindowInMemory")}
+          onchange={(v) => updateSettings((x) => (x.desktop.keepWindowInMemory = v))}
+        />
       </SettingRow>
     {/if}
     <SettingRow label={t("settings.preventSleep")}>
-      <Toggle checked={s.desktop.preventSleepWhileStreaming} label={t("settings.preventSleep")}
-        onchange={(v) => updateSettings((x) => (x.desktop.preventSleepWhileStreaming = v))} />
+      <Toggle
+        checked={s.desktop.preventSleepWhileStreaming}
+        label={t("settings.preventSleep")}
+        onchange={(v) => updateSettings((x) => (x.desktop.preventSleepWhileStreaming = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.defaultDevices")} description={t("settings.defaultDevices.desc")}>
-      <Toggle checked={s.desktop.defaultDevicesWhileActive} label={t("settings.defaultDevices")}
-        onchange={(v) => updateSettings((x) => (x.desktop.defaultDevicesWhileActive = v))} />
+      <Toggle
+        checked={s.desktop.defaultDevicesWhileActive}
+        label={t("settings.defaultDevices")}
+        onchange={(v) => updateSettings((x) => (x.desktop.defaultDevicesWhileActive = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.audioCues")} description={t("settings.audioCues.desc")}>
       <Toggle checked={s.audioCues} label={t("settings.audioCues")} onchange={(v) => updateSettings((x) => (x.audioCues = v))} />
@@ -175,8 +193,18 @@
       />
     </SettingRow>
     <SettingRow label={t("settings.autoConnect")}>
-      <Toggle checked={s.autoConnectTrusted} label={t("settings.autoConnect")}
-        onchange={(v) => updateSettings((x) => (x.autoConnectTrusted = v))} />
+      <Toggle
+        checked={s.autoConnectTrusted}
+        label={t("settings.autoConnect")}
+        onchange={(v) => updateSettings((x) => (x.autoConnectTrusted = v))}
+      />
+    </SettingRow>
+    <SettingRow label={t("settings.resumeRoutes")} description={t("settings.resumeRoutes.desc")}>
+      <Toggle
+        checked={s.resumeRoutesOnStart}
+        label={t("settings.resumeRoutes")}
+        onchange={(v) => updateSettings((x) => (x.resumeRoutesOnStart = v))}
+      />
     </SettingRow>
     <SettingRow label={t("settings.auditLog")} description={t("settings.auditLog.desc")}>
       <Button onclick={() => (showAuditLog = true)}>{t("audit.view")}</Button>
@@ -211,7 +239,10 @@
       {t("settings.streamingLoad", String(load.receivers), String(load.maxReceivers), mbps(load.kbps), String(load.cpuPct))}
     </p>
     {#if load.receivers >= load.safeReceivers}
-      <Banner severity="warning" message={t("settings.streamingLoad.warn", mbps(load.perReceiverKbps), String(load.perReceiverCpuPct))} />
+      <Banner
+        severity="warning"
+        message={t("settings.streamingLoad.warn", mbps(load.perReceiverKbps), String(load.perReceiverCpuPct))}
+      />
     {/if}
   </Card>
 
@@ -219,8 +250,11 @@
     <Troubleshooter />
     {#if debugLoggingSupported}
       <SettingRow label={t("settings.debugLogging")} description={t("settings.debugLogging.desc")}>
-        <Toggle checked={s.debugLogging === true} label={t("settings.debugLogging")}
-          onchange={(v) => updateSettings((x) => (x.debugLogging = v))} />
+        <Toggle
+          checked={s.debugLogging === true}
+          label={t("settings.debugLogging")}
+          onchange={(v) => updateSettings((x) => (x.debugLogging = v))}
+        />
       </SettingRow>
     {/if}
     <div class="row wrap">
@@ -234,7 +268,10 @@
 
     <!-- Hidden troubleshooting overrides (plan §4.3, §24.7): folded away, and folded open by
          itself when one of them is not at its default, so nothing stays changed unnoticed. -->
-    <SettingRow label={t("settings.advanced")} description={advancedChanged ? t("settings.advanced.changed", changedCount) : undefined}>
+    <SettingRow
+      label={t("settings.advanced")}
+      description={advancedChanged ? t("settings.advanced.changed", changedCount) : undefined}
+    >
       {#if advancedChanged}
         <Button variant="ghost" onclick={resetAdvanced}>{t("settings.advanced.reset")}</Button>
       {/if}
@@ -246,16 +283,25 @@
     {#if showAdvanced}
       <p class="caption">{t("settings.advanced.desc")}</p>
       <SettingRow label={t("settings.continuousCapture")} description={t("settings.continuousCapture.desc")}>
-        <Toggle checked={advanced.continuousCapture} label={t("settings.continuousCapture")}
-          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, continuousCapture: v }))} />
+        <Toggle
+          checked={advanced.continuousCapture}
+          label={t("settings.continuousCapture")}
+          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, continuousCapture: v }))}
+        />
       </SettingRow>
       <SettingRow label={t("settings.keepAudioDevicesOpen")} description={t("settings.keepAudioDevicesOpen.desc")}>
-        <Toggle checked={advanced.keepAudioDevicesOpen} label={t("settings.keepAudioDevicesOpen")}
-          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, keepAudioDevicesOpen: v }))} />
+        <Toggle
+          checked={advanced.keepAudioDevicesOpen}
+          label={t("settings.keepAudioDevicesOpen")}
+          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, keepAudioDevicesOpen: v }))}
+        />
       </SettingRow>
       <SettingRow label={t("settings.realtimeAudioPriority")} description={t("settings.realtimeAudioPriority.desc")}>
-        <Toggle checked={advanced.realtimeAudioPriority} label={t("settings.realtimeAudioPriority")}
-          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, realtimeAudioPriority: v }))} />
+        <Toggle
+          checked={advanced.realtimeAudioPriority}
+          label={t("settings.realtimeAudioPriority")}
+          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, realtimeAudioPriority: v }))}
+        />
       </SettingRow>
       <div class="row wrap">
         <Button variant="ghost" onclick={() => openDocs("advanced")}>{t("settings.advanced.guide")}</Button>
@@ -270,8 +316,11 @@
     <p class="caption">{t("settings.version", app.local.appVersion)} · {t("settings.license")}</p>
 
     <SettingRow label={t("update.auto")} description={t("update.auto.desc")}>
-      <Toggle checked={s.checkForUpdates} label={t("update.auto")}
-        onchange={(v) => updateSettings((x) => (x.checkForUpdates = v))} />
+      <Toggle
+        checked={s.checkForUpdates}
+        label={t("update.auto")}
+        onchange={(v) => updateSettings((x) => (x.checkForUpdates = v))}
+      />
     </SettingRow>
     <SettingRow label={t("update.channel")} description={t("update.channel.desc")} id="update-channel">
       <Select
@@ -282,7 +331,8 @@
           { value: "stable", label: t("update.channel.stable") },
           { value: "beta", label: t("update.channel.beta") },
         ]}
-        onchange={(v) => updateSettings((x) => (x.updateChannel = v as UpdateChannel))} />
+        onchange={(v) => updateSettings((x) => (x.updateChannel = v as UpdateChannel))}
+      />
     </SettingRow>
     <div class="row wrap">
       <p class="caption grow" role="status">{updateText}</p>

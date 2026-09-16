@@ -3,12 +3,8 @@
   import { t } from "../i18n";
   import Button from "./Button.svelte";
 
-  let {
-    title,
-    onclose,
-    children,
-    actions,
-  }: { title: string; onclose?: () => void; children: Snippet; actions?: Snippet } = $props();
+  let { title, onclose, children, actions }: { title: string; onclose?: () => void; children: Snippet; actions?: Snippet } =
+    $props();
 
   const titleId = $props.id();
   let dialog: HTMLDialogElement;
@@ -25,7 +21,14 @@
 </script>
 
 <!-- Escape fires "cancel": it closes dialogs that can be closed and is ignored by ones that need an answer. -->
-<dialog bind:this={dialog} aria-labelledby={titleId} oncancel={(e) => { e.preventDefault(); onclose?.(); }}>
+<dialog
+  bind:this={dialog}
+  aria-labelledby={titleId}
+  oncancel={(e) => {
+    e.preventDefault();
+    onclose?.();
+  }}
+>
   <header>
     <h1 id={titleId}>{title}</h1>
     {#if onclose}<Button variant="ghost" icon="close" label={t("common.close")} onclick={onclose} />{/if}

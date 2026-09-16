@@ -31,11 +31,11 @@ import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import net.soundpush.ui.R
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.Tokens
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Full-screen QR scanner (CameraX + ZXing, fully on-device). Only accepts SoundPush pairing codes. */
 @Composable

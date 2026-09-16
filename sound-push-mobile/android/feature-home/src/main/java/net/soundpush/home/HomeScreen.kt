@@ -30,7 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,7 +44,6 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.PeerView
@@ -57,18 +55,19 @@ import net.soundpush.ui.components.EmptyState
 import net.soundpush.ui.components.IconTile
 import net.soundpush.ui.components.Labels
 import net.soundpush.ui.components.LocalWidthClass
-import net.soundpush.ui.components.WidthClass
-import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.QualityBadge
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingSlider
 import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.StatusBanner
 import net.soundpush.ui.components.TaskCard
+import net.soundpush.ui.components.WidthClass
 import net.soundpush.ui.components.formatElapsed
+import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.components.rememberFormat
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.Tokens
+import kotlin.math.roundToInt
 
 private data class Task(
     val titleRes: Int,
@@ -154,9 +153,10 @@ fun HomeScreen(
 
     /** Peers [task] runs with. A larger task (headset) claims its parts, so it lights one card, not three. */
     fun activePeers(task: Task): List<PeerView> = state.trustedPeers.filter { peer ->
-        runs(task, peer.deviceId) && TASKS.none { other ->
-            other !== task && other.kinds.size > task.kinds.size && other.kinds.containsAll(task.kinds) && runs(other, peer.deviceId)
-        }
+        runs(task, peer.deviceId) &&
+            TASKS.none { other ->
+                other !== task && other.kinds.size > task.kinds.size && other.kinds.containsAll(task.kinds) && runs(other, peer.deviceId)
+            }
     }
 
     /** Connection problems and tips. */
@@ -187,7 +187,6 @@ fun HomeScreen(
                 RouteCard(route, state.peers.firstOrNull { it.deviceId == route.peerId })
             }
         }
-
     }
 
     /** "What do you want to do?" task cards. */
@@ -227,7 +226,6 @@ fun HomeScreen(
                 }
             }
         }
-
     }
 
     /** Paired devices and their connection state. */
@@ -370,7 +368,12 @@ private fun RouteCard(route: RouteView, peer: PeerView?) {
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth().semantics { onClick(label = toggleLabel) { expanded = !expanded; true } },
+        modifier = Modifier.fillMaxWidth().semantics {
+            onClick(label = toggleLabel) {
+                expanded = !expanded
+                true
+            }
+        },
     ) {
         Column(Modifier.padding(Tokens.Space.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

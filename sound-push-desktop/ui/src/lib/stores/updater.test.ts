@@ -101,7 +101,12 @@ describe("UpdaterStore", () => {
   it("checks in the background at most once a day", async () => {
     let now = 1_000_000_000_000;
     const checker = vi.fn(() => Promise.resolve(null));
-    const store = new UpdaterStore(checker, async () => {}, () => now, openedByUser);
+    const store = new UpdaterStore(
+      checker,
+      async () => {},
+      () => now,
+      openedByUser,
+    );
     await store.checkIfDue();
     await store.checkIfDue();
     expect(checker).toHaveBeenCalledTimes(1);
@@ -113,7 +118,12 @@ describe("UpdaterStore", () => {
   it("does not retry a failed background check until the interval has passed", async () => {
     let now = 1_000_000_000_000;
     const checker = vi.fn(() => Promise.reject(new Error("no update feed yet")));
-    const store = new UpdaterStore(checker, async () => {}, () => now, openedByUser);
+    const store = new UpdaterStore(
+      checker,
+      async () => {},
+      () => now,
+      openedByUser,
+    );
     await store.checkIfDue();
     await store.checkIfDue();
     await store.checkIfDue();
@@ -176,13 +186,18 @@ describe("UpdaterStore", () => {
   });
 
   it("leaves a metered connection alone, and does not count the skip as a check", async () => {
-    let now = 1_000_000_000_000;
+    const now = 1_000_000_000_000;
     let metered = true;
     const checker = vi.fn(() => Promise.resolve(null));
-    const store = new UpdaterStore(checker, async () => {}, () => now, async () => ({
-      autostarted: false,
-      metered,
-    }));
+    const store = new UpdaterStore(
+      checker,
+      async () => {},
+      () => now,
+      async () => ({
+        autostarted: false,
+        metered,
+      }),
+    );
     await store.checkIfDue();
     await store.checkIfDue();
     expect(checker).not.toHaveBeenCalled();
@@ -194,10 +209,15 @@ describe("UpdaterStore", () => {
 
   it("still checks on a metered connection when the user asks", async () => {
     const checker = vi.fn(() => Promise.resolve(null));
-    const store = new UpdaterStore(checker, async () => {}, Date.now, async () => ({
-      autostarted: true,
-      metered: true,
-    }));
+    const store = new UpdaterStore(
+      checker,
+      async () => {},
+      Date.now,
+      async () => ({
+        autostarted: true,
+        metered: true,
+      }),
+    );
     await store.check(true);
     expect(checker).toHaveBeenCalledTimes(1);
     expect(store.status).toBe("upToDate");

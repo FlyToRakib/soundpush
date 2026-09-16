@@ -5,12 +5,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color as AndroidColor
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings as AndroidSettings
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -59,13 +57,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.os.BundleCompat
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import java.io.Serializable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -95,11 +92,14 @@ import net.soundpush.ui.components.BannerModel
 import net.soundpush.ui.components.Choice
 import net.soundpush.ui.components.Labels
 import net.soundpush.ui.components.LocalWidthClass
-import net.soundpush.ui.components.WidthClass
 import net.soundpush.ui.components.ScreenHeader
+import net.soundpush.ui.components.WidthClass
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.SoundPushTheme
 import net.soundpush.ui.theme.Tokens
+import java.io.Serializable
+import android.graphics.Color as AndroidColor
+import android.provider.Settings as AndroidSettings
 
 /** AppCompatActivity (not only ComponentActivity) so the per-app language also works on Android 8–12. */
 class MainActivity : AppCompatActivity() {
@@ -244,8 +244,7 @@ class MainActivity : AppCompatActivity() {
         outState.putSerializable(KEY_PENDING, pending)
     }
 
-    private fun hasPermission(permission: String) =
-        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    private fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     private fun refreshPermissions() {
         notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled() &&
@@ -691,10 +690,25 @@ class MainActivity : AppCompatActivity() {
         val output by DeviceStatus.output.collectAsState()
         val network by DeviceStatus.network.collectAsState()
         val measuredMs by DeviceStatus.outputLatencyMs.collectAsState()
+        val micSilenced by DeviceStatus.micSilenced.collectAsState()
         val tips = state.settings.dismissedTips
         val receiving = state.routes.any { !it.isSending && it.status != "stopped" }
+        val micLive = state.routes.any { it.isMic && it.isSending && it.status != "stopped" }
         val dismiss = stringResource(R.string.common_dismiss)
         return buildList {
+            // Live while it lasts, gone when the other app lets go (plan §8.3). Not dismissible:
+            // it says why the computer is hearing nothing right now.
+            if (micLive && micSilenced) {
+                add(
+                    BannerModel(
+                        key = "micInUse",
+                        title = stringResource(R.string.home_banner_mic_in_use),
+                        message = stringResource(R.string.home_banner_mic_in_use_body),
+                        icon = SpIcons.Mic,
+                        warning = true,
+                    ),
+                )
+            }
             if (state.routes.isNotEmpty() && !notificationsEnabled) {
                 add(
                     BannerModel(

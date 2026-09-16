@@ -6,6 +6,12 @@ plugins {
     alias(libs.plugins.aboutlibraries)
 }
 
+/** A release signing value from the environment (CI) or from gradle.properties (a maintainer). */
+fun signingValue(env: String, property: String): String? = System.getenv(env)?.takeIf { it.isNotBlank() }
+    ?: providers.gradleProperty(property).orNull?.takeIf { it.isNotBlank() }
+
+val releaseKeystore: String? = signingValue("ANDROID_KEYSTORE_FILE", "soundpush.keystore.file")
+
 android {
     namespace = "net.soundpush.app"
     compileSdk = 36
@@ -28,6 +34,21 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // The release key (plan §32) never lives in the repository: CI decodes it from a secret and
+        // points these variables at it, and a maintainer can set them in ~/.gradle/gradle.properties.
+        // Without them there is no "release" config at all and the release build keeps the public
+        // debug key, which is what every build on this branch does today.
+        releaseKeystore?.let { keystore ->
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = signingValue("ANDROID_KEYSTORE_PASSWORD", "soundpush.keystore.password")
+                keyAlias = signingValue("ANDROID_KEY_ALIAS", "soundpush.key.alias")
+                keyPassword = signingValue("ANDROID_KEY_PASSWORD", "soundpush.key.password")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -38,10 +59,26 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // Local testing only: store builds must use a real release key (see docs).
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // What the Macrobenchmark module measures (plan §29.1): the release build, minified and not
+        // debuggable, but profileable so the benchmark can read frame and startup timings.
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            isProfileable = true
+            matchingFallbacks += "release"
+        }
+    }
+
+    // Play builds one download per device from the bundle (plan §32: AAB with per-ABI splits). The
+    // language split stays off: the in-app picker offers every translation this build carries, so
+    // they must all be installed, not just the ones matching the system language.
+    bundle {
+        abi { enableSplit = true }
+        density { enableSplit = true }
+        language { enableSplit = false }
     }
 
     buildFeatures { compose = true }

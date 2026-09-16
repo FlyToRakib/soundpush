@@ -295,33 +295,52 @@ jobs:
           rm -rf sound-push-mobile/android/core-engine/src/main/java/uniffi
           cargo run -q -p sp-ffi --bin uniffi-bindgen -- generate --library target/debug/libsoundpush_ffi.so --language kotlin --out-dir sound-push-mobile/android/core-engine/src/main/java --no-format
           ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 26 -o sound-push-mobile/android/core-engine/src/main/jniLibs build -p sp-ffi --release
-      - name: Build release APK
-        working-directory: sound-push-mobile/android
-        run: ./gradlew assembleRelease --console=plain
-
-      - name: Sign APK
+      # The release key, when there is one. Gradle does the signing (see app/build.gradle.kts), so the
+      # APK and the App Bundle are signed the same way and nothing has to re-sign an artifact
+      # afterwards. Without the secret the build keeps the public debug key, which is what every
+      # build does until the signing key exists.
+      - name: Release keystore
+        id: keystore
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          apk=sound-push-mobile/android/app/build/outputs/apk/release/app-release.apk
-          apksigner=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -1)apksigner
-          mkdir -p dist
           if [ -n "$KEYSTORE" ]; then
             echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
-            out="dist/SoundPush_${VERSION}_android.apk"
-            "$apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-pass env:KEYSTORE_PASSWORD \
-              --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD --out "$out" "$apk"
-            rm -f "$RUNNER_TEMP/release.jks"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
           else
-            # Until the release keystore exists the APK keeps the public debug key, and its name says so.
-            out="dist/SoundPush_${VERSION}_android_debug-key-signed.apk"
-            cp "$apk" "$out"
-            echo "::warning title=Android::ANDROID_KEYSTORE is not set: the APK is signed with the public debug key (preview only, not for stores)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Android::ANDROID_KEYSTORE is not set: the APK and App Bundle are signed with the public debug key (preview only, not for stores)."
           fi
-          "$apksigner" verify --print-certs "$out" | head -5
+
+      # Play takes the App Bundle and builds one download per device from it, split by ABI and
+      # density (plan §32); the APK is for GitHub Releases and F-Droid.
+      - name: Build release APK and App Bundle
+        working-directory: sound-push-mobile/android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ steps.keystore.outputs.signed == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease bundleRelease --console=plain
+
+      - name: Name and verify the artifacts
+        env:
+          SIGNED: ${{ steps.keystore.outputs.signed }}
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/release.jks"
+          # Until the release keystore exists the artifacts keep the debug key, and their names say so.
+          suffix=""
+          [ "$SIGNED" = true ] || suffix="_debug-key-signed"
+          mkdir -p dist
+          apk="dist/SoundPush_${VERSION}_android${suffix}.apk"
+          aab="dist/SoundPush_${VERSION}_android${suffix}.aab"
+          cp sound-push-mobile/android/app/build/outputs/apk/release/app-release.apk "$apk"
+          cp sound-push-mobile/android/app/build/outputs/bundle/release/app-release.aab "$aab"
+          apksigner=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$apksigner" verify --print-certs "$apk" | head -5
+          # An App Bundle is a jar, so jarsigner is what reports its certificate.
+          jarsigner -verify -certs -verbose:summary "$aab" | tail -5
 
       - uses: actions/upload-artifact@v4
         with:

@@ -2,10 +2,8 @@ package net.soundpush.settings
 
 import android.content.ComponentName
 import android.content.Intent
-import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -30,7 +28,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
-import kotlin.math.roundToInt
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
 import net.soundpush.engine.SoundPush
@@ -44,6 +41,8 @@ import net.soundpush.ui.components.SettingSwitch
 import net.soundpush.ui.components.SpCard
 import net.soundpush.ui.components.readableWidth
 import net.soundpush.ui.theme.Tokens
+import kotlin.math.roundToInt
+import android.provider.Settings as AndroidSettings
 
 /** One runtime permission in Settings → Permissions. [onClick] asks again or leads to app settings. */
 data class PermissionRow(val label: String, val status: String, val needsAction: Boolean, val onClick: () -> Unit)
@@ -133,6 +132,11 @@ fun SettingsScreen(
             SettingSwitch(stringResource(R.string.settings_remind), s.mobile.remindAfterRestart) { v ->
                 SoundPush.updateSettings { it.copy(mobile = it.mobile.copy(remindAfterRestart = v)) }
             }
+            SettingSwitch(
+                stringResource(R.string.settings_resume_routes),
+                s.resumeRoutesOnStart,
+                stringResource(R.string.settings_resume_routes_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(resumeRoutesOnStart = v) } }
             Divider()
             NavRow(stringResource(R.string.settings_battery), stringResource(R.string.settings_battery_desc), onOpenBatteryGuide)
         }

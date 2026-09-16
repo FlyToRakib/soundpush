@@ -54,11 +54,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 import net.soundpush.ui.R
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.LocalSpColors
 import net.soundpush.ui.theme.Tokens
+import kotlin.math.roundToInt
 
 /** Screen title that respects the real status-bar height, with an optional back arrow. */
 @Composable
@@ -133,14 +133,7 @@ fun IconTile(icon: ImageVector, active: Boolean = true, filled: Boolean = false)
  * "Active" badge in place of the chevron, so the running task is obvious in the list.
  */
 @Composable
-fun TaskCard(
-    title: String,
-    description: String,
-    icon: ImageVector,
-    enabled: Boolean,
-    active: Boolean = false,
-    onClick: () -> Unit,
-) {
+fun TaskCard(title: String, description: String, icon: ImageVector, enabled: Boolean, active: Boolean = false, onClick: () -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     val muted = !enabled && !active
     val stateText = when {
@@ -217,13 +210,7 @@ fun spSwitchColors() = SwitchDefaults.colors(
 
 /** A full-row switch: the whole row is the touch target and is announced as one switch. */
 @Composable
-fun SettingSwitch(
-    label: String,
-    checked: Boolean,
-    description: String? = null,
-    enabled: Boolean = true,
-    onChange: (Boolean) -> Unit,
-) {
+fun SettingSwitch(label: String, checked: Boolean, description: String? = null, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()

@@ -13,9 +13,7 @@
   const scaleLoss = $derived(Math.max(5, summary?.maxLossPct ?? 0));
   const end = $derived(samples[samples.length - 1]?.at ?? 0);
   const x = (at: number) => W - ((end - at) / HISTORY_MS) * W;
-  const line = $derived(
-    samples.map((s) => `${x(s.at).toFixed(1)},${(H - (s.latencyMs / scaleMs) * H).toFixed(1)}`).join(" "),
-  );
+  const line = $derived(samples.map((s) => `${x(s.at).toFixed(1)},${(H - (s.latencyMs / scaleMs) * H).toFixed(1)}`).join(" "));
   const bars = $derived(samples.filter((s) => s.lossPct > 0).map((s) => ({ x: x(s.at), h: (s.lossPct / scaleLoss) * H * 0.5 })));
   const label = $derived(
     summary

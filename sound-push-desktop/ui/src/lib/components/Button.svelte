@@ -61,7 +61,10 @@
     background: transparent;
     cursor: pointer;
     font-weight: 500;
-    transition: background var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast);
+    transition:
+      background var(--motion-fast),
+      border-color var(--motion-fast),
+      opacity var(--motion-fast);
     white-space: nowrap;
   }
   .icon-only {
