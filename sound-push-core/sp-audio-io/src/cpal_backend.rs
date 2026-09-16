@@ -257,9 +257,12 @@ impl AudioBackend for CpalBackend {
         &self,
         source: &CaptureSource,
         channels: u16,
-        mut on_audio: CaptureCallback,
+        on_audio: CaptureCallback,
         mut on_error: ErrorCallback,
     ) -> Result<Box<dyn AudioStream>, AudioError> {
+        // The callback runs on a thread the OS audio stack owns; it promotes itself on its first
+        // buffer (plan §13.3).
+        let mut on_audio = crate::rt_priority::realtime_capture(on_audio);
         #[cfg(all(target_os = "linux", feature = "pulse"))]
         if crate::pulse::available() {
             return crate::pulse::open_capture(source, channels, on_audio, on_error);
@@ -395,9 +398,11 @@ impl AudioBackend for CpalBackend {
         &self,
         target: &RenderTarget,
         channels: u16,
-        mut on_audio: RenderCallback,
+        on_audio: RenderCallback,
         mut on_error: ErrorCallback,
     ) -> Result<Box<dyn AudioStream>, AudioError> {
+        // As in `open_capture`: the thread the OS calls back on promotes itself.
+        let mut on_audio = crate::rt_priority::realtime_render(on_audio);
         #[cfg(all(target_os = "linux", feature = "pulse"))]
         if crate::pulse::available() {
             return crate::pulse::open_render(target, channels, on_audio, on_error);
@@ -481,5 +486,13 @@ impl AudioBackend for CpalBackend {
                 guard,
             ))
         })
+    }
+
+    fn close_idle(&self) {
+        // Devices are released with their stream handle, so nothing is held here between
+        // streams. Linux forgets whether a sound server answered, so one that was restarted
+        // while SoundPush was idle is found again on the next route.
+        #[cfg(all(target_os = "linux", feature = "pulse"))]
+        crate::pulse::forget_availability();
     }
 }

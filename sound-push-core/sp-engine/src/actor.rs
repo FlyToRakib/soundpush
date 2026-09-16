@@ -471,6 +471,8 @@ pub(crate) async fn spawn(
     let (state_tx, state_rx) = watch::channel(Arc::new(EngineState::default()));
 
     let backend = hooks.audio_backend();
+    // Advanced override, before any audio thread exists (plan §13.3).
+    sp_audio_io::rt_priority::set_enabled(settings.advanced.realtime_audio_priority);
     let mut actor = Actor {
         hooks,
         config,
@@ -1282,6 +1284,9 @@ impl Actor {
         } else if let Some(m) = &self.monitor {
             m.gain_db.set(self.settings.mic.gain_db);
         }
+        // Advanced overrides. Real-time priority applies to audio threads started from now on;
+        // "keep audio devices open" and "continuous capture" are read where they are used.
+        sp_audio_io::rt_priority::set_enabled(self.settings.advanced.realtime_audio_priority);
     }
 
     fn refresh_audio_devices(&mut self) {
@@ -2881,6 +2886,7 @@ impl Actor {
         }
 
         self.check_virtual_mic_use();
+        self.check_audio_idle(now);
 
         // Pending prompts expire.
         let expired_requests: Vec<u64> = self

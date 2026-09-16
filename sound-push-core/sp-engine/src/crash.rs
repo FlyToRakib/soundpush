@@ -1,8 +1,16 @@
-//! Local crash reports for Rust panics (plan §28.2). Nothing is ever uploaded.
+//! Local crash reports (plan §13.2, §28.2). Nothing is ever uploaded.
 //!
-//! [`install`] adds a panic hook (keeping the previous one) that writes a short, redacted report
-//! into `<data dir>/crash-reports`. The engine surfaces reports once on the next start
-//! ([`take_unseen`]) and diagnostics exports include them ([`recent`]).
+//! Two kinds land in `<data dir>/crash-reports`:
+//!
+//! * `panic-<time>-<pid>.txt` — [`install`] adds a panic hook (keeping the previous one) that
+//!   writes a short, redacted report for a Rust panic.
+//! * `crash-<time>-<pid>.txt` — written by the shell's crash handler for a crash the panic hook
+//!   never sees (an access violation, `SIGSEGV`, a stack overflow), through [`write_note`].
+//!   A matching `crash-<time>-<pid>.dmp` minidump sits next to it.
+//!
+//! The engine surfaces new reports once on the next start ([`take_unseen`]) and diagnostics
+//! exports include them ([`recent`]). Only the text is ever exported: a minidump holds process
+//! memory, so it stays on the machine for the user to attach by hand if they choose to.
 //!
 //! Redaction: IP addresses, long hexadecimal strings (keys, fingerprints, device ids beyond an
 //! 8-character prefix) and the user's home directory are removed from the message. Reports never
@@ -15,12 +23,56 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DIR: &str = "crash-reports";
 const SEEN_MARKER: &str = "last-seen";
-/// Reports kept on disk; older ones are deleted.
+/// Reports kept on disk; older ones (and their minidumps) are deleted.
 const KEEP: usize = 10;
 const MAX_MESSAGE: usize = 4096;
 const MAX_BACKTRACE: usize = 16 * 1024;
+/// A minidump larger than this is not kept: crash reports must not fill the user's disk.
+pub const MAX_MINIDUMP_BYTES: u64 = 64 * 1024 * 1024;
 
 static INSTALLED: OnceLock<PathBuf> = OnceLock::new();
+
+/// Where reports and minidumps are written.
+pub fn report_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(DIR)
+}
+
+/// Seconds since the epoch, or 0 when the clock is before it.
+pub fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Base name shared by a crash note and its minidump, for crashes the panic hook cannot see.
+pub fn crash_stem(now: u64) -> String {
+    format!("crash-{now:012}-{:08}", std::process::id())
+}
+
+/// Write the text report for a crash handled outside the panic hook, so the existing "SoundPush
+/// closed unexpectedly" notice and the diagnostics export pick it up. `details` is redacted.
+/// `minidump` names the dump written next to it, if one could be written.
+pub fn write_note(data_dir: &Path, version: &str, stem: &str, details: &str, minidump: bool) {
+    let dir = report_dir(data_dir);
+    if fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let dump = if minidump {
+        format!("Minidump: {stem}.dmp (kept on this computer only)\n")
+    } else {
+        String::new()
+    };
+    let report = format!(
+        "SoundPush crash report (stored locally, never uploaded)\nVersion: {version}\nOS: {} {}\nTime (unix): {}\n{dump}\n{}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        now_secs(),
+        redact(&truncate(details, MAX_MESSAGE)),
+    );
+    let _ = fs::write(dir.join(format!("{stem}.txt")), report);
+    prune(&dir);
+}
 
 /// Install the panic hook once per process. Later calls are ignored.
 pub fn install(data_dir: &Path, app_version: &str) {
@@ -55,10 +107,7 @@ fn write_report(dir: &Path, version: &str, info: &std::panic::PanicHookInfo<'_>)
         .unwrap_or("unnamed")
         .to_string();
     let backtrace = std::backtrace::Backtrace::force_capture().to_string();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let now = now_secs();
 
     let report = format!(
         "SoundPush crash report (stored locally, never uploaded)\nVersion: {version}\nOS: {} {}\nTime (unix): {now}\nThread: {thread}\nLocation: {location}\nMessage: {}\n\nBacktrace:\n{}\n",
@@ -86,18 +135,31 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{}…", &s[..end])
 }
 
+/// Sort key of a report: the timestamp its name embeds, then the name itself so two reports
+/// from the same second stay apart. Panics and handled crashes use different prefixes, so
+/// comparing whole names would order them by kind instead of by time.
+fn order(name: &str) -> (u64, &str) {
+    let stamp = name
+        .split('-')
+        .nth(1)
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    (stamp, name)
+}
+
 fn reports(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .map(|entries| {
             entries
                 .filter_map(Result::ok)
                 .map(|e| e.file_name().to_string_lossy().to_string())
-                .filter(|n| n.starts_with("panic-") && n.ends_with(".txt"))
+                .filter(|n| {
+                    (n.starts_with("panic-") || n.starts_with("crash-")) && n.ends_with(".txt")
+                })
                 .collect()
         })
         .unwrap_or_default();
-    // Names embed a zero-padded timestamp, so they sort chronologically.
-    names.sort();
+    names.sort_by(|a, b| order(a).cmp(&order(b)));
     names
 }
 
@@ -105,6 +167,21 @@ fn prune(dir: &Path) {
     let names = reports(dir);
     for old in names.iter().take(names.len().saturating_sub(KEEP)) {
         let _ = fs::remove_file(dir.join(old));
+        // The minidump belonging to a deleted report goes with it.
+        let _ = fs::remove_file(dir.join(old.replace(".txt", ".dmp")));
+    }
+    // A dump whose report never appeared (the handler died writing it) would stay for ever.
+    let kept: Vec<String> = reports(dir)
+        .iter()
+        .map(|n| n.replace(".txt", ".dmp"))
+        .collect();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".dmp") && !kept.contains(&name) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
     }
 }
 
@@ -116,7 +193,8 @@ pub fn take_unseen(data_dir: &Path) -> usize {
         return 0;
     };
     let seen = fs::read_to_string(dir.join(SEEN_MARKER)).unwrap_or_default();
-    let unseen = names.iter().filter(|n| n.as_str() > seen.trim()).count();
+    let seen = order(seen.trim());
+    let unseen = names.iter().filter(|n| order(n) > seen).count();
     if unseen > 0 {
         let _ = fs::write(dir.join(SEEN_MARKER), newest);
     }
@@ -235,6 +313,49 @@ mod tests {
         let recent = recent(dir.path(), 2);
         assert_eq!(recent[0].1, "new");
         assert_eq!(recent.len(), 2);
+    }
+
+    #[test]
+    fn handled_crashes_are_ordered_with_panics_and_take_their_minidump_along() {
+        let dir = tempfile::tempdir().unwrap();
+        let reports_dir = report_dir(dir.path());
+        write_note(
+            dir.path(),
+            "1.2.3",
+            "crash-000000000100-00000001",
+            "boom",
+            true,
+        );
+        let note = fs::read_to_string(reports_dir.join("crash-000000000100-00000001.txt")).unwrap();
+        assert!(note.contains("never uploaded") && note.contains("Version: 1.2.3"));
+        assert!(note.contains("crash-000000000100-00000001.dmp"));
+        assert_eq!(take_unseen(dir.path()), 1);
+
+        // A panic from a later second is the newer report although "crash" sorts before "panic".
+        fs::write(reports_dir.join("panic-000000000050-00000001.txt"), "older").unwrap();
+        fs::write(reports_dir.join("panic-000000000200-00000001.txt"), "newer").unwrap();
+        assert_eq!(take_unseen(dir.path()), 1, "only the newer one is new");
+        assert_eq!(recent(dir.path(), 1)[0].1, "newer");
+
+        // Pruning a report deletes its minidump, and an orphaned dump never lingers.
+        fs::write(reports_dir.join("crash-000000000100-00000001.dmp"), b"dump").unwrap();
+        fs::write(
+            reports_dir.join("crash-000000000009-00000002.dmp"),
+            b"orphan",
+        )
+        .unwrap();
+        for i in 0..KEEP {
+            fs::write(
+                reports_dir.join(format!("panic-{:012}-00000003.txt", 1000 + i)),
+                "filler",
+            )
+            .unwrap();
+        }
+        prune(&reports_dir);
+        assert_eq!(reports(&reports_dir).len(), KEEP);
+        assert!(!reports_dir.join("crash-000000000100-00000001.txt").exists());
+        assert!(!reports_dir.join("crash-000000000100-00000001.dmp").exists());
+        assert!(!reports_dir.join("crash-000000000009-00000002.dmp").exists());
     }
 
     #[test]

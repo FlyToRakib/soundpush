@@ -743,7 +743,13 @@ pub async fn close_main_window(app: AppHandle) {
         if let Some(saved) = app.try_state::<crate::window_state::WindowState>() {
             saved.save();
         }
-        let _ = window.destroy();
+        // "Keep window in memory for instant reopen" hides the window instead of releasing the
+        // webview with it (plan §13.1).
+        if crate::keeps_window_in_memory(&app) {
+            let _ = window.hide();
+        } else {
+            let _ = window.destroy();
+        }
     } else {
         let _ = window.minimize();
     }

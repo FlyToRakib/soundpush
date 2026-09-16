@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod crash_dump;
 mod cues;
 mod device_watch;
 mod hooks;
@@ -66,6 +67,14 @@ pub fn show_main_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        // A window kept in memory received no snapshots while it was hidden (see
+        // `forward_state`), so it starts from the current one.
+        if let Some(engine) = app
+            .try_state::<AppState>()
+            .and_then(|s| s.engine.get().cloned())
+        {
+            let _ = app.emit("engine://state", &*engine.state());
+        }
         return;
     }
     let theme = app
@@ -108,8 +117,10 @@ fn main() {
     let log_dir = data_dir.join("logs");
     let _log_guard = init_logging(&log_dir);
     // Panics leave a redacted report in the data folder (never uploaded); the engine mentions it
-    // once on the next start and diagnostics exports include it.
+    // once on the next start and diagnostics exports include it. A crash the panic hook cannot
+    // see (access violation, SIGSEGV in a driver) leaves a note and a local minidump instead.
     sp_engine::crash::install(&data_dir, env!("CARGO_PKG_VERSION"));
+    crash_dump::install(&data_dir, env!("CARGO_PKG_VERSION"));
     info!(version = env!("CARGO_PKG_VERSION"), "SoundPush starting");
 
     let app = tauri::Builder::default()
@@ -318,10 +329,18 @@ fn main() {
     });
 }
 
+/// "Keep window in memory for instant reopen" (plan §13.1), off by default.
+pub fn keeps_window_in_memory(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .and_then(|s| s.engine.get().map(|e| e.state()))
+        .is_some_and(|s| s.settings.desktop.keep_window_in_memory)
+}
+
 /// Closing the window (plan §24): quits when "Keep running when the window is closed" is off.
-/// Otherwise the webview is destroyed, freeing its memory, and SoundPush stays in the tray. The
-/// first time the window stays open for a one-time explanation; on desktops without a tray the
-/// window is minimized instead of disappearing.
+/// Otherwise the webview is destroyed, freeing its memory, and SoundPush stays in the tray — or,
+/// with "Keep window in memory for instant reopen" on, the window is only hidden and keeps its
+/// webview loaded. The first time the window stays open for a one-time explanation; on desktops
+/// without a tray the window is minimized instead of disappearing.
 fn on_close_requested(app: &AppHandle, api: &tauri::CloseRequestApi) {
     if let Some(saved) = app.try_state::<window_state::WindowState>() {
         saved.save();
@@ -350,7 +369,13 @@ fn on_close_requested(app: &AppHandle, api: &tauri::CloseRequestApi) {
         if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
             let _ = window.minimize();
         }
+    } else if state.settings.desktop.keep_window_in_memory {
+        api.prevent_close();
+        if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            let _ = window.hide();
+        }
     }
+    // Otherwise the close goes ahead and the webview is released with the window.
 }
 
 /// Push engine state to the UI and tray; apply desktop-side settings.
@@ -386,7 +411,12 @@ fn forward_state(app: AppHandle, engine: EngineHandle, hooks: Arc<hooks::Desktop
                     hotkeys::apply(&handle, wanted.0.as_deref(), wanted.1.as_deref())
                 });
             }
-            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            // Snapshots go to the webview only while a window exists (plan §13.1) and is on
+            // screen: a window kept in memory but hidden is caught up by `show_main_window`.
+            if let Some(window) = app
+                .get_webview_window(MAIN_WINDOW)
+                .filter(|w| w.is_visible().unwrap_or(true))
+            {
                 if let Err(e) = app.emit("engine://state", &*state) {
                     warn!(error = %e, "emit failed");
                 }

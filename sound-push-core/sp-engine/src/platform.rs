@@ -54,6 +54,11 @@ pub trait PlatformHooks: Send + Sync + 'static {
     /// The OS audio device list may have changed; drop cached device detection.
     fn audio_devices_changed(&self) {}
 
+    /// No route has used audio for a minute (`idle = true`), or audio is needed again
+    /// (plan §13.5). Shells release cached device detection while idle; nothing may depend on
+    /// this being called, and the next route start must work either way.
+    fn audio_idle(&self, _idle: bool) {}
+
     /// Mute or unmute this device's physical speakers ("Mute PC"). Returns false if unsupported.
     fn set_speakers_muted(&self, _muted: bool) -> bool {
         false

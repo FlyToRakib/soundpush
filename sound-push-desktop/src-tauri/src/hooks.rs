@@ -222,6 +222,15 @@ impl PlatformHooks for DesktopHooks {
         }
     }
 
+    fn audio_idle(&self, idle: bool) {
+        // Nothing streams any more: drop the cached device list so the OS enumerator objects go
+        // away and a cable installed meanwhile is seen at once. Filling it again is one
+        // enumeration, which the next route start or status query does anyway.
+        if idle && let Ok(mut cache) = self.outputs_cache.lock() {
+            *cache = (None, Vec::new());
+        }
+    }
+
     fn set_speakers_muted(&self, muted: bool) -> bool {
         let ok = crate::power::set_default_output_muted(muted);
         if ok {
