@@ -13,6 +13,10 @@ pub enum SleepInhibitor {
     /// it when told to stop. The sender is that signal; dropping it also stops the thread.
     #[cfg(windows)]
     Windows(std::sync::mpsc::Sender<()>),
+    /// A sandboxed or Wayland desktop, where the portal holds the inhibit for us (plan §26.2).
+    /// The value is only kept alive: its own `Drop` closes the portal request.
+    #[cfg(target_os = "linux")]
+    Portal(#[allow(dead_code)] crate::portals::PortalInhibit),
     #[allow(dead_code)]
     Process(Child),
 }
@@ -54,6 +58,14 @@ impl SleepInhibitor {
                 .ok()
                 .map(Self::Process);
         }
+        // Inside a Flatpak there is no systemd-inhibit to run, and on Wayland the portal is the
+        // supported way; elsewhere the child process below stays the simpler one.
+        #[cfg(target_os = "linux")]
+        if crate::portals::preferred()
+            && let Some(inhibit) = crate::portals::PortalInhibit::acquire("Streaming audio")
+        {
+            return Some(Self::Portal(inhibit));
+        }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
             // The inhibited child is `cat` on a pipe this process owns: it exits when the pipe
@@ -83,6 +95,9 @@ impl Drop for SleepInhibitor {
             Self::Windows(stop) => {
                 let _ = stop.send(());
             }
+            // Its own Drop closes the portal request.
+            #[cfg(target_os = "linux")]
+            Self::Portal(_) => {}
             Self::Process(child) => {
                 let _ = child.kill();
                 let _ = child.wait();

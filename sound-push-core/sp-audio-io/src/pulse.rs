@@ -485,6 +485,18 @@ impl Pulse {
         })
     }
 
+    /// The other half of [`Self::set_default_sink`], for "make SoundPush the default devices".
+    pub fn set_default_source(&mut self, source: &str) -> Result<(), AudioError> {
+        let ok = Rc::new(Cell::new(false));
+        let result = ok.clone();
+        let op = self
+            .context
+            .set_default_source(source, move |s| result.set(s));
+        self.confirm(op, &ok, || {
+            format!("the sound server could not make {source} the default input")
+        })
+    }
+
     /// Report device changes until the connection ends (see [`watch_devices`]).
     fn follow_devices(&mut self, on_change: &mut dyn FnMut(bool, bool)) -> Result<(), AudioError> {
         // (a device was added or removed, the server changed)

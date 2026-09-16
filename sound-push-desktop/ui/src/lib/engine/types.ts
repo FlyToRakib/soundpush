@@ -111,6 +111,23 @@ export interface DesktopSettings {
   /** Start the phone microphone when another app opens the virtual microphone. */
   autoStartMic: boolean;
   lastMicPeer: string | null;
+  /** Keep the window's webview loaded while SoundPush sits in the tray (plan §13.1). */
+  keepWindowInMemory: boolean;
+  /** Make SoundPush the default input and output while a route is active (plan §23.2). */
+  defaultDevicesWhileActive: boolean;
+}
+
+/**
+ * Hidden troubleshooting overrides (plan §4.3, §24.7). Defaults are the automatic behaviour, so
+ * an engine that predates them behaves exactly as before; see `docs/advanced.md`.
+ */
+export interface AdvancedSettings {
+  /** Keep sending during silence instead of switching to DTX. */
+  continuousCapture: boolean;
+  /** Keep audio devices open instead of closing them a minute after the last stream. */
+  keepAudioDevicesOpen: boolean;
+  /** Ask the OS for real-time priority on the capture and playback threads. */
+  realtimeAudioPriority: boolean;
 }
 
 /** Per-device overrides of StreamSettings; absent fields follow the global setting. */
@@ -190,6 +207,8 @@ export interface Settings {
   debugLogging?: boolean;
   /** When debug logging switches itself off (unix seconds, 0 while off). Set by the engine. */
   debugLoggingUntilUnix?: number;
+  /** Hidden troubleshooting overrides; absent on an engine that predates them. */
+  advanced?: AdvancedSettings;
 }
 
 /** Desktop update channel (docs/release-signing.md). */
@@ -386,6 +405,26 @@ export interface SystemStatus {
   bluetoothOutputs: string[];
   defaultOutput: string | null;
   appCapture: boolean;
+  /** Microsoft Edge WebView2 runtime version on Windows; null when it is missing or elsewhere. */
+  webview2Version: string | null;
+  /** Running audio-enhancement or overlay software known to break capture (Windows, plan §8.3). */
+  audioEnhancements: string[];
+  /** A VPN that carries this computer's whole connection (plan §8.1). */
+  vpn: VpnStatus;
+}
+
+/** A VPN carrying the default route, which usually blocks the local network too. */
+export interface VpnStatus {
+  capturesInternet: boolean;
+  name: string | null;
+}
+
+/** What decides whether a background update check runs now (plan §24). */
+export interface UpdateConditions {
+  /** The OS started SoundPush at sign-in, so the first check waits half a minute. */
+  autostarted: boolean;
+  /** A metered connection (hotspot, capped plan): background checks are left alone. */
+  metered: boolean;
 }
 
 export type HotkeyKind = "mute" | "pushToTalk";

@@ -656,6 +656,16 @@ pub async fn system_status() -> CmdResult<crate::system::SystemStatus> {
         .map_err(|e| EngineError::Internal(e.to_string()).into())
 }
 
+/// Whether an automatic update check should run now: not right after signing in, and not on a
+/// metered connection (plan §24). Reads the connection cost, so off the UI thread.
+#[tauri::command]
+pub async fn update_conditions() -> CmdResult<crate::system::UpdateConditions> {
+    let autostarted = crate::autostarted();
+    tauri::async_runtime::spawn_blocking(move || crate::system::update_conditions(autostarted))
+        .await
+        .map_err(|e| EngineError::Internal(e.to_string()).into())
+}
+
 /// Ask the OS for microphone access (macOS shows its prompt only while undecided).
 #[tauri::command]
 pub async fn request_microphone(state: State<'_, AppState>) -> CmdResult<()> {

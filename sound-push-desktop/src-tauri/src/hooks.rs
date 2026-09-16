@@ -50,6 +50,12 @@ const VIRTUAL_CABLES: &[(&str, Option<&str>)] = &[
     ("Loopback Audio", None),
 ];
 
+/// Whether a playback device is a virtual cable (something apps can record from) rather than a
+/// real speaker. Used by "make SoundPush the default devices" to leave real speakers alone.
+pub fn is_virtual_cable(output: &str) -> bool {
+    cable_input_name(output).is_some()
+}
+
 /// Recording-side name for a virtual cable's playback device; `None` for real speakers.
 fn cable_input_name(output: &str) -> Option<String> {
     VIRTUAL_CABLES

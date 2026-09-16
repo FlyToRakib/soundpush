@@ -6,7 +6,7 @@
   import SettingRow from "../lib/components/SettingRow.svelte";
   import Toggle from "../lib/components/Toggle.svelte";
   import { engine } from "../lib/engine/client";
-  import type { Theme, UpdateChannel, Visibility } from "../lib/engine/types";
+  import type { AdvancedSettings, Theme, UpdateChannel, Visibility } from "../lib/engine/types";
   import { PSEUDO_LONG, PSEUDO_RTL, availableLanguages, languageName, t } from "../lib/i18n";
   import { LINKS, docsUrl, type DocsPage } from "../lib/links";
   import { store } from "../lib/stores/engine.svelte";
@@ -19,9 +19,28 @@
   import AuditLog from "./AuditLog.svelte";
 
   let showAuditLog = $state(false);
+  let showAdvanced = $state(false);
 
   const app = $derived(store.state!);
   const s = $derived(app.settings);
+
+  /** Defaults of the hidden overrides; an engine that predates them behaves the same way. */
+  const ADVANCED_DEFAULTS: AdvancedSettings = {
+    continuousCapture: false,
+    keepAudioDevicesOpen: false,
+    realtimeAudioPriority: true,
+  };
+  const advanced = $derived({ ...ADVANCED_DEFAULTS, ...s.advanced });
+  const changedCount = $derived(
+    (Object.keys(ADVANCED_DEFAULTS) as (keyof AdvancedSettings)[]).filter((k) => advanced[k] !== ADVANCED_DEFAULTS[k])
+      .length,
+  );
+  const advancedChanged = $derived(changedCount > 0);
+  // Something changed from the default must not stay hidden.
+  $effect(() => {
+    if (advancedChanged) showAdvanced = true;
+  });
+  const resetAdvanced = () => updateSettings((x) => (x.advanced = { ...ADVANCED_DEFAULTS }));
   const isMac = $derived(app.local.platform === "macos");
   /** Launch at login is on here but switched off in the OS (Task Manager / Startup apps). */
   const startupBlocked = $derived(s.desktop.launchAtLogin && platform.system?.autostartDisabledByOs === true);
@@ -116,9 +135,19 @@
       <Toggle checked={s.desktop.closeToTray} label={t("settings.closeToTray")}
         onchange={(v) => updateSettings((x) => (x.desktop.closeToTray = v))} />
     </SettingRow>
+    {#if s.desktop.closeToTray}
+      <SettingRow label={t("settings.keepWindowInMemory")} description={t("settings.keepWindowInMemory.desc")}>
+        <Toggle checked={s.desktop.keepWindowInMemory} label={t("settings.keepWindowInMemory")}
+          onchange={(v) => updateSettings((x) => (x.desktop.keepWindowInMemory = v))} />
+      </SettingRow>
+    {/if}
     <SettingRow label={t("settings.preventSleep")}>
       <Toggle checked={s.desktop.preventSleepWhileStreaming} label={t("settings.preventSleep")}
         onchange={(v) => updateSettings((x) => (x.desktop.preventSleepWhileStreaming = v))} />
+    </SettingRow>
+    <SettingRow label={t("settings.defaultDevices")} description={t("settings.defaultDevices.desc")}>
+      <Toggle checked={s.desktop.defaultDevicesWhileActive} label={t("settings.defaultDevices")}
+        onchange={(v) => updateSettings((x) => (x.desktop.defaultDevicesWhileActive = v))} />
     </SettingRow>
     <SettingRow label={t("settings.audioCues")} description={t("settings.audioCues.desc")}>
       <Toggle checked={s.audioCues} label={t("settings.audioCues")} onchange={(v) => updateSettings((x) => (x.audioCues = v))} />
@@ -161,6 +190,37 @@
       <Button variant="ghost" onclick={() => open(LINKS.reportBug)}>{t("settings.reportBug")}</Button>
     </div>
     <p class="caption">{t("settings.shortcuts", isMac ? "⌘" : "Ctrl")}</p>
+
+    <!-- Hidden troubleshooting overrides (plan §4.3, §24.7): folded away, and folded open by
+         itself when one of them is not at its default, so nothing stays changed unnoticed. -->
+    <SettingRow label={t("settings.advanced")} description={advancedChanged ? t("settings.advanced.changed", changedCount) : undefined}>
+      {#if advancedChanged}
+        <Button variant="ghost" onclick={resetAdvanced}>{t("settings.advanced.reset")}</Button>
+      {/if}
+      <Button variant="ghost" expanded={showAdvanced} controls="advanced-settings" onclick={() => (showAdvanced = !showAdvanced)}>
+        {t(showAdvanced ? "settings.advanced.hide" : "settings.advanced.show")}
+      </Button>
+    </SettingRow>
+    {#if showAdvanced}
+      <div id="advanced-settings">
+      <p class="caption">{t("settings.advanced.desc")}</p>
+      <SettingRow label={t("settings.continuousCapture")} description={t("settings.continuousCapture.desc")}>
+        <Toggle checked={advanced.continuousCapture} label={t("settings.continuousCapture")}
+          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, continuousCapture: v }))} />
+      </SettingRow>
+      <SettingRow label={t("settings.keepAudioDevicesOpen")} description={t("settings.keepAudioDevicesOpen.desc")}>
+        <Toggle checked={advanced.keepAudioDevicesOpen} label={t("settings.keepAudioDevicesOpen")}
+          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, keepAudioDevicesOpen: v }))} />
+      </SettingRow>
+      <SettingRow label={t("settings.realtimeAudioPriority")} description={t("settings.realtimeAudioPriority.desc")}>
+        <Toggle checked={advanced.realtimeAudioPriority} label={t("settings.realtimeAudioPriority")}
+          onchange={(v) => updateSettings((x) => (x.advanced = { ...advanced, realtimeAudioPriority: v }))} />
+      </SettingRow>
+      <div class="row wrap">
+        <Button variant="ghost" onclick={() => openDocs("advanced")}>{t("settings.advanced.guide")}</Button>
+      </div>
+      </div>
+    {/if}
   </Card>
 
   <Card title={t("settings.about")}>

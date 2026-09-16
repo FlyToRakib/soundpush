@@ -117,7 +117,8 @@ fn write_platform_minidump(file: &mut std::fs::File, context: &CrashContext) -> 
 
 #[cfg(target_os = "linux")]
 fn write_platform_minidump(file: &mut std::fs::File, context: &CrashContext) -> bool {
-    minidump_writer::minidump_writer::MinidumpWriter::new(context.pid, context.tid)
+    // The crashing thread is blamed, so its stack is the one the report opens on.
+    minidump_writer::minidump_writer::MinidumpWriterConfig::new(context.pid, context.tid)
         .write(file)
         .is_ok()
 }

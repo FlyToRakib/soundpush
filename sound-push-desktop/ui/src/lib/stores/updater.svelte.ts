@@ -3,9 +3,14 @@
 // Background checks run at most once a day while enabled and stay silent when offline or failing.
 // Checks the user starts show their result ("up to date", or what went wrong).
 // The update channel (stable/beta) comes from the settings through `configure`.
+//
+// Two rules keep background checks out of the way (plan §24): after the OS starts SoundPush at
+// sign-in the first check waits half a minute, and a metered connection (a phone hotspot, a
+// capped plan) is left alone entirely. A check the user asks for always runs.
 import { untrack } from "svelte";
+import { engine } from "../engine/client";
 import { checkForUpdate, relaunch, type AvailableUpdate, type CheckOptions } from "../engine/updater";
-import type { UpdateChannel } from "../engine/types";
+import type { UpdateChannel, UpdateConditions } from "../engine/types";
 
 export type UpdateStatus = "idle" | "checking" | "upToDate" | "available" | "downloading" | "ready" | "error";
 
@@ -13,6 +18,19 @@ const LAST_CHECK_KEY = "sp-update-last-check";
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** How often a running window looks whether the daily check is due. */
 const POLL_MS = 60 * 60 * 1000;
+/** How long the first background check waits when the OS started SoundPush at sign-in. */
+export const AUTOSTART_DELAY_MS = 30_000;
+
+/** Neither rule applies when the shell cannot say — an update check is not worth an error. */
+const NO_CONDITIONS: UpdateConditions = { autostarted: false, metered: false };
+
+async function askConditions(): Promise<UpdateConditions> {
+  try {
+    return (await engine.updateConditions()) ?? NO_CONDITIONS;
+  } catch {
+    return NO_CONDITIONS;
+  }
+}
 
 function readLastCheck(): number {
   try {
@@ -43,6 +61,7 @@ export class UpdaterStore {
 
   private update: AvailableUpdate | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private firstCheck: ReturnType<typeof setTimeout> | null = null;
   // Plain fields (not $state): reading them inside an effect must not subscribe it.
   private channel: UpdateChannel = "stable";
   private installId = "";
@@ -52,6 +71,7 @@ export class UpdaterStore {
     private readonly checker: (options: CheckOptions) => Promise<AvailableUpdate | null> = checkForUpdate,
     private readonly restartApp: () => Promise<void> = relaunch,
     private readonly now: () => number = Date.now,
+    private readonly conditions: () => Promise<UpdateConditions> = askConditions,
   ) {}
 
   get busy(): boolean {
@@ -81,16 +101,38 @@ export class UpdaterStore {
   /** Start or stop daily background checks (Settings → "Check for updates automatically"). */
   setAutomatic(enabled: boolean): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.firstCheck) clearTimeout(this.firstCheck);
     this.timer = null;
+    this.firstCheck = null;
     if (!enabled) return;
+    this.timer = setInterval(() => void this.checkIfDue(), POLL_MS);
     // Called from a component effect: start the check on the next tick so the state it reads
     // is not tracked by that effect (tracking it re-ran the effect on every status change).
-    setTimeout(() => void this.checkIfDue(), 0);
-    this.timer = setInterval(() => void this.checkIfDue(), POLL_MS);
+    this.firstCheck = setTimeout(() => void this.scheduleFirstCheck(), 0);
+  }
+
+  /** The first background check of a run, delayed when the OS started SoundPush at sign-in. */
+  private async scheduleFirstCheck(): Promise<void> {
+    this.firstCheck = null;
+    const { autostarted } = await this.conditions();
+    // Switched off while the shell was answering.
+    if (!this.timer) return;
+    if (!autostarted) {
+      await this.checkIfDue();
+      return;
+    }
+    this.firstCheck = setTimeout(() => {
+      this.firstCheck = null;
+      void this.checkIfDue();
+    }, AUTOSTART_DELAY_MS);
   }
 
   async checkIfDue(): Promise<void> {
-    if (this.now() - readLastCheck() >= CHECK_INTERVAL_MS) await this.check(false);
+    if (this.now() - readLastCheck() < CHECK_INTERVAL_MS) return;
+    // Someone's mobile data is not for a download SoundPush decided to make on its own. The next
+    // poll looks again, and "Check now" in Settings still works.
+    if ((await this.conditions()).metered) return;
+    await this.check(false);
   }
 
   async check(manual: boolean): Promise<void> {
