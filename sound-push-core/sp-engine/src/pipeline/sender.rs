@@ -12,6 +12,7 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use sp_audio_io::{AudioBackend, AudioStream, CaptureSource, ErrorCallback};
 use sp_media::codec::{Encoder, OpusApplication, encoder_for};
+use sp_media::drift::{DriftController, FractionalResampler};
 use sp_media::dsp::{
     DuckGate, Gain, HighPass, LevelMeter, NoiseSuppressor, SoftLimiter, db_to_gain, is_silent,
 };
@@ -229,15 +230,39 @@ impl Drop for Sender {
 /// zeros turns that jitter into a gap in the voice every few frames. Instead the reader keeps
 /// [`MIX_PREFILL_FRAMES`] in hand before it starts — about 20 ms, on the microphone half only —
 /// and only ever takes whole frames. If the capture does run dry (it stalled, or its clock is
-/// genuinely slower) it plays one silent frame and fills the cushion again, rather than clicking
-/// on every late callback. Backlog beyond [`MIX_MAX_BACKLOG_FRAMES`] is dropped, so a faster clock
-/// cannot make the microphone drift behind the system audio either.
-#[derive(Debug, Default)]
+/// genuinely stalled) it plays one silent frame and fills the cushion again, rather than clicking
+/// on every late callback.
+///
+/// Two audio devices never run at exactly the same rate — a USB microphone against the sound
+/// card's loopback differs by tens to hundreds of ppm — so a cushion on its own would still drain
+/// or overflow every few minutes, with a dropout or a skip each time. The reader therefore also
+/// resamples the microphone by a hair, steered by the cushion's fill ([`DriftController`], the
+/// same compensation the receiver uses), and the fill stays where it is. Backlog beyond
+/// [`MIX_MAX_BACKLOG_FRAMES`] is still dropped as a last resort.
 struct MixReader {
     primed: bool,
+    channels: usize,
+    drift: DriftController,
+    resampler: FractionalResampler,
+    /// Microphone samples read from the ring, waiting to be resampled.
+    scratch: Vec<f32>,
+    /// Resampled microphone audio not yet mixed.
+    pending: Vec<f32>,
 }
 
 impl MixReader {
+    fn new(channels: usize) -> Self {
+        let channels = channels.max(1);
+        Self {
+            primed: false,
+            channels,
+            drift: DriftController::new(),
+            resampler: FractionalResampler::new(channels),
+            scratch: Vec::new(),
+            pending: Vec::new(),
+        }
+    }
+
     fn take(&mut self, input: &mut rtrb::Consumer<f32>, out: &mut [f32]) {
         let frame = out.len();
         let keep = frame * MIX_MAX_BACKLOG_FRAMES;
@@ -248,21 +273,65 @@ impl MixReader {
             }
         }
         let available = input.slots();
-        if (!self.primed && available < frame * MIX_PREFILL_FRAMES) || available < frame {
-            self.primed = false;
+        if !self.primed && available < frame * MIX_PREFILL_FRAMES {
             out.fill(0.0);
             return;
         }
-        self.primed = true;
-        match input.read_chunk(frame) {
-            Ok(chunk) => {
-                let (a, b) = chunk.as_slices();
-                out[..a.len()].copy_from_slice(a);
-                out[a.len()..].copy_from_slice(b);
-                chunk.commit_all();
-            }
-            Err(_) => out.fill(0.0),
+        // Whole interleaved frames only, so channels never swap.
+        let ch = self.channels;
+        let whole = |n: usize| n - n % ch;
+        // Measured before this frame is taken, so the target includes it: what the controller
+        // holds on to is the full cushion left once the frame is gone.
+        let ratio = self.drift.update(
+            (available + self.pending.len()) as u64,
+            (frame * (MIX_PREFILL_FRAMES + 1)) as u64,
+        );
+        // What resampling at `ratio` needs to produce the rest of this frame, plus the
+        // interpolation history the first time round. Any sample it comes up short is topped up
+        // below, so this asks for no spare: every sample held back here is cushion lost.
+        let wanted = frame.saturating_sub(self.pending.len());
+        let mut need = whole((wanted as f64 * ratio).round() as usize);
+        if !self.primed {
+            need += 3 * self.channels;
         }
+        if available < need {
+            self.underrun(out);
+            return;
+        }
+        self.read(input, need);
+        // Hermite interpolation keeps a sample or two back; top up one sample frame at a time
+        // until the frame is whole, as long as the ring has them.
+        while self.pending.len() < frame {
+            if input.slots() < self.channels {
+                self.underrun(out);
+                return;
+            }
+            self.read(input, self.channels);
+        }
+        self.primed = true;
+        out.copy_from_slice(&self.pending[..frame]);
+        self.pending.drain(..frame);
+    }
+
+    fn read(&mut self, input: &mut rtrb::Consumer<f32>, n: usize) {
+        self.scratch.clear();
+        if let Ok(chunk) = input.read_chunk(n) {
+            let (a, b) = chunk.as_slices();
+            self.scratch.extend_from_slice(a);
+            self.scratch.extend_from_slice(b);
+            chunk.commit_all();
+        }
+        self.resampler
+            .process(&self.scratch, self.drift.ratio(), &mut self.pending);
+    }
+
+    /// The microphone ran dry: one silent frame, and start over from a fresh cushion.
+    fn underrun(&mut self, out: &mut [f32]) {
+        self.primed = false;
+        self.pending.clear();
+        self.resampler.reset();
+        self.drift.reset();
+        out.fill(0.0);
     }
 }
 
@@ -320,7 +389,9 @@ fn refresh_targets(fanout: &Fanout, targets: &mut Vec<Target>) {
 
 /// A mixed source's second capture may not be exactly in step with the first. More than this
 /// much waiting audio is dropped, so the microphone part cannot drift behind the system audio.
-const MIX_MAX_BACKLOG_FRAMES: usize = 4;
+/// Drift compensation keeps the fill near the cushion, so this is only reached when a capture
+/// delivers a burst after stalling; it leaves room for the cushion plus a late callback's catch-up.
+const MIX_MAX_BACKLOG_FRAMES: usize = 6;
 /// Frames of the second capture held back before the mix takes from it, and again after it has
 /// run dry: enough to ride out the ordinary scheduling jitter between two capture clocks.
 const MIX_PREFILL_FRAMES: usize = 2;
@@ -339,7 +410,7 @@ fn encode_loop(
     echo: Option<&EchoReference>,
 ) {
     let mut mix_buf = vec![0.0f32; frame * channels];
-    let mut mix_reader = MixReader::default();
+    let mut mix_reader = MixReader::new(channels);
     let mut mix_gain = Gain::new(db_to_gain(controls.mix_gain_db.get()));
     let mut system_gain = Gain::new(db_to_gain(controls.system_gain_db.get()));
     let mut buf = vec![0.0f32; frame * channels];
@@ -694,9 +765,18 @@ mod tests {
             let running = Arc::new(AtomicBool::new(true));
             let flag = running.clone();
             let thread = std::thread::spawn(move || {
+                // Paced by absolute deadlines, like a sound card's clock: a relative sleep
+                // oversleeps a little every time (by whole percents on macOS), so two such
+                // "devices" would drift apart far faster than any real pair of audio clocks.
+                let start = std::time::Instant::now();
+                let mut n = 0u32;
                 while flag.load(Ordering::Relaxed) {
                     on_audio(&buf);
-                    std::thread::sleep(Duration::from_millis(10));
+                    n += 1;
+                    let due = start + Duration::from_millis(10) * n;
+                    if let Some(wait) = due.checked_duration_since(std::time::Instant::now()) {
+                        std::thread::sleep(wait);
+                    }
                 }
             });
             Ok(Box::new(Ticker {
@@ -731,7 +811,7 @@ mod tests {
     #[test]
     fn the_mix_waits_for_a_cushion_and_never_pads_a_frame() {
         let (mut p, mut c) = mix_ring();
-        let mut reader = MixReader::default();
+        let mut reader = MixReader::new(1);
         let mut out = vec![1.0f32; FRAME];
 
         // One frame in hand is not enough to start: silence, and nothing is taken.
@@ -760,7 +840,7 @@ mod tests {
     #[test]
     fn a_capture_whose_callbacks_do_not_line_up_with_frames_leaves_no_gaps() {
         let (mut p, mut c) = mix_ring();
-        let mut reader = MixReader::default();
+        let mut reader = MixReader::new(1);
         let mut out = vec![0.0f32; FRAME];
         // A real capture delivers the same rate in its own buffer size — 512 samples here against
         // 480-sample frames — so at the moment a frame is wanted it is often a few samples short.
@@ -796,10 +876,52 @@ mod tests {
         assert_eq!(gaps, 0, "{gaps} of 1000 frames had a gap");
     }
 
+    /// Ten minutes of 10 ms frames with the microphone's clock `ppm` off the system audio's.
+    /// Returns the frames that had a gap and the most the ring ever held.
+    fn run_with_clock_offset(ppm: f64) -> (usize, usize) {
+        let (mut p, mut c) = rtrb::RingBuffer::new(FRAME * 16);
+        let mut reader = MixReader::new(1);
+        let mut out = vec![0.0f32; FRAME];
+        const CALLBACK: usize = 512;
+        let rate = 1.0 + ppm * 1e-6;
+        let (mut pushed, mut gaps, mut most) = (0usize, 0usize, 0usize);
+        for tick in 0..60_000usize {
+            // The microphone has captured `rate` times as much as the frames asked for so far,
+            // delivered in whole callbacks.
+            let captured = ((tick + 1) as f64 * FRAME as f64 * rate) as usize;
+            while pushed + CALLBACK <= captured {
+                for _ in 0..CALLBACK {
+                    p.push(0.5).unwrap();
+                }
+                pushed += CALLBACK;
+            }
+            most = most.max(c.slots());
+            reader.take(&mut c, &mut out);
+            if tick >= MIX_PREFILL_FRAMES * 2 && out.contains(&0.0) {
+                gaps += 1;
+            }
+        }
+        (gaps, most)
+    }
+
+    #[test]
+    fn microphone_clock_drift_is_absorbed_without_dropouts_or_skips() {
+        // Real device pairs differ by tens to hundreds of ppm; ±300 ppm drains or overfills a
+        // 20 ms cushion in about a minute without compensation.
+        for ppm in [-300.0, 300.0] {
+            let (gaps, most) = run_with_clock_offset(ppm);
+            assert_eq!(gaps, 0, "{ppm} ppm: {gaps} frames had a dropout");
+            assert!(
+                most < FRAME * MIX_MAX_BACKLOG_FRAMES,
+                "{ppm} ppm: the backlog reached {most} samples, so audio was skipped"
+            );
+        }
+    }
+
     #[test]
     fn a_faster_capture_clock_cannot_drift_the_mix_behind() {
         let (mut p, mut c) = mix_ring();
-        let mut reader = MixReader::default();
+        let mut reader = MixReader::new(1);
         let mut out = vec![0.0f32; FRAME];
         // Three frames arrive for every one the encode thread takes.
         for _ in 0..20 {
