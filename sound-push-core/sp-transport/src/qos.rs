@@ -5,7 +5,8 @@
 //! - **Linux, Android, macOS:** `IP_TOS` and `IPV6_TCLASS` on the socket. TCP connections carry
 //!   the mark. QUIC packets currently do not: quinn-udp 0.5 attaches a per-packet TOS/TCLASS
 //!   control message holding only the ECN bits, and the kernel uses that instead of the socket
-//!   option. The socket option is still set, so the mark applies once quinn-udp can carry a DSCP.
+//!   option. The socket option is still set, so the mark applies once quinn-udp can carry a DSCP;
+//!   `quic_packets_still_overwrite_the_dscp_mark` below fails as soon as that version changes.
 //! - **Windows:** socket TOS options are ignored unless a Group Policy allows them, so every QUIC
 //!   peer gets a qWAVE flow instead (traffic type Voice, then outgoing DSCP 46 where the process may
 //!   set it; without administrator rights qWAVE keeps the Voice default marking). A flow is bound
@@ -201,6 +202,39 @@ mod qwave {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The version of quinn-udp whose send path was read for the limitation documented above.
+    const CHECKED_QUINN_UDP: &str = "0.5.15";
+
+    /// A tripwire for the day QUIC packets can carry a DSCP.
+    ///
+    /// quinn-udp 0.5 attaches a per-packet `IP_TOS`/`IPV6_TCLASS` control message holding only the
+    /// ECN bits (`quinn-udp/src/unix.rs`, `prepare_msg`: `encoder.push(IPPROTO_IP, IP_TOS, ecn)`).
+    /// The kernel uses that instead of the socket option, so the EF mark [`mark_socket`] sets
+    /// never reaches the wire for QUIC. Windows needs qWAVE for a different reason: socket TOS
+    /// options are ignored there unless a Group Policy allows them.
+    ///
+    /// When the dependency moves past the version checked here, this test fails on purpose.
+    /// Re-read quinn-udp's send path
+    /// (<https://github.com/quinn-rs/quinn/blob/main/quinn-udp/src/unix.rs>): if a transmit can
+    /// carry a whole TOS byte, hand it `DSCP_EF << 2` from the endpoint and drop the qWAVE flow
+    /// wherever that covers it. Otherwise raise the constant here and the version named in
+    /// `docs/protocol/wire.md`.
+    #[test]
+    fn quic_packets_still_overwrite_the_dscp_mark() {
+        // The workspace lock file is the one place the real version is decided.
+        let lock = include_str!("../../../Cargo.lock");
+        let version = lock
+            .split("name = \"quinn-udp\"")
+            .nth(1)
+            .and_then(|rest| rest.split_once("version = \""))
+            .and_then(|(_, rest)| rest.split('"').next())
+            .expect("quinn-udp is in the workspace lock file");
+        assert_eq!(
+            version, CHECKED_QUINN_UDP,
+            "quinn-udp changed: check whether it can carry a DSCP now (see this test's comment)"
+        );
+    }
 
     #[test]
     fn marking_is_best_effort_and_never_fails() {
