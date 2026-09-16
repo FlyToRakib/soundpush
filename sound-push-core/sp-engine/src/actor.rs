@@ -744,10 +744,13 @@ impl Actor {
             Some(sp_audio_io::RenderTarget::Output(name)) => Some(name.clone()),
             _ => None,
         };
+        let system_audio = self.backend.supports_loopback();
         LocalCapabilities {
-            system_audio: self.backend.supports_loopback(),
+            system_audio,
             app_audio: self.hooks.app_audio_source().is_some(),
             microphone: true,
+            // Both halves have to exist for the mixed source (plan §5.1).
+            mixed: system_audio,
             speaker: true,
             virtual_mic: virtual_mic.is_some(),
             virtual_mic_input: virtual_mic_device
@@ -780,6 +783,9 @@ impl Actor {
         if caps.microphone {
             bits = bits.with(Capabilities::SOURCE_MICROPHONE);
         }
+        if caps.mixed {
+            bits = bits.with(Capabilities::SOURCE_MIXED);
+        }
         if caps.speaker {
             bits = bits.with(Capabilities::SINK_SPEAKER);
         }
@@ -808,6 +814,13 @@ impl Actor {
                 "apps",
                 "App audio",
                 EndpointKind::SourceAppAudio,
+            ));
+        }
+        if caps.mixed {
+            endpoints.push(endpoint_info(
+                "mixed",
+                "System audio + microphone",
+                EndpointKind::SourceMixed,
             ));
         }
         if caps.virtual_mic {
@@ -2522,6 +2535,10 @@ impl Actor {
                 Err(EngineError::LoopbackUnsupported)
             }
             RouteKind::SendAppAudio if !caps.app_audio => Err(EngineError::LoopbackUnsupported),
+            RouteKind::SendMixed if !caps.mixed => Err(EngineError::LoopbackUnsupported),
+            RouteKind::SendMixed if !self.hooks.microphone_permitted() => {
+                Err(EngineError::MicPermissionDenied)
+            }
             RouteKind::ReceiveMicToVirtualMic if !caps.virtual_mic => {
                 Err(EngineError::VirtualMicMissing)
             }
@@ -3200,9 +3217,10 @@ impl Actor {
                 continue;
             }
             match r.kind {
-                RouteKind::SendMicToSpeaker | RouteKind::SendMicToVirtualMic => {
-                    ka.microphone = true
-                }
+                // A mixed stream records the microphone too.
+                RouteKind::SendMicToSpeaker
+                | RouteKind::SendMicToVirtualMic
+                | RouteKind::SendMixed => ka.microphone = true,
                 RouteKind::SendAppAudio => ka.app_audio_capture = true,
                 RouteKind::SendSystemAudio => {}
                 _ => ka.playback = true,
@@ -3498,6 +3516,7 @@ impl Actor {
             can_send_system_audio: caps.has(Capabilities::SOURCE_SYSTEM_AUDIO),
             can_send_app_audio: caps.has(Capabilities::SOURCE_APP_AUDIO),
             can_send_mic: caps.has(Capabilities::SOURCE_MICROPHONE),
+            can_send_mixed: caps.has(Capabilities::SOURCE_MIXED),
             can_play: caps.has(Capabilities::SINK_SPEAKER),
             has_virtual_mic: caps.has(Capabilities::SINK_VIRTUAL_MIC),
             transport: match session.map(|s| s.conn.transport()) {

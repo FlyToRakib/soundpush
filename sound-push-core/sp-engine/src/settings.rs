@@ -222,6 +222,31 @@ impl Default for MicSettings {
     }
 }
 
+/// The mixed source (plan §5.1): system audio and the microphone in one stream, each part with
+/// its own gain, so a commentary feed can sit above or below the game.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MixedSettings {
+    /// Gain applied to the system-audio part, in dB (−30 … +10).
+    pub system_gain_db: f32,
+    /// Gain applied to the microphone part, in dB (−30 … +10). The microphone's own gain, noise
+    /// suppression and high-pass filter from [`MicSettings`] apply before this.
+    pub mic_gain_db: f32,
+}
+
+impl Default for MixedSettings {
+    fn default() -> Self {
+        // Both parts at their captured level: the user balances from there.
+        Self {
+            system_gain_db: 0.0,
+            mic_gain_db: 0.0,
+        }
+    }
+}
+
+/// Range of both mixed-source gains, in dB.
+pub const MIX_GAIN_RANGE_DB: (f32, f32) = (-30.0, 10.0);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CaptureSettings {
@@ -374,6 +399,7 @@ pub struct Settings {
     pub output: OutputSettings,
     pub mic: MicSettings,
     pub capture: CaptureSettings,
+    pub mixed: MixedSettings,
     pub desktop: DesktopSettings,
     pub mobile: MobileSettings,
     pub auto_connect_trusted: bool,
@@ -426,6 +452,7 @@ impl Default for Settings {
             output: OutputSettings::default(),
             mic: MicSettings::default(),
             capture: CaptureSettings::default(),
+            mixed: MixedSettings::default(),
             desktop: DesktopSettings::default(),
             mobile: MobileSettings::default(),
             auto_connect_trusted: true,
@@ -452,6 +479,9 @@ impl Settings {
         self.output.balance = self.output.balance.clamp(-1.0, 1.0);
         self.output.av_offset_ms = self.output.av_offset_ms.clamp(-500, 500);
         self.mic.gain_db = self.mic.gain_db.clamp(0.0, 20.0);
+        let (min_mix, max_mix) = MIX_GAIN_RANGE_DB;
+        self.mixed.system_gain_db = self.mixed.system_gain_db.clamp(min_mix, max_mix);
+        self.mixed.mic_gain_db = self.mixed.mic_gain_db.clamp(min_mix, max_mix);
         self.stream.opus_bitrate = self.stream.opus_bitrate.clamp(6_000, 510_000);
         self.max_receivers = self.max_receivers.clamp(1, MAX_RECEIVERS_LIMIT);
         self.stream.custom_min_ms = self.stream.custom_min_ms.clamp(5, 500);

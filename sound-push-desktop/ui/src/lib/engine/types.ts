@@ -19,10 +19,13 @@ export type MicMode =
 export type RouteKind =
   | "sendSystemAudio"
   | "sendAppAudio"
+  /** This computer's system audio and microphone, mixed into one stream. */
+  | "sendMixed"
   | "sendMicToVirtualMic"
   | "sendMicToSpeaker"
   | "receiveSystemAudio"
   | "receiveAppAudio"
+  | "receiveMixed"
   | "receiveMicToVirtualMic"
   | "receiveMicToSpeaker";
 
@@ -102,6 +105,14 @@ export interface CaptureSettings {
   excludeApp: boolean;
 }
 
+/** The mixed source: system audio and the microphone in one stream, each part with its own gain. */
+export interface MixedSettings {
+  /** dB, −30 … +10. */
+  systemGainDb: number;
+  /** dB, −30 … +10; applied after the microphone's own gain and processing. */
+  micGainDb: number;
+}
+
 export interface DesktopSettings {
   launchAtLogin: boolean;
   startMinimized: boolean;
@@ -176,6 +187,7 @@ export interface Settings {
   output: OutputSettings;
   mic: MicSettings;
   capture: CaptureSettings;
+  mixed: MixedSettings;
   desktop: DesktopSettings;
   mobile: { stayAvailable: boolean; remindAfterRestart: boolean };
   autoConnectTrusted: boolean;
@@ -230,6 +242,8 @@ export interface PeerView {
   canSendSystemAudio: boolean;
   canSendAppAudio: boolean;
   canSendMic: boolean;
+  /** Can send its system audio and microphone mixed into one stream. */
+  canSendMixed: boolean;
   canPlay: boolean;
   hasVirtualMic: boolean;
   /** "quic" or "tcp" (USB) while connected, "" otherwise. */
@@ -355,6 +369,8 @@ export interface EngineState {
     systemAudio: boolean;
     appAudio: boolean;
     microphone: boolean;
+    /** System audio and the microphone in one stream. */
+    mixed: boolean;
     speaker: boolean;
     virtualMic: boolean;
     /** Device the phone microphone is fed into. */

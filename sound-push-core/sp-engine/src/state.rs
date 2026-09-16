@@ -78,6 +78,8 @@ pub struct LocalCapabilities {
     pub system_audio: bool,
     pub app_audio: bool,
     pub microphone: bool,
+    /// System audio and the microphone in one stream (plan §5.1): both parts must be available.
+    pub mixed: bool,
     pub speaker: bool,
     pub virtual_mic: bool,
     /// Playback device the phone microphone is fed into (e.g. "CABLE Input (VB-Audio Virtual Cable)").
@@ -151,6 +153,8 @@ pub struct PeerView {
     pub can_send_system_audio: bool,
     pub can_send_app_audio: bool,
     pub can_send_mic: bool,
+    /// Can send its system audio and microphone mixed into one stream.
+    pub can_send_mixed: bool,
     pub can_play: bool,
     pub has_virtual_mic: bool,
     /// "quic" or "tcp" (USB via adb) while connected, empty otherwise.
@@ -170,6 +174,8 @@ pub enum RouteKind {
     SendSystemAudio,
     /// This device's app audio (Android playback capture) plays on the peer.
     SendAppAudio,
+    /// This device's system audio and microphone, mixed, play on the peer (plan §5.1).
+    SendMixed,
     /// This device's microphone becomes the peer's virtual mic.
     SendMicToVirtualMic,
     /// This device's microphone plays on the peer's speakers.
@@ -178,6 +184,8 @@ pub enum RouteKind {
     ReceiveSystemAudio,
     /// The peer's app audio plays here.
     ReceiveAppAudio,
+    /// The peer's system audio and microphone, mixed, play here.
+    ReceiveMixed,
     /// The peer's microphone becomes this device's virtual mic.
     ReceiveMicToVirtualMic,
     /// The peer's microphone plays on this device's speakers.
@@ -190,6 +198,7 @@ impl RouteKind {
             self,
             Self::SendSystemAudio
                 | Self::SendAppAudio
+                | Self::SendMixed
                 | Self::SendMicToVirtualMic
                 | Self::SendMicToSpeaker
         )
@@ -200,6 +209,7 @@ impl RouteKind {
         match self {
             Self::SendSystemAudio | Self::ReceiveSystemAudio => ("system", "speaker"),
             Self::SendAppAudio | Self::ReceiveAppAudio => ("apps", "speaker"),
+            Self::SendMixed | Self::ReceiveMixed => ("mixed", "speaker"),
             Self::SendMicToVirtualMic | Self::ReceiveMicToVirtualMic => ("mic", "virtual-mic"),
             Self::SendMicToSpeaker | Self::ReceiveMicToSpeaker => ("mic", "speaker"),
         }
@@ -210,10 +220,12 @@ impl RouteKind {
         match self {
             Self::SendSystemAudio => Self::ReceiveSystemAudio,
             Self::SendAppAudio => Self::ReceiveAppAudio,
+            Self::SendMixed => Self::ReceiveMixed,
             Self::SendMicToVirtualMic => Self::ReceiveMicToVirtualMic,
             Self::SendMicToSpeaker => Self::ReceiveMicToSpeaker,
             Self::ReceiveSystemAudio => Self::SendSystemAudio,
             Self::ReceiveAppAudio => Self::SendAppAudio,
+            Self::ReceiveMixed => Self::SendMixed,
             Self::ReceiveMicToVirtualMic => Self::SendMicToVirtualMic,
             Self::ReceiveMicToSpeaker => Self::SendMicToSpeaker,
         }
@@ -223,6 +235,7 @@ impl RouteKind {
         let send = match (source, sink) {
             ("system", "speaker") => Self::SendSystemAudio,
             ("apps", "speaker") => Self::SendAppAudio,
+            ("mixed", "speaker") => Self::SendMixed,
             ("mic", "virtual-mic") => Self::SendMicToVirtualMic,
             ("mic", "speaker") => Self::SendMicToSpeaker,
             _ => return None,
@@ -354,6 +367,7 @@ mod tests {
         for kind in [
             RouteKind::SendSystemAudio,
             RouteKind::SendAppAudio,
+            RouteKind::SendMixed,
             RouteKind::SendMicToVirtualMic,
             RouteKind::SendMicToSpeaker,
         ] {

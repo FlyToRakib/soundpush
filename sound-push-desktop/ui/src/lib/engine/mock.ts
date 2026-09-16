@@ -37,6 +37,7 @@ const settings: Settings = {
     highPass: true,
   },
   capture: { systemDevice: null, muteLocalSpeakers: false, app: null, excludeApp: false },
+  mixed: { systemGainDb: 0, micGainDb: 0 },
   desktop: {
     launchAtLogin: true,
     startMinimized: true,
@@ -93,6 +94,7 @@ let state: EngineState = {
       canSendSystemAudio: false,
       canSendAppAudio: true,
       canSendMic: true,
+      canSendMixed: false,
       canPlay: true,
       hasVirtualMic: false,
       transport: "quic",
@@ -109,6 +111,7 @@ let state: EngineState = {
     systemAudio: true,
     appAudio: false,
     microphone: true,
+    mixed: true,
     speaker: true,
     virtualMic: false,
     virtualMicDevice: null,

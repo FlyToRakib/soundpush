@@ -46,6 +46,8 @@ data class Capabilities(
     val systemAudio: Boolean = false,
     val appAudio: Boolean = false,
     val microphone: Boolean = true,
+    /** System audio and the microphone in one stream (plan §5.1); needs system-audio capture. */
+    val mixed: Boolean = false,
     val speaker: Boolean = true,
     val virtualMic: Boolean = false,
 )
@@ -91,6 +93,8 @@ data class PeerView(
     val canSendSystemAudio: Boolean = false,
     val canSendAppAudio: Boolean = false,
     val canSendMic: Boolean = false,
+    /** Can send its system audio and microphone mixed into one stream. */
+    val canSendMixed: Boolean = false,
     val canPlay: Boolean = false,
     val hasVirtualMic: Boolean = false,
     /** "quic" or "tcp" (USB) while connected. */
@@ -272,6 +276,13 @@ data class MicSettings(
 @Serializable
 data class CaptureSettings(val systemDevice: String? = null, val muteLocalSpeakers: Boolean = false)
 
+/**
+ * The mixed source (plan §5.1). A phone cannot capture system audio, so these only apply to a
+ * computer; they are kept here so settings written from this app do not reset them.
+ */
+@Serializable
+data class MixedSettings(val systemGainDb: Float = 0f, val micGainDb: Float = 0f)
+
 @Serializable
 data class DesktopSettings(
     val launchAtLogin: Boolean = true,
@@ -300,6 +311,7 @@ data class Settings(
     val output: OutputSettings = OutputSettings(),
     val mic: MicSettings = MicSettings(),
     val capture: CaptureSettings = CaptureSettings(),
+    val mixed: MixedSettings = MixedSettings(),
     val desktop: DesktopSettings = DesktopSettings(),
     val mobile: MobileSettings = MobileSettings(),
     val autoConnectTrusted: Boolean = true,

@@ -363,6 +363,74 @@ fn qr_pairing_route_and_audio() {
 }
 
 #[test]
+fn a_mixed_route_carries_system_audio_and_the_microphone_in_one_stream() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let captures = Arc::new(AtomicUsize::new(0));
+    let desk = start(
+        &desk_dir,
+        "Desk",
+        Arc::new(Counting {
+            inner: NullBackend {
+                recorded: None,
+                capture_frequency: 440.0,
+            },
+            captures: captures.clone(),
+        }),
+    );
+    let (phone_backend, recorded) = recorder();
+    let phone = start(&phone_dir, "Phone", phone_backend);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (desk_id, _) = pair(&rt, &desk, &phone);
+
+    // The mixed source is offered only where the peer advertises the capability bit.
+    wait_for(&phone, "the desk offers a mixed source", |s| {
+        s.peers
+            .iter()
+            .any(|p| p.device_id == desk_id && p.can_send_mixed)
+    });
+
+    let route_id = rt
+        .block_on(phone.start_route(desk_id.clone(), RouteKind::ReceiveMixed))
+        .unwrap();
+    wait_for(&desk, "the desk mixes", |s| {
+        s.routes
+            .iter()
+            .any(|r| r.kind == RouteKind::SendMixed && r.status == RouteStatus::Active)
+    });
+    wait_for_audio(&recorded, "phone should play the mixed stream");
+    assert_eq!(
+        captures.load(Ordering::Relaxed),
+        2,
+        "a mixed source opens the system audio and the microphone"
+    );
+
+    // Gains are live: silencing both halves leaves silence, and the route keeps running.
+    let mut settings = desk.state().settings.clone();
+    settings.mixed.system_gain_db = -30.0;
+    settings.mixed.mic_gain_db = -30.0;
+    let saved = rt.block_on(desk.update_settings(settings)).unwrap();
+    assert_eq!(saved.mixed.system_gain_db, -30.0);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while peak_of_last_second(&recorded) > 0.05 {
+        assert!(Instant::now() < deadline, "the mixed gains did not apply");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        desk.state()
+            .routes
+            .iter()
+            .any(|r| r.kind == RouteKind::SendMixed && r.status == RouteStatus::Active),
+        "turning both halves down does not stop the route"
+    );
+
+    phone.stop_route(route_id).unwrap();
+    wait_for(&desk, "the mixed route stopped", |s| {
+        !s.routes.iter().any(|r| r.kind == RouteKind::SendMixed)
+    });
+}
+
+#[test]
 fn a_source_feeds_at_most_its_configured_number_of_receivers() {
     let desk_dir = tempfile::tempdir().unwrap();
     let a_dir = tempfile::tempdir().unwrap();

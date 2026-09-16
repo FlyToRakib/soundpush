@@ -20,6 +20,12 @@ pub(crate) enum SourceKey {
     },
     Apps,
     Mic(Option<String>),
+    /// System audio and the microphone summed into one stream (plan §5.1). Routes share it like
+    /// any other group, so several listeners still cost one capture pair and one encode.
+    Mixed {
+        system: Box<SourceKey>,
+        mic: Box<SourceKey>,
+    },
 }
 
 /// Routes with equal keys share one capture and encoder.
@@ -32,18 +38,37 @@ pub(crate) struct EncoderKey {
     frame_us: u32,
 }
 
-impl EncoderKey {
-    fn new(source: &CaptureSource, is_mic: bool, apps: bool, profile: &StreamProfile) -> Self {
-        let source = match source {
-            _ if apps => SourceKey::Apps,
-            CaptureSource::SystemLoopback(device) => SourceKey::System(device.clone()),
-            CaptureSource::Application { process, exclude } => SourceKey::Application {
+impl SourceKey {
+    fn of(source: &CaptureSource, is_mic: bool, apps: bool) -> Self {
+        match source {
+            _ if apps => Self::Apps,
+            CaptureSource::SystemLoopback(device) => Self::System(device.clone()),
+            CaptureSource::Application { process, exclude } => Self::Application {
                 process: process.clone(),
                 exclude: *exclude,
             },
-            CaptureSource::Input(device) if is_mic => SourceKey::Mic(Some(device.clone())),
-            CaptureSource::Input(device) => SourceKey::System(Some(device.clone())),
-            CaptureSource::DefaultInput => SourceKey::Mic(None),
+            CaptureSource::Input(device) if is_mic => Self::Mic(Some(device.clone())),
+            CaptureSource::Input(device) => Self::System(Some(device.clone())),
+            CaptureSource::DefaultInput => Self::Mic(None),
+        }
+    }
+}
+
+impl EncoderKey {
+    fn new(
+        source: &CaptureSource,
+        mix: Option<&CaptureSource>,
+        is_mic: bool,
+        apps: bool,
+        profile: &StreamProfile,
+    ) -> Self {
+        let first = SourceKey::of(source, is_mic, apps);
+        let source = match mix {
+            Some(mic) => SourceKey::Mixed {
+                system: Box::new(first),
+                mic: Box::new(SourceKey::of(mic, true, false)),
+            },
+            None => first,
         };
         Self {
             source,
@@ -56,6 +81,11 @@ impl EncoderKey {
 
     fn is_mic(&self) -> bool {
         matches!(self.source, SourceKey::Mic(_))
+    }
+
+    /// Mixed groups carry a microphone too, so the microphone settings reach them.
+    fn has_mic(&self) -> bool {
+        matches!(self.source, SourceKey::Mic(_) | SourceKey::Mixed { .. })
     }
 }
 
@@ -179,15 +209,18 @@ impl Actor {
     ) -> Result<bool, EngineError> {
         let apps = route.kind.endpoints().0 == "apps";
         let source = match route.kind.endpoints().0 {
-            "system" => self.system_audio_source(),
+            // Mixed starts from the system audio; the microphone is summed into it (plan §5.1).
+            "system" | "mixed" => self.system_audio_source(),
             "apps" => self
                 .hooks
                 .app_audio_source()
                 .ok_or(EngineError::LoopbackUnsupported)?,
             _ => self.mic_source(),
         };
+        let mixed = route.kind == RouteKind::SendMixed;
+        let mix = mixed.then(|| self.mic_source());
         let is_mic = route.kind.is_mic();
-        let key = EncoderKey::new(&source, is_mic, apps, &profile);
+        let key = EncoderKey::new(&source, mix.as_ref(), is_mic, apps, &profile);
 
         // Per-route controls; the group has its own for gain, noise suppression and mic mute.
         let controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
@@ -224,13 +257,16 @@ impl Actor {
             }
             None => {
                 let start_id = self.next_start_id();
+                // A mixed group's microphone half takes the microphone settings too; only its
+                // mute is separate, so muting the microphone leaves the system audio playing.
+                let has_mic = is_mic || mixed;
                 let group = Arc::new(SenderControls::new(
-                    if is_mic {
+                    if has_mic {
                         self.settings.mic.gain_db
                     } else {
                         0.0
                     },
-                    is_mic && self.settings.mic.noise_suppression,
+                    has_mic && self.settings.mic.noise_suppression,
                     profile.bitrate,
                 ));
                 group
@@ -238,7 +274,12 @@ impl Actor {
                     .store(is_mic && self.mic_muted, Ordering::Relaxed);
                 group
                     .high_pass
-                    .store(is_mic && self.settings.mic.high_pass, Ordering::Relaxed);
+                    .store(has_mic && self.settings.mic.high_pass, Ordering::Relaxed);
+                group
+                    .mix_muted
+                    .store(mixed && self.mic_muted, Ordering::Relaxed);
+                group.system_gain_db.set(self.settings.mixed.system_gain_db);
+                group.mix_gain_db.set(self.settings.mixed.mic_gain_db);
                 let failed_tx = self.internal_tx.clone();
                 let failed_key = key.clone();
                 let on_error = Box::new(move |e: sp_audio_io::AudioError| {
@@ -268,6 +309,7 @@ impl Actor {
                             profile,
                             application,
                             source,
+                            mix,
                         },
                         group,
                         on_error,
@@ -561,23 +603,43 @@ impl Actor {
         }
     }
 
-    /// Push microphone settings to running microphone groups.
+    /// Push microphone and mixed-source settings to the running groups that carry a microphone.
     pub(super) fn update_mic_groups(&self) {
         for (key, slot) in &self.encoders {
-            if let (true, EncoderSlot::Running(sender)) = (key.is_mic(), slot) {
-                sender.controls.gain_db.set(self.settings.mic.gain_db);
-                sender
-                    .controls
-                    .noise_suppression
-                    .store(self.settings.mic.noise_suppression, Ordering::Relaxed);
-                sender
-                    .controls
-                    .high_pass
-                    .store(self.settings.mic.high_pass, Ordering::Relaxed);
+            let EncoderSlot::Running(sender) = slot else {
+                continue;
+            };
+            if !key.has_mic() {
+                continue;
+            }
+            sender.controls.gain_db.set(self.settings.mic.gain_db);
+            sender
+                .controls
+                .noise_suppression
+                .store(self.settings.mic.noise_suppression, Ordering::Relaxed);
+            sender
+                .controls
+                .high_pass
+                .store(self.settings.mic.high_pass, Ordering::Relaxed);
+            if key.is_mic() {
                 sender
                     .controls
                     .muted
                     .store(self.mic_muted, Ordering::Relaxed);
+            } else {
+                // Mixed: the microphone mute silences only the microphone half (plan §5.1).
+                sender
+                    .controls
+                    .mix_muted
+                    .store(self.mic_muted, Ordering::Relaxed);
+                sender
+                    .controls
+                    .system_gain_db
+                    .set(self.settings.mixed.system_gain_db);
+                sender
+                    .controls
+                    .mix_gain_db
+                    .set(self.settings.mixed.mic_gain_db);
             }
         }
     }

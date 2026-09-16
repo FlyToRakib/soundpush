@@ -25,8 +25,16 @@ pub struct SenderControls {
     pub muted: AtomicBool,
     pub gain_db: AtomicF32,
     pub noise_suppression: AtomicBool,
-    /// 80 Hz high-pass ahead of noise suppression (microphone groups).
+    /// 80 Hz high-pass ahead of noise suppression (microphone groups, and the microphone part of
+    /// a mixed group).
     pub high_pass: AtomicBool,
+    /// Mixed source only (plan §5.1): gain of the system-audio part, in dB.
+    pub system_gain_db: AtomicF32,
+    /// Mixed source only: gain of the microphone part, in dB, applied after [`Self::gain_db`].
+    pub mix_gain_db: AtomicF32,
+    /// Mixed source only: silence the microphone part (the microphone mute) while the system
+    /// audio keeps playing.
+    pub mix_muted: AtomicBool,
     /// Requested Opus bitrate (bits/s); applied by the encoder thread when it changes.
     pub bitrate: AtomicU32,
     pub expected_loss_pct: AtomicU32,
@@ -48,6 +56,9 @@ impl SenderControls {
             gain_db: AtomicF32::new(gain_db),
             noise_suppression: AtomicBool::new(noise_suppression),
             high_pass: AtomicBool::new(false),
+            system_gain_db: AtomicF32::new(0.0),
+            mix_gain_db: AtomicF32::new(0.0),
+            mix_muted: AtomicBool::new(false),
             bitrate: AtomicU32::new(bitrate),
             expected_loss_pct: AtomicU32::new(0),
             redundancy: AtomicBool::new(false),

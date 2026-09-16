@@ -22,6 +22,8 @@
     <string name="task_headset_desc">Listen and talk through this phone</string>
     <string name="task_send_apps">Send phone audio</string>
     <string name="task_send_apps_desc">Play this phone\'s apps on another device</string>
+    <string name="task_listen_mixed">Listen with commentary</string>
+    <string name="task_listen_mixed_desc">The computer\'s sound and its microphone in one stream</string>
     <string name="task_unavailable_apps">Needs Android 10 or newer</string>
     <string name="home_task_active">Streaming to %1$s</string>
     <string name="home_task_active_badge">Active</string>
@@ -42,6 +44,8 @@
     <string name="route_sendMicToSpeaker">Microphone → %1$s speakers</string>
     <string name="route_sendAppAudio">Phone audio → %1$s</string>
     <string name="route_sendSystemAudio">Audio → %1$s</string>
+    <string name="route_sendMixed">Audio + microphone → %1$s</string>
+    <string name="route_receiveMixed">%1$s audio + microphone</string>
     <string name="route_receiveMicToVirtualMic">%1$s microphone</string>
     <string name="route_receiveMicToSpeaker">%1$s microphone</string>
 

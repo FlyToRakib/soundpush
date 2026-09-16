@@ -47,6 +47,8 @@ object Labels {
         "sendMicToSpeaker" -> R.string.route_sendMicToSpeaker
         "sendAppAudio" -> R.string.route_sendAppAudio
         "sendSystemAudio" -> R.string.route_sendSystemAudio
+        "sendMixed" -> R.string.route_sendMixed
+        "receiveMixed" -> R.string.route_receiveMixed
         "receiveMicToVirtualMic" -> R.string.route_receiveMicToVirtualMic
         else -> R.string.route_receiveMicToSpeaker
     }

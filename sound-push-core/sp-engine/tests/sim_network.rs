@@ -207,6 +207,7 @@ impl Scenario {
                 profile: profile.clone(),
                 application: OpusApplication::LowDelay,
                 source: CaptureSource::SystemLoopback(None),
+                mix: None,
             },
             Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
             Box::new(|_| {}),

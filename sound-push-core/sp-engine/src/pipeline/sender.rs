@@ -52,6 +52,9 @@ pub struct SenderConfig {
     pub profile: StreamProfile,
     pub application: OpusApplication,
     pub source: CaptureSource,
+    /// Mixed source (plan §5.1): a second capture summed into the first, each part with its own
+    /// gain. `None` for every single-source stream, which then takes the path it always did.
+    pub mix: Option<CaptureSource>,
 }
 
 /// One route receiving a group's packets.
@@ -101,11 +104,13 @@ impl Drop for Subscription {
 
 pub struct Sender {
     _capture: Box<dyn AudioStream>,
+    /// Second capture of a mixed source (plan §5.1); `None` for every other stream.
+    _mix_capture: Option<Box<dyn AudioStream>>,
     running: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     fanout: Arc<Fanout>,
     /// Group-wide controls: `gain_db`, `noise_suppression`, `muted` (microphone mute),
-    /// `level_db`, `clipping`, `capture_overruns`.
+    /// `level_db`, `clipping`, `capture_overruns`, and for a mixed source the two part gains.
     pub controls: Arc<SenderControls>,
 }
 
@@ -124,23 +129,30 @@ impl Sender {
             .map_err(|e| EngineError::Internal(e.to_string()))?;
 
         // One second of capture headroom.
-        let (mut producer, mut consumer) = rtrb::RingBuffer::<f32>::new(48_000 * channels);
-        let overruns = controls.clone();
+        let (producer, mut consumer) = rtrb::RingBuffer::<f32>::new(48_000 * channels);
         let capture = backend.open_capture(
             &config.source,
             channels as u16,
-            Box::new(move |samples: &[f32]| {
-                let n = samples.len().min(producer.slots());
-                if n < samples.len() {
-                    overruns.capture_overruns.fetch_add(1, Ordering::Relaxed);
-                }
-                if let Ok(chunk) = producer.write_chunk_uninit(n) {
-                    // Safe, allocation-free copy that commits exactly what it wrote.
-                    chunk.fill_from_iter(samples.iter().copied());
-                }
-            }),
+            fill_ring(producer, controls.clone()),
             on_error,
         )?;
+
+        // The mixed source's second capture runs on its own clock, so it gets its own ring and
+        // the encode thread takes what is there when it needs a frame. Its failures are reported
+        // like the first capture's: the group closes and the routes stop or reopen.
+        let (mix_capture, mix_consumer) = match &config.mix {
+            Some(source) => {
+                let (producer, consumer) = rtrb::RingBuffer::<f32>::new(48_000 * channels);
+                let stream = backend.open_capture(
+                    source,
+                    channels as u16,
+                    fill_ring(producer, controls.clone()),
+                    Box::new(|_| {}),
+                )?;
+                (Some(stream), Some(consumer))
+            }
+            None => (None, None),
+        };
 
         let running = Arc::new(AtomicBool::new(true));
         let fanout = Arc::new(Fanout::default());
@@ -149,6 +161,7 @@ impl Sender {
             let controls = controls.clone();
             let fanout = fanout.clone();
             let codec = encoder.codec();
+            let mut mix_consumer = mix_consumer;
             std::thread::Builder::new()
                 .name("sp-encode".into())
                 .spawn(move || {
@@ -157,6 +170,7 @@ impl Sender {
                         &controls,
                         &fanout,
                         &mut consumer,
+                        mix_consumer.as_mut(),
                         encoder.as_mut(),
                         codec,
                         channels,
@@ -168,6 +182,7 @@ impl Sender {
 
         Ok(Self {
             _capture: capture,
+            _mix_capture: mix_capture,
             running,
             thread: Some(thread),
             fanout,
@@ -200,6 +215,46 @@ impl Drop for Sender {
             let _ = t.join();
         }
     }
+}
+
+/// Take one frame from a mixed source's second capture, zero-padding what it has not produced
+/// yet and dropping any backlog beyond [`MIX_MAX_BACKLOG_FRAMES`], so that part cannot drift
+/// behind the first capture (the two run on their own clocks).
+fn take_frame(input: &mut rtrb::Consumer<f32>, out: &mut [f32]) {
+    let keep = out.len() * MIX_MAX_BACKLOG_FRAMES;
+    if input.slots() > keep {
+        let stale = input.slots() - keep;
+        if let Ok(chunk) = input.read_chunk(stale) {
+            chunk.commit_all();
+        }
+    }
+    let wanted = out.len().min(input.slots());
+    let mut taken = 0;
+    if let Ok(chunk) = input.read_chunk(wanted) {
+        let (a, b) = chunk.as_slices();
+        out[..a.len()].copy_from_slice(a);
+        out[a.len()..a.len() + b.len()].copy_from_slice(b);
+        chunk.commit_all();
+        taken = wanted;
+    }
+    out[taken..].fill(0.0);
+}
+
+/// A capture callback that writes into `producer`, counting what a full ring had to drop.
+fn fill_ring(
+    mut producer: rtrb::Producer<f32>,
+    controls: Arc<SenderControls>,
+) -> sp_audio_io::CaptureCallback {
+    Box::new(move |samples: &[f32]| {
+        let n = samples.len().min(producer.slots());
+        if n < samples.len() {
+            controls.capture_overruns.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Ok(chunk) = producer.write_chunk_uninit(n) {
+            // Safe, allocation-free copy that commits exactly what it wrote.
+            chunk.fill_from_iter(samples.iter().copied());
+        }
+    })
 }
 
 /// The encode thread's copy of a subscriber.
@@ -237,17 +292,25 @@ fn refresh_targets(fanout: &Fanout, targets: &mut Vec<Target>) {
     *targets = next;
 }
 
+/// A mixed source's second capture may not be exactly in step with the first. More than this
+/// much waiting audio is dropped, so the microphone part cannot drift behind the system audio.
+const MIX_MAX_BACKLOG_FRAMES: usize = 4;
+
 #[allow(clippy::too_many_arguments)]
 fn encode_loop(
     running: &AtomicBool,
     controls: &SenderControls,
     fanout: &Fanout,
     input: &mut rtrb::Consumer<f32>,
+    mut mix_input: Option<&mut rtrb::Consumer<f32>>,
     encoder: &mut dyn Encoder,
     codec: Codec,
     channels: usize,
     frame: usize,
 ) {
+    let mut mix_buf = vec![0.0f32; frame * channels];
+    let mut mix_gain = Gain::new(db_to_gain(controls.mix_gain_db.get()));
+    let mut system_gain = Gain::new(db_to_gain(controls.system_gain_db.get()));
     let mut buf = vec![0.0f32; frame * channels];
     let mut packet = Vec::with_capacity(1500);
     let mut previous: Vec<u8> = Vec::with_capacity(1500);
@@ -308,22 +371,53 @@ fn encode_loop(
         }
         gain.set(db_to_gain(controls.gain_db.get()));
 
-        // DSP (plan §15.7): high-pass → noise suppression → gain → limiter → meter.
-        if controls.high_pass.load(Ordering::Relaxed) {
-            high_pass
-                .get_or_insert_with(|| HighPass::new(80.0, channels))
-                .process(&mut buf);
+        // A mixed source (plan §5.1) takes one frame of microphone alongside the system audio.
+        let mixing = if let Some(mic) = mix_input.as_mut() {
+            take_frame(mic, &mut mix_buf);
+            true
         } else {
-            high_pass = None;
+            false
+        };
+
+        // DSP (plan §15.7): high-pass → noise suppression → gain → limiter → meter. In a mixed
+        // stream that chain belongs to the microphone part; the system audio arrives ready.
+        {
+            let dsp = if mixing { &mut mix_buf } else { &mut buf };
+            if controls.high_pass.load(Ordering::Relaxed) {
+                high_pass
+                    .get_or_insert_with(|| HighPass::new(80.0, channels))
+                    .process(dsp);
+            } else {
+                high_pass = None;
+            }
+            if controls.noise_suppression.load(Ordering::Relaxed)
+                && channels == 1
+                && frame % 480 == 0
+            {
+                denoiser
+                    .get_or_insert_with(NoiseSuppressor::new)
+                    .process(dsp);
+            } else {
+                denoiser = None;
+            }
+            gain.process(dsp);
         }
-        if controls.noise_suppression.load(Ordering::Relaxed) && channels == 1 && frame % 480 == 0 {
-            denoiser
-                .get_or_insert_with(NoiseSuppressor::new)
-                .process(&mut buf);
-        } else {
-            denoiser = None;
+        if mixing {
+            // Each part keeps its own gain, so the balance between them is the user's (plan §5.1).
+            // The microphone mute silences only its half; the system audio keeps playing.
+            if controls.mix_muted.load(Ordering::Relaxed) {
+                mix_buf.fill(0.0);
+            } else {
+                mix_gain.set(db_to_gain(controls.mix_gain_db.get()));
+                mix_gain.process(&mut mix_buf);
+            }
+            system_gain.set(db_to_gain(controls.system_gain_db.get()));
+            system_gain.process(&mut buf);
+            for (out, mic) in buf.iter_mut().zip(mix_buf.iter()) {
+                *out += *mic;
+            }
         }
-        gain.process(&mut buf);
+        // The limiter catches a sum that went over full scale.
         let clipped = limiter.process(&mut buf);
         meter.process(&buf);
         let level = meter.peak_db();
@@ -505,6 +599,153 @@ mod tests {
         }
     }
 
+    /// Two captures at different, constant levels, so a mixed stream can be checked sample by
+    /// sample: system audio at 0.4, the microphone at 0.2.
+    struct TwoSources;
+
+    struct Ticker {
+        running: Arc<AtomicBool>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl AudioStream for Ticker {
+        fn info(&self) -> sp_audio_io::StreamInfo {
+            sp_audio_io::StreamInfo {
+                device_sample_rate: 48_000,
+                device_channels: 2,
+                channels: 2,
+                latency_ms: 10,
+            }
+        }
+    }
+
+    impl Drop for Ticker {
+        fn drop(&mut self) {
+            self.running.store(false, Ordering::Relaxed);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    impl AudioBackend for TwoSources {
+        fn name(&self) -> &'static str {
+            "two-sources"
+        }
+        fn list_devices(&self) -> Result<Vec<sp_audio_io::DeviceInfo>, sp_audio_io::AudioError> {
+            Ok(Vec::new())
+        }
+        fn supports_loopback(&self) -> bool {
+            true
+        }
+        fn open_capture(
+            &self,
+            source: &CaptureSource,
+            channels: u16,
+            mut on_audio: sp_audio_io::CaptureCallback,
+            _on_error: ErrorCallback,
+        ) -> Result<Box<dyn AudioStream>, sp_audio_io::AudioError> {
+            let level = match source {
+                CaptureSource::SystemLoopback(_) => 0.4f32,
+                _ => 0.2,
+            };
+            let buf = vec![level; 480 * channels.clamp(1, 2) as usize];
+            let running = Arc::new(AtomicBool::new(true));
+            let flag = running.clone();
+            let thread = std::thread::spawn(move || {
+                while flag.load(Ordering::Relaxed) {
+                    on_audio(&buf);
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+            Ok(Box::new(Ticker {
+                running,
+                thread: Some(thread),
+            }))
+        }
+        fn open_render(
+            &self,
+            _target: &sp_audio_io::RenderTarget,
+            _channels: u16,
+            _on_audio: sp_audio_io::RenderCallback,
+            _on_error: ErrorCallback,
+        ) -> Result<Box<dyn AudioStream>, sp_audio_io::AudioError> {
+            Err(sp_audio_io::AudioError::DeviceNotFound("no output".into()))
+        }
+    }
+
+    /// Peak of the newest packet, decoded from lossless PCM.
+    fn last_level(c: &Collect) -> f32 {
+        let packet = packets(c).pop().expect("a packet was sent");
+        assert_eq!(packet.header.codec, Codec::PcmS16Le);
+        packet
+            .payload
+            .chunks_exact(2)
+            .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32_768.0)
+            .fold(0.0f32, |m, s| m.max(s.abs()))
+    }
+
+    #[test]
+    fn a_mixed_source_sums_both_parts_with_their_own_gains() {
+        let profile = build_profile(LatencyProfile::Balanced, Quality::Lossless, 2, false);
+        let group_controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
+        let group = Sender::start(
+            &TwoSources,
+            SenderConfig {
+                profile: profile.clone(),
+                application: OpusApplication::LowDelay,
+                source: CaptureSource::SystemLoopback(None),
+                mix: Some(CaptureSource::DefaultInput),
+            },
+            group_controls.clone(),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        let out = Arc::new(Collect::default());
+        let _sub = group.subscribe(Subscriber {
+            route: 1,
+            sink: out.clone(),
+            dtx: true,
+            controls: Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
+        });
+
+        // Both parts at unity: 0.4 of system audio plus 0.2 of microphone.
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(
+            (last_level(&out) - 0.6).abs() < 0.02,
+            "{}",
+            last_level(&out)
+        );
+
+        // −6 dB on the system half alone: about 0.2 + 0.2.
+        group_controls.system_gain_db.set(-6.0);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            (last_level(&out) - 0.4).abs() < 0.02,
+            "{}",
+            last_level(&out)
+        );
+
+        // The microphone mute silences its half; the system audio keeps playing.
+        group_controls.mix_muted.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            (last_level(&out) - 0.2).abs() < 0.02,
+            "{}",
+            last_level(&out)
+        );
+
+        group_controls.mix_muted.store(false, Ordering::Relaxed);
+        group_controls.system_gain_db.set(0.0);
+        group_controls.mix_gain_db.set(-20.0);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            (last_level(&out) - 0.42).abs() < 0.02,
+            "{}",
+            last_level(&out)
+        );
+    }
+
     fn packets(c: &Collect) -> Vec<MediaPacket> {
         c.0.lock()
             .unwrap()
@@ -529,6 +770,7 @@ mod tests {
                 profile: profile.clone(),
                 application: OpusApplication::LowDelay,
                 source: CaptureSource::SystemLoopback(None),
+                mix: None,
             },
             Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
             Box::new(|_| {}),
@@ -609,6 +851,7 @@ mod tests {
                 profile: profile.clone(),
                 application: OpusApplication::Voip,
                 source: CaptureSource::DefaultInput,
+                mix: None,
             },
             controls(),
             Box::new(|_| {}),

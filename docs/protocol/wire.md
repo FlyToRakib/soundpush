@@ -68,7 +68,13 @@ Routes:
 | `StatsReport` | receiver → sender, 1 Hz | Loss, jitter, buffer, drift; drives adaptive bitrate. |
 | `Goodbye{reason}` | either | Orderly close. Reason 13 `RateLimited`: too many pairing attempts from this address (5/min, `docs/security/pairing.md`); peers that do not know it treat it as an ordinary close. |
 
-Endpoint ids: sources `system`, `apps`, `mic`; sinks `speaker`, `virtual-mic`.
+Endpoint ids: sources `system`, `apps`, `mic`, `mixed`; sinks `speaker`, `virtual-mic`.
+
+`mixed` (plan §5.1) is one stream carrying the sender's system audio and its microphone, summed
+with a gain per part. It is offered only to peers advertising `SOURCE_MIXED`, and a peer that does
+not know the endpoint answers `RouteReject(UnsupportedEndpoint)`, so 1.0 builds are unaffected. On
+the wire it is an ordinary stream: the mixing happens before the encoder, and a receiver needs no
+knowledge of it.
 
 `RouteUpdate` semantics: the route's requester proposes codec, bitrate, channels, frame size and redundancy; the
 receiving side always keeps its own jitter bounds. Bitrate and redundancy apply live. A codec, channel or frame change
@@ -96,6 +102,7 @@ interruption without asking the user again (see `docs/security/pairing.md`).
 | Bit | Name |
 |---|---|
 | 0, 1, 2 | `SOURCE_SYSTEM_AUDIO`, `SOURCE_APP_AUDIO`, `SOURCE_MICROPHONE` |
+| 3 | `SOURCE_MIXED` (the `mixed` endpoint: system audio + microphone in one stream) |
 | 8, 9 | `SINK_SPEAKER`, `SINK_VIRTUAL_MIC` |
 | 16, 17 | `CODEC_OPUS`, `CODEC_PCM` |
 | 24, 25, 26 | `FEATURE_REDUNDANCY`, `FEATURE_REMOTE_CONTROL`, `FEATURE_MIC_MONITOR` |

@@ -339,6 +339,7 @@ mod tests {
                 profile: profile.clone(),
                 application: OpusApplication::LowDelay,
                 source: CaptureSource::DefaultInput,
+                mix: None,
             },
             Arc::new(SenderControls::new(0.0, false, profile.bitrate)),
             Box::new(|_| {}),

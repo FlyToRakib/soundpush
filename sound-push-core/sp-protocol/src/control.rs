@@ -181,6 +181,9 @@ pub enum EndpointKind {
     SourceSystemAudio = 1,
     SourceAppAudio = 2,
     SourceMicrophone = 3,
+    /// System audio and the microphone mixed into one stream (`SOURCE_MIXED`). A peer that does
+    /// not know the value decodes it as `Unspecified` and rejects the route.
+    SourceMixed = 4,
     SinkSpeaker = 10,
     SinkVirtualMic = 11,
 }

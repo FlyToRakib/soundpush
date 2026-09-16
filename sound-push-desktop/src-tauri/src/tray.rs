@@ -314,6 +314,8 @@ fn route_title(route: &RouteView) -> String {
     let title = match route.kind {
         RouteKind::SendSystemAudio => format!("Computer audio → {peer}"),
         RouteKind::SendAppAudio => format!("App audio → {peer}"),
+        RouteKind::SendMixed => format!("Computer audio + microphone → {peer}"),
+        RouteKind::ReceiveMixed => format!("{peer} audio + microphone → this computer"),
         RouteKind::SendMicToVirtualMic | RouteKind::SendMicToSpeaker => {
             format!("Microphone → {peer}")
         }

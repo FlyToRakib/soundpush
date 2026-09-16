@@ -10,7 +10,7 @@ export interface Task {
   unavailableKey?: string;
 }
 
-/** Home-screen tasks, from this computer's perspective. At most four. */
+/** Home-screen tasks, from this computer's perspective. A handful at most. */
 export const TASKS: Task[] = [
   {
     id: "sendSystemAudio",
@@ -38,6 +38,14 @@ export const TASKS: Task[] = [
     icon: "apps",
     kinds: ["receiveAppAudio"],
     available: () => true,
+  },
+  // Commentary over a game, for example: one stream carrying both (plan §5.1).
+  {
+    id: "sendMixed",
+    icon: "mic",
+    kinds: ["sendMixed"],
+    available: (s) => s.capabilities.mixed,
+    unavailableKey: "task.unavailable.loopback",
   },
 ];
 

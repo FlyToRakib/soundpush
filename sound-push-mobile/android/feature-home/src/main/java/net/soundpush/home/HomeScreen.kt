@@ -83,6 +83,7 @@ private data class Task(
 /** Why one device in the picker can't do [task]. */
 private fun peerReasonRes(task: Task, peer: PeerView): Int = when {
     task.kinds.contains("receiveSystemAudio") && !peer.canSendSystemAudio -> R.string.home_peer_reason_listen
+    task.kinds.contains("receiveMixed") && !peer.canSendMixed -> R.string.home_peer_reason_listen
     task.kinds.contains("sendMicToVirtualMic") && !peer.hasVirtualMic -> R.string.home_peer_reason_mic
     else -> R.string.home_peer_reason_play
 }
@@ -103,6 +104,11 @@ private val TASKS = listOf(
     ) { it.canSendSystemAudio && it.hasVirtualMic },
     Task(R.string.task_send_apps, R.string.task_send_apps_desc, SpIcons.Apps, listOf("sendAppAudio"), R.string.home_reason_play) {
         it.canPlay
+    },
+    // The computer's sound and its microphone in one stream (plan §5.1); it offers the mixed
+    // source only where it can capture both, so the task hides itself on devices that cannot.
+    Task(R.string.task_listen_mixed, R.string.task_listen_mixed_desc, SpIcons.Headset, listOf("receiveMixed"), R.string.home_reason_listen) {
+        it.canSendMixed
     },
 )
 
