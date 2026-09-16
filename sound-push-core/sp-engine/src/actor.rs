@@ -33,8 +33,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
 use crate::audit::{AuditEntry, AuditKind, AuditLog, permission_name, policy_name};
-use crate::error::{ErrorView, Severity};
-use crate::health::LinkHealth;
+use crate::error::{ErrorView, Severity, stop_reason_code};
+use crate::health::{FALLBACK_BITRATE, LinkHealth, QualityFallback};
 use crate::net::{local_addresses, race_candidates, resolve, sort_candidates};
 use crate::nettest::NetworkReport;
 use crate::pairing_limit::{Decision, PairingLimiter};
@@ -318,6 +318,9 @@ struct Route {
     last_received: u64,
     last_missing: u64,
     loss_pct: f64,
+    /// Lossless held on Opus while the link keeps losing packets (plan §8.1); only the route's
+    /// requester, which proposes the codec, keeps this.
+    quality_fallback: QualityFallback,
     paused_at: Option<Instant>,
     deadline: Option<Instant>,
 }
@@ -806,6 +809,12 @@ impl Actor {
     ) {
         let id = self.next_notice_id;
         self.next_notice_id += 1;
+        // The support code goes into the log as well, so a report quoting it can be found there
+        // even when the user dismissed the message (plan §36.4).
+        match error {
+            Some(e) => warn!(code = e.code(), key = e.key(), detail = %e, "engine error"),
+            None => debug!(key, "notice"),
+        }
         self.notices.push(NoticeView {
             id,
             key: key.to_string(),
@@ -2065,6 +2074,45 @@ impl Actor {
         }
     }
 
+    /// Lossless (PCM) streams that keep losing packets fall back to Opus, and go back to lossless
+    /// when the link is good again (plan §8.1, §15.6). Both ways are announced, because the user
+    /// asked for lossless and would otherwise wonder where it went.
+    ///
+    /// Only the route's requester proposes the codec, so only it runs this; the other side
+    /// receives the change as an ordinary `RouteUpdate`.
+    fn update_quality_fallback(&mut self) {
+        let pcm = Codec::PcmS16Le as u32;
+        let changed: Vec<(String, DeviceId, bool)> = self
+            .routes
+            .iter_mut()
+            .filter(|r| r.requested_locally && r.status == RouteStatus::Active)
+            .filter(|r| {
+                r.quality_fallback.is_active() || r.profile.as_ref().is_some_and(|p| p.codec == pcm)
+            })
+            .filter_map(|r| {
+                r.quality_fallback
+                    .update(r.loss_pct)
+                    .then(|| (r.key(), r.peer, r.quality_fallback.is_active()))
+            })
+            .collect();
+        for (key, peer, active) in changed {
+            self.reconfigure_route(&key);
+            let name = self.peer_name(&peer);
+            if active {
+                info!(route = key, "lossless fell back to Opus");
+                self.notice(
+                    "notice.qualityFallback",
+                    vec![name],
+                    Severity::Warning,
+                    None,
+                );
+            } else {
+                info!(route = key, "lossless restored");
+                self.notice("notice.qualityRestored", vec![name], Severity::Info, None);
+            }
+        }
+    }
+
     // ============================================================ control messages
 
     fn on_control(&mut self, conn_id: u64, msg: ControlMsg) {
@@ -2234,6 +2282,18 @@ impl Actor {
     // ============================================================ routes
 
     fn start_route(&mut self, peer: DeviceId, kind: RouteKind, reply: Reply<String>) {
+        self.start_route_keeping(peer, kind, reply, QualityFallback::default());
+    }
+
+    /// `fallback`: the quality fallback of the route this one replaces, so a route restarted on a
+    /// lossy link does not ask for lossless again (`profiles::restart_route`).
+    fn start_route_keeping(
+        &mut self,
+        peer: DeviceId,
+        kind: RouteKind,
+        reply: Reply<String>,
+        fallback: QualityFallback,
+    ) {
         if let Err(e) = self.check_local_capability(kind) {
             let _ = reply.send(Err(e));
             return;
@@ -2246,7 +2306,10 @@ impl Actor {
             let _ = reply.send(Ok(existing.key()));
             return;
         }
-        let profile = self.profile_for(kind, &peer);
+        let mut profile = self.profile_for(kind, &peer);
+        if fallback.is_active() {
+            profiles::apply_quality_fallback(&mut profile);
+        }
         let Some(session) = self.sessions.get_mut(&peer) else {
             let _ = reply.send(Err(if self.trust.get(&peer).is_some() {
                 EngineError::Unreachable
@@ -2267,6 +2330,7 @@ impl Actor {
         let mut route = new_route(peer, id, kind, true, self.settings.output.volume);
         route.status = RouteStatus::Requesting;
         route.profile = Some(profile);
+        route.quality_fallback = fallback;
         route.reply = Some(reply);
         route.deadline = Some(Instant::now() + Duration::from_secs(35));
         self.routes.push(route);
@@ -2513,6 +2577,12 @@ impl Actor {
         let mut route = self.routes.remove(pos);
         self.release_pipelines(&mut route);
         if matches!(route.status, RouteStatus::Active | RouteStatus::Paused) {
+            info!(
+                route = key,
+                code = stop_reason_code(reason),
+                reason = ?reason,
+                "route stopped"
+            );
             self.audit_peer(
                 AuditKind::RouteStopped,
                 &route.peer,
@@ -2860,6 +2930,7 @@ impl Actor {
         }
 
         self.update_link_health();
+        self.update_quality_fallback();
         self.expire_stable_holds(now);
         self.refused_audited
             .retain(|_, t| now.duration_since(*t) < REFUSED_AUDIT_INTERVAL);
@@ -3341,6 +3412,7 @@ fn new_route(
         last_received: 0,
         last_missing: 0,
         loss_pct: 0.0,
+        quality_fallback: QualityFallback::default(),
         paused_at: None,
         deadline: None,
     }

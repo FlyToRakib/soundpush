@@ -6,8 +6,25 @@
 //! routes this device started. Bitrate and redundancy change live; a codec, channel or frame
 //! change rebuilds the pipelines on both sides (`FEATURE_ROUTE_RECONFIGURE`), or restarts the
 //! route when the peer is a 1.0 build.
+//!
+//! The lossless quality fallback (plan §8.1, §15.6) rides on the same path: a route whose
+//! [`QualityFallback`](crate::health::QualityFallback) is on has Opus substituted for PCM in the
+//! profile it would otherwise use, so the user's latency, channel and redundancy choices still
+//! apply and everything else about reconfiguration is unchanged.
 
 use super::*;
+
+/// Replace lossless with Opus on a route that keeps losing packets (plan §8.1). Nothing else
+/// changes: the frame size PCM chose fits Opus too, and one codec swap is the whole downgrade.
+pub(super) fn apply_quality_fallback(p: &mut StreamProfile) {
+    if p.codec != Codec::PcmS16Le as u32 {
+        return;
+    }
+    p.codec = Codec::Opus as u32;
+    p.bitrate = FALLBACK_BITRATE;
+    // A fixed bitrate: the adaptive ladder would fight the fallback's own hysteresis.
+    p.adaptive_bitrate = false;
+}
 
 fn encoding_changed(a: &StreamProfile, b: &StreamProfile) -> bool {
     a.codec != b.codec || a.channels != b.channels || a.frame_us != b.frame_us
@@ -43,10 +60,19 @@ impl Actor {
             return;
         };
         let (peer, id, kind, requested_locally) = (r.peer, r.id, r.kind, r.requested_locally);
+        let fallback = r.quality_fallback.is_active();
         let Some(current) = r.profile.clone() else {
             return;
         };
-        let wanted = self.profile_for(kind, &peer);
+        let mut wanted = self.profile_for(kind, &peer);
+        if wanted.codec == Codec::PcmS16Le as u32 {
+            if fallback {
+                apply_quality_fallback(&mut wanted);
+            }
+        } else if let Some(r) = self.routes.iter_mut().find(|r| r.key() == key) {
+            // The route no longer asks for lossless: nothing left to fall back from.
+            r.quality_fallback.reset();
+        }
         let mut next = current.clone();
         if !kind.local_is_source() {
             next.jitter_min_ms = wanted.jitter_min_ms;
@@ -145,11 +171,14 @@ impl Actor {
         };
         let (peer, kind, keep, requested_locally) =
             (r.peer, r.kind, r.keep_running, r.requested_locally);
+        // The quality fallback survives the restart: a new route would ask for lossless again and
+        // fall back a few seconds later, restarting the route over and over on a bad link.
+        let fallback = r.quality_fallback.clone();
         // `Superseded`: replaced by a new route, so saved-route entries stay.
         self.stop_route_by_key(key, StopReason::Superseded, true);
         if requested_locally {
             let (tx, _rx) = oneshot::channel();
-            self.start_route(peer, kind, tx);
+            self.start_route_keeping(peer, kind, tx, fallback);
             if let Some(r) = self
                 .routes
                 .iter_mut()
@@ -159,5 +188,46 @@ impl Actor {
                 r.keep_running = keep;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sp_media::profile::{LatencyProfile, Quality, build_profile};
+
+    use super::*;
+
+    #[test]
+    fn the_fallback_swaps_only_the_codec_and_bitrate() {
+        let lossless = build_profile(LatencyProfile::Stable, Quality::Lossless, 2, true);
+        let mut p = lossless.clone();
+        apply_quality_fallback(&mut p);
+        assert_eq!(p.codec, Codec::Opus as u32);
+        assert_eq!(p.bitrate, FALLBACK_BITRATE);
+        assert!(!p.adaptive_bitrate);
+        // The user's latency, channels and redundancy survive the downgrade.
+        assert_eq!(
+            (
+                p.channels,
+                p.frame_us,
+                p.redundancy,
+                p.jitter_min_ms,
+                p.jitter_max_ms
+            ),
+            (
+                lossless.channels,
+                lossless.frame_us,
+                lossless.redundancy,
+                lossless.jitter_min_ms,
+                lossless.jitter_max_ms
+            )
+        );
+        assert!(encoding_changed(&lossless, &p), "the pipelines rebuild");
+
+        // Applying it to a profile that is already Opus changes nothing.
+        let opus = build_profile(LatencyProfile::Balanced, Quality::Auto, 2, false);
+        let mut same = opus.clone();
+        apply_quality_fallback(&mut same);
+        assert_eq!(same, opus);
     }
 }
