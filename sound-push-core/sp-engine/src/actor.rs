@@ -36,7 +36,7 @@ use crate::audit::{AuditEntry, AuditKind, AuditLog, permission_name, policy_name
 use crate::denoise::{DenoiseChange, DenoiseSupervisor};
 use crate::error::{ErrorView, Severity, stop_reason_code};
 use crate::health::{FALLBACK_BITRATE, LinkHealth, QualityFallback};
-use crate::net::{local_addresses, race_candidates, resolve, sort_candidates};
+use crate::net::{drop_own_addresses, local_addresses, race_candidates, resolve, sort_candidates};
 use crate::nettest::NetworkReport;
 use crate::pairing_limit::{Decision, PairingLimiter};
 use crate::pipeline::monitor::MicMonitor;
@@ -986,6 +986,20 @@ impl Actor {
         self.local_addrs_at = Instant::now();
     }
 
+    /// The addresses this device answers on, for candidates that must not be dialled. The TCP
+    /// listener is included: pinned to TCP it answers on every interface, on its own port.
+    fn own_addresses(&self) -> Vec<SocketAddr> {
+        let tcp_port = self.tcp.as_ref().map(|t| t.local_port()).unwrap_or(0);
+        self.local_addrs
+            .iter()
+            .filter_map(|a| a.parse::<SocketAddr>().ok())
+            .flat_map(|a| {
+                let tcp = (tcp_port != 0).then(|| SocketAddr::new(a.ip(), tcp_port));
+                std::iter::once(a).chain(tcp)
+            })
+            .collect()
+    }
+
     fn flush_trust(&mut self) {
         if let Err(e) = self.trust.flush() {
             warn!(error = %e, "could not save paired device details");
@@ -1519,6 +1533,8 @@ impl Actor {
         usb_port: Option<u16>,
     ) -> u64 {
         sort_candidates(&mut addrs, self.config.include_loopback);
+        // An address this computer answers on is never the peer (see `drop_own_addresses`).
+        drop_own_addresses(&mut addrs, &self.own_addresses());
         // The pinned transport (plan §16.1) decides which candidates exist at all; Auto keeps
         // both, with the USB head start.
         let pin = self.settings.transport;

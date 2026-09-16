@@ -56,6 +56,20 @@ pub fn sort_candidates(addrs: &mut Vec<SocketAddr>, include_loopback: bool) {
     addrs.dedup();
 }
 
+/// Drop candidates that are this device's own listening addresses.
+///
+/// A saved or advertised address outlives the device that had it: after a DHCP reshuffle the
+/// address stored for a phone can be the one this computer now answers on. Dialling it reaches
+/// our own listener, which presents our own certificate, so the handshake is refused — and the
+/// reconnect timer tries again a few seconds later, forever.
+///
+/// Only an exact match counts. Another SoundPush on the same computer (a second instance, or the
+/// two engines in the integration tests) shares every interface address but listens on a port of
+/// its own, and is a real peer.
+pub fn drop_own_addresses(addrs: &mut Vec<SocketAddr>, own: &[SocketAddr]) {
+    addrs.retain(|a| !own.contains(a));
+}
+
 /// Race `addrs` best-first with a [`CANDIDATE_STAGGER`] head start per candidate (plan §17.3).
 ///
 /// Every candidate keeps running once it started, so a slow best candidate still wins if it
@@ -131,6 +145,35 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    fn socket_addrs(list: &[&str]) -> Vec<SocketAddr> {
+        list.iter().filter_map(|s| s.parse().ok()).collect()
+    }
+
+    #[test]
+    fn this_devices_own_listening_address_is_never_dialled() {
+        let own = socket_addrs(&["192.168.68.102:47650"]);
+        // 192.168.68.102 is this computer: a phone's saved address that DHCP has since handed
+        // over. Dialling it reaches our own listener and can only fail the handshake.
+        let mut addrs = socket_addrs(&[
+            "192.168.68.101:47650",
+            "192.168.68.102:47650",
+            // The same computer on another port is a second SoundPush, which is a real peer.
+            "192.168.68.102:51000",
+            "127.0.0.1:47650",
+        ]);
+        drop_own_addresses(&mut addrs, &own);
+
+        assert_eq!(
+            addrs,
+            socket_addrs(&[
+                "192.168.68.101:47650",
+                "192.168.68.102:51000",
+                // Loopback stays: it is how the USB link is dialled.
+                "127.0.0.1:47650",
+            ])
+        );
+    }
 
     fn addrs(n: u16) -> Vec<SocketAddr> {
         (1..=n)

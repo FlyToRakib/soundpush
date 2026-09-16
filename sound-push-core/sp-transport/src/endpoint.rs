@@ -1,8 +1,8 @@
 //! QUIC endpoint: listens for peers and dials them.
 
-use std::net::{Ipv6Addr, SocketAddr, UdpSocket};
-use std::sync::Arc;
-use std::time::Duration;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use sp_security::{DeviceId, DeviceIdentity};
 use tracing::{debug, warn};
@@ -166,11 +166,48 @@ impl Handshake {
                 SecureConnection::from_quic(conn, flow)
             }
             Err(e) => {
-                warn!(%remote, error = %e, "incoming handshake failed");
+                log_handshake_failure(remote, &e);
                 Err(e.into())
             }
         }
     }
+}
+
+/// How long repeated failures from one address are counted instead of logged.
+const HANDSHAKE_FAILURE_QUIET: Duration = Duration::from_secs(60);
+/// Addresses tracked for that; far more than a home network ever has, and it is pruned.
+const HANDSHAKE_FAILURE_ADDRESSES: usize = 64;
+
+/// Failures per remote address: when the first one was logged, and how many followed it.
+static HANDSHAKE_FAILURES: Mutex<Vec<(IpAddr, Instant, u32)>> = Mutex::new(Vec::new());
+
+/// Log a failed incoming handshake, at most once a minute per address.
+///
+/// A peer that cannot complete the handshake retries on its own reconnect timer, so without this
+/// one unreachable device writes a warning every few seconds for as long as it runs — enough to
+/// push everything else out of a rotated log. The first failure is reported immediately; the ones
+/// that follow are counted and summarized.
+fn log_handshake_failure(remote: SocketAddr, error: &quinn::ConnectionError) {
+    let now = Instant::now();
+    let Ok(mut seen) = HANDSHAKE_FAILURES.lock() else {
+        warn!(%remote, %error, "incoming handshake failed");
+        return;
+    };
+    seen.retain(|(_, at, _)| now.duration_since(*at) < HANDSHAKE_FAILURE_QUIET);
+    if let Some((_, at, repeats)) = seen.iter_mut().find(|(ip, _, _)| *ip == remote.ip()) {
+        *repeats += 1;
+        if now.duration_since(*at) < HANDSHAKE_FAILURE_QUIET {
+            return;
+        }
+        let repeats = std::mem::replace(repeats, 0);
+        *at = now;
+        warn!(%remote, %error, repeats, "incoming handshake keeps failing");
+        return;
+    }
+    if seen.len() < HANDSHAKE_FAILURE_ADDRESSES {
+        seen.push((remote.ip(), now, 0));
+    }
+    warn!(%remote, %error, "incoming handshake failed");
 }
 
 /// Bind a dual-stack IPv6 socket so one socket serves IPv4 and IPv6 peers.
