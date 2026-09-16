@@ -28,3 +28,4 @@ repository numbers were used for spike results first, so the table maps both.
 | [0017](0017-native-kotlin-compose-android.md) | Native Kotlin + Compose Android app | ADR-0003 | Accepted |
 | [0018](0018-opus-pcm-48khz.md) | Opus and PCM codecs, 48 kHz wire format | ADR-0005 | Accepted |
 | [0019](0019-release-signing-without-paid-certificates.md) | Releases and updates without paid certificates | (new) | Accepted |
+| [0020](0020-desktop-echo-control.md) | Half-duplex echo control on the desktop instead of a bundled AEC | (new) | Accepted |
