@@ -185,6 +185,8 @@
     <string name="error_virtual_mic">Set up the virtual microphone on your computer first.</string>
     <string name="error_invalid">That doesn\'t look right.</string>
     <string name="error_starting">SoundPush is still starting.</string>
+    <!-- An error message followed by its support code, e.g. "Couldn't reach the device. (SP-NET-001)". -->
+    <string name="error_with_code">%1$s (%2$s)</string>
 
     <string name="startup_error_title">SoundPush couldn\'t start</string>
     <string name="common_retry">Try again</string>
@@ -219,6 +221,8 @@
     <string name="notice_settings_recovered">Settings were reset because the stored file was damaged.</string>
     <string name="notice_unstable_connection">The connection to %1$s keeps dropping, so its streams use the Stable latency setting for now. A stronger Wi-Fi signal or USB helps.</string>
     <string name="notice_pairing_rate_limited">Too many pairing attempts from %1$s. Pairing from there is paused for a minute.</string>
+    <string name="notice_quality_fallback">The connection to %1$s is losing audio, so lossless switched to Opus at 256 kb/s. It goes back on its own once the link is stable.</string>
+    <string name="notice_quality_restored">The connection to %1$s is stable again, so lossless audio is back.</string>
     <string name="error_pairing_rate_limited">Too many pairing attempts. Wait a minute and try again.</string>
 
     <!-- Security log (Settings → Privacy) -->
@@ -445,6 +449,8 @@
     <string name="settings_update_download">Download</string>
     <string name="settings_update_failed">Couldn\'t check for updates. Check your internet connection and try again.</string>
     <string name="settings_user_guide">User guide</string>
+    <string name="settings_error_codes">Error codes</string>
+    <string name="settings_error_codes_desc">Look up a code from a message, like SP-NET-004</string>
     <string name="settings_report_bug">Report a problem</string>
     <string name="settings_privacy_policy">Privacy policy</string>
     <string name="settings_license">License</string>

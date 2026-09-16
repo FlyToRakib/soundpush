@@ -71,6 +71,8 @@ object Labels {
         "notice.crashReport" -> R.string.notice_crash_report
         "notice.unstableConnection" -> R.string.notice_unstable_connection
         "notice.pairingRateLimited" -> R.string.notice_pairing_rate_limited
+        "notice.qualityFallback" -> R.string.notice_quality_fallback
+        "notice.qualityRestored" -> R.string.notice_quality_restored
         else -> R.string.notice_generic
     }
 

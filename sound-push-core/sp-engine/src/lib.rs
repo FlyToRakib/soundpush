@@ -27,7 +27,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 
 pub use audit::{AuditEntry, AuditKind};
-pub use error::{EngineError, ErrorView, FixAction, Severity};
+pub use error::{EngineError, ErrorView, FixAction, Severity, stop_reason_code};
 pub use nettest::{NetworkReport, NetworkTestStatus, NetworkTestView, Recommendation};
 pub use platform::{KeepAlive, PlatformHooks};
 pub use settings::{DeviceProfile, Settings};

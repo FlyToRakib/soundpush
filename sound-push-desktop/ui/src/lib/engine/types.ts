@@ -282,6 +282,8 @@ export interface RouteRequestPrompt {
 }
 
 export interface ErrorView {
+  /** Stable support code, e.g. "SP-NET-004" (docs/error-codes.md). */
+  code: string;
   key: string;
   message: string;
   severity: Severity;

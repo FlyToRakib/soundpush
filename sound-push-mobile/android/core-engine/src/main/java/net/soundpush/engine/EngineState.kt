@@ -199,6 +199,8 @@ data class RouteRequestPrompt(
 @Serializable
 data class ErrorView(
     val key: String,
+    /** Stable support code, e.g. `SP-NET-004` (docs/error-codes.md). */
+    val code: String = "",
     val message: String = "",
     val severity: String = "error",
     val retryable: Boolean = false,

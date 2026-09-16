@@ -19,6 +19,7 @@ export const LINKS = {
 const DOCS = {
   userGuide: { site: "user-guide/", github: LINKS.userGuide },
   troubleshooting: { site: "troubleshooting/", github: `${LINKS.userGuide}#9-troubleshooting` },
+  errorCodes: { site: "error-codes/", github: `${REPO}/blob/HEAD/docs/error-codes.md` },
   virtualMicrophone: { site: "virtual-microphone/", github: `${REPO}/blob/HEAD/docs/virtual-microphone.md` },
   privacy: { site: "privacy/", github: LINKS.privacy },
   translating: { site: "translating/", github: `${REPO}/blob/HEAD/docs/translating.md` },

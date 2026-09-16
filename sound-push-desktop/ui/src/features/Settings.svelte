@@ -158,6 +158,7 @@
       <Button onclick={() => (exporting = true)}>{t("settings.export")}</Button>
       <Button variant="ghost" onclick={() => run(engine.openLogsFolder())}>{t("settings.openLogs")}</Button>
       <Button variant="ghost" onclick={() => openDocs("userGuide")}>{t("settings.userGuide")}</Button>
+      <Button variant="ghost" onclick={() => openDocs("errorCodes")}>{t("settings.errorCodes")}</Button>
       <Button variant="ghost" onclick={() => open(LINKS.reportBug)}>{t("settings.reportBug")}</Button>
     </div>
     <p class="caption">{t("settings.shortcuts", isMac ? "⌘" : "Ctrl")}</p>

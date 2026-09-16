@@ -2,6 +2,7 @@ package net.soundpush.app
 
 import android.Manifest
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
@@ -77,6 +78,7 @@ import net.soundpush.devices.DevicesScreen
 import net.soundpush.devices.QrScanner
 import net.soundpush.engine.DeviceStatus
 import net.soundpush.engine.EngineState
+import net.soundpush.engine.ErrorView
 import net.soundpush.engine.RouteRequestPrompt
 import net.soundpush.engine.SoundPush
 import net.soundpush.home.HomeScreen
@@ -410,7 +412,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         LaunchedEffect(Unit) {
-            SoundPush.errors.collect { snackbar.showSnackbar(context.getString(Labels.error(it.key))) }
+            SoundPush.errors.collect { snackbar.showSnackbar(errorText(context, it)) }
         }
         LaunchedEffect(Unit) {
             messages.collect { snackbar.showSnackbar(it) }
@@ -422,7 +424,7 @@ class MainActivity : AppCompatActivity() {
                 .distinctUntilChangedBy { it.id }
                 .collect { notice ->
                     SoundPush.command { dismissNotice(notice.id.toULong()) }
-                    val text = notice.error?.let { context.getString(Labels.error(it.key)) }
+                    val text = notice.error?.let { errorText(context, it) }
                         ?: context.getString(Labels.notice(notice.key), *notice.args.toTypedArray())
                     snackbar.showSnackbar(text)
                 }
@@ -810,6 +812,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
         SoundPush.command { respondRouteRequest(request.requestId.toULong(), accept, remember) }
+    }
+
+    /**
+     * An engine error with its stable support code ("… (SP-NET-004)", plan §36.4), so what a user
+     * reports names one failure whatever language the app is in. Codes: docs/error-codes.md.
+     */
+    private fun errorText(context: Context, error: ErrorView): String {
+        val message = context.getString(Labels.error(error.key))
+        return if (error.code.isEmpty()) message else context.getString(R.string.error_with_code, message, error.code)
     }
 
     private companion object {
