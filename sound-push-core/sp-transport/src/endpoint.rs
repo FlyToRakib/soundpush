@@ -1,6 +1,7 @@
 //! QUIC endpoint: listens for peers and dials them.
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -105,8 +106,10 @@ impl Endpoint {
         addr: SocketAddr,
         pinned: Option<DeviceId>,
     ) -> Result<SecureConnection, TransportError> {
+        let dialed_self = Arc::new(AtomicBool::new(false));
         let quic_client = quinn::crypto::rustls::QuicClientConfig::try_from(
-            self.credentials.client_config(pinned, ALPN)?,
+            self.credentials
+                .client_config(pinned, ALPN, dialed_self.clone())?,
         )
         .map_err(|e| TransportError::Tls(e.to_string()))?;
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client));
@@ -115,7 +118,13 @@ impl Endpoint {
         let addr = if self.ipv6 { normalize(addr) } else { addr };
         debug!(%addr, "dialing peer");
         let connecting = self.inner.connect_with(client_config, addr, SERVER_NAME)?;
-        let conn = connecting.await?;
+        let conn = connecting.await.map_err(|e| {
+            if dialed_self.load(Ordering::Relaxed) {
+                TransportError::DialedSelf
+            } else {
+                TransportError::from(e)
+            }
+        })?;
         let flow = mark_peer(self.marker.as_ref(), conn.remote_address());
         SecureConnection::from_quic(conn, flow)
     }

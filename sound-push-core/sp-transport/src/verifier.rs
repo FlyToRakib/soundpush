@@ -7,6 +7,7 @@
 //! decisions happen after the handshake in the engine.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{
@@ -19,6 +20,12 @@ use sp_security::{DeviceId, Fingerprint, public_key_from_cert};
 
 fn algorithms(provider: &CryptoProvider) -> WebPkiSupportedAlgorithms {
     provider.signature_verification_algorithms
+}
+
+/// The device id a certificate belongs to, or `None` when it is not one of ours at all.
+fn device_id_of(cert: &CertificateDer<'_>) -> Option<DeviceId> {
+    let key = public_key_from_cert(cert.as_ref()).ok()?;
+    Some(Fingerprint::of_public_key(&key).device_id())
 }
 
 fn check_cert(cert: &CertificateDer<'_>, pinned: Option<DeviceId>) -> Result<(), Error> {
@@ -40,13 +47,29 @@ fn check_cert(cert: &CertificateDer<'_>, pinned: Option<DeviceId>) -> Result<(),
 #[derive(Debug)]
 pub struct PeerServerVerifier {
     pinned: Option<DeviceId>,
+    /// This device's own id, and a flag raised when the server turns out to be this device.
+    ///
+    /// An address can outlive the device that had it: after a DHCP reshuffle the address saved
+    /// for a phone can be one this computer now answers on, and dialling it reaches our own
+    /// listener. The handshake then fails on the pinned key like any other wrong device, which
+    /// tells the caller nothing, so it keeps trying on every reconnect. Recognising our own
+    /// certificate lets the caller drop that address instead.
+    own: DeviceId,
+    dialed_self: Arc<AtomicBool>,
     algs: WebPkiSupportedAlgorithms,
 }
 
 impl PeerServerVerifier {
-    pub fn new(provider: &CryptoProvider, pinned: Option<DeviceId>) -> Arc<Self> {
+    pub fn new(
+        provider: &CryptoProvider,
+        pinned: Option<DeviceId>,
+        own: DeviceId,
+        dialed_self: Arc<AtomicBool>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             pinned,
+            own,
+            dialed_self,
             algs: algorithms(provider),
         })
     }
@@ -61,6 +84,9 @@ impl ServerCertVerifier for PeerServerVerifier {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
+        if device_id_of(end_entity).is_some_and(|id| id == self.own) {
+            self.dialed_self.store(true, Ordering::Relaxed);
+        }
         check_cert(end_entity, self.pinned)?;
         Ok(ServerCertVerified::assertion())
     }

@@ -4,6 +4,7 @@
 //! verifiers, so pinning and trust behave identically whichever path a connection takes.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -19,6 +20,8 @@ pub(crate) struct Credentials {
     pub provider: Arc<CryptoProvider>,
     cert: CertificateDer<'static>,
     key: Arc<Vec<u8>>,
+    /// This device's id, so a connection that reaches this very device is recognised as one.
+    own: DeviceId,
 }
 
 impl Credentials {
@@ -28,6 +31,7 @@ impl Credentials {
             provider: Arc::new(rustls::crypto::ring::default_provider()),
             cert: CertificateDer::from(cert.cert_der.clone()),
             key: Arc::new(cert.key_pkcs8_der.to_vec()),
+            own: identity.device_id(),
         })
     }
 
@@ -45,16 +49,24 @@ impl Credentials {
 
     /// TLS 1.3 client presenting our certificate; with `pinned`, the handshake fails unless the
     /// server's key has that device ID.
+    /// `dialed_self` is raised when the certificate on the other end turns out to be this
+    /// device's own, which means the address dialled is one of ours (see [`PeerServerVerifier`]).
     pub fn client_config(
         &self,
         pinned: Option<DeviceId>,
         alpn: &[u8],
+        dialed_self: Arc<AtomicBool>,
     ) -> Result<rustls::ClientConfig, TransportError> {
         let mut config = rustls::ClientConfig::builder_with_provider(self.provider.clone())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(|e| TransportError::Tls(e.to_string()))?
             .dangerous()
-            .with_custom_certificate_verifier(PeerServerVerifier::new(&self.provider, pinned))
+            .with_custom_certificate_verifier(PeerServerVerifier::new(
+                &self.provider,
+                pinned,
+                self.own,
+                dialed_self,
+            ))
             .with_client_auth_cert(vec![self.cert.clone()], private_key(&self.key))
             .map_err(|e| TransportError::Tls(e.to_string()))?;
         config.alpn_protocols = vec![alpn.to_vec()];

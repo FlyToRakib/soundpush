@@ -46,6 +46,9 @@ pub enum TransportError {
     Io(#[from] std::io::Error),
     #[error("peer certificate missing or invalid")]
     PeerIdentity,
+    /// The address dialled is this device: the certificate on the other end was our own.
+    #[error("that address is this device")]
+    DialedSelf,
     #[error("stream write error: {0}")]
     Write(#[from] quinn::WriteError),
     #[error("stream read error: {0}")]

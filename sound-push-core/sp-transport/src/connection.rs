@@ -575,4 +575,57 @@ mod tests {
             .await
             .unwrap();
     }
+
+    /// Dialling an address this device itself answers on — a peer's old address that a router has
+    /// since handed here — must be recognised as that, not as another device refusing us, so the
+    /// caller can forget the address instead of dialling it again on every reconnect.
+    #[tokio::test]
+    async fn dialling_this_device_is_recognised_over_quic_and_tcp() {
+        let me = DeviceIdentity::generate();
+        // Dialled expecting the phone, as a reconnect to the phone's saved address would be.
+        let phone = DeviceIdentity::generate().device_id();
+
+        let quic = Arc::new(Endpoint::bind(&me, &config()).unwrap());
+        let listener = quic.clone();
+        tokio::spawn(async move {
+            while let Some(h) = listener.accept().await {
+                let _ = h.finish().await;
+            }
+        });
+        let own = SocketAddr::from(([127, 0, 0, 1], quic.local_port()));
+        let err = quic.connect(own, Some(phone)).await.err().unwrap();
+        assert!(matches!(err, TransportError::DialedSelf), "quic: {err}");
+
+        let tcp = TcpEndpoint::bind(&me, IpAddr::V4(Ipv4Addr::LOCALHOST), 0)
+            .await
+            .unwrap();
+        let own = SocketAddr::from(([127, 0, 0, 1], tcp.local_port()));
+        let tcp = Arc::new(tcp);
+        let listener = tcp.clone();
+        tokio::spawn(async move {
+            while let Some(h) = listener.accept().await {
+                let _ = h.finish().await;
+            }
+        });
+        let err = tcp.connect(own, Some(phone)).await.err().unwrap();
+        assert!(matches!(err, TransportError::DialedSelf), "tcp: {err}");
+
+        // Another device refusing the pinned key is still an ordinary failure, not "ourselves".
+        let stranger = Endpoint::bind(&DeviceIdentity::generate(), &config()).unwrap();
+        let stranger_addr = SocketAddr::from(([127, 0, 0, 1], stranger.local_port()));
+        tokio::spawn(async move {
+            while let Some(h) = stranger.accept().await {
+                let _ = h.finish().await;
+            }
+        });
+        let err = quic
+            .connect(stranger_addr, Some(phone))
+            .await
+            .err()
+            .unwrap();
+        assert!(
+            !matches!(err, TransportError::DialedSelf),
+            "a stranger is not this device: {err}"
+        );
+    }
 }

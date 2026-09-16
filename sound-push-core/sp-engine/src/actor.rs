@@ -225,6 +225,8 @@ enum Internal {
     /// A device reached this one but the TLS handshake did not finish, so there is no telling
     /// which device it was — only where it came from.
     HandshakeRefused(SocketAddr),
+    /// An address that was dialled turned out to be this device itself.
+    AddressIsSelf(SocketAddr),
     DialFailed {
         conn_id: u64,
         target: Option<DeviceId>,
@@ -1573,9 +1575,11 @@ impl Actor {
             let has_network = !addrs.is_empty();
             // The ranked candidates race each other, each starting 250 ms after the one before
             // it; the first authenticated handshake wins and the rest are cancelled.
+            let self_tx = tx.clone();
             let network = race_candidates(addrs, move |addr| {
                 let endpoint = endpoint.clone();
                 let tcp = network_tcp.clone();
+                let self_tx = self_tx.clone();
                 async move {
                     let connect = async {
                         match &tcp {
@@ -1587,6 +1591,12 @@ impl Actor {
                         Ok(Ok(conn)) => Ok(conn),
                         Ok(Err(e)) => {
                             debug!(%addr, error = %e, "dial failed");
+                            // The device on the other end was this one: an address a peer used to
+                            // have and this device now answers on. Forget it, or every reconnect
+                            // dials it again.
+                            if matches!(e, sp_transport::TransportError::DialedSelf) {
+                                let _ = self_tx.send(Internal::AddressIsSelf(addr));
+                            }
                             Err(EngineError::from(e))
                         }
                         Err(_) => Err(EngineError::Unreachable),
@@ -1726,6 +1736,7 @@ impl Actor {
                 ));
             }
             Internal::HandshakeRefused(remote) => self.on_handshake_refused(remote),
+            Internal::AddressIsSelf(addr) => self.forget_own_address(addr),
             Internal::Dialed {
                 conn_id,
                 conn,
@@ -1955,6 +1966,36 @@ impl Actor {
             entry = entry.route(route);
         }
         self.audit.record(entry);
+    }
+
+    /// Forget an address that turned out to be this device.
+    ///
+    /// Addresses outlive the devices that had them: after a DHCP reshuffle the address saved for
+    /// a phone can be one this computer now answers on. Dialling it reaches our own listener,
+    /// which can only fail, and the reconnect timer would try it again for as long as the app
+    /// runs. The candidate filter in `dial` catches the addresses this device knows it has; this
+    /// catches the rest — another interface, a port we no longer listen on, an address a router
+    /// hands us later — because the certificate on the other end was our own, which is proof.
+    fn forget_own_address(&mut self, addr: SocketAddr) {
+        let text = addr.to_string();
+        info!(%addr, "that address is this device; forgetting it");
+        for peer in self
+            .discovered
+            .values_mut()
+            .filter(|a| a.addresses.contains(&addr))
+        {
+            peer.addresses.retain(|a| a != &addr);
+        }
+        let ids: Vec<DeviceId> = self
+            .trust
+            .list()
+            .filter(|d| d.last_addresses.contains(&text))
+            .map(|d| d.fingerprint().device_id())
+            .collect();
+        for id in ids {
+            self.trust
+                .update_hints(&id, |d| d.last_addresses.retain(|a| a != &text));
+        }
     }
 
     /// A device reached this one but the handshake did not finish, so it is not known which

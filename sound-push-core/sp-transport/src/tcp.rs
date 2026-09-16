@@ -10,7 +10,7 @@
 //! audio instead of delaying it.
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -137,11 +137,15 @@ impl TcpEndpoint {
         addr: SocketAddr,
         pinned: Option<DeviceId>,
     ) -> Result<SecureConnection, TransportError> {
-        let connector =
-            TlsConnector::from(Arc::new(self.credentials.client_config(pinned, ALPN_TCP)?));
+        let dialed_self = Arc::new(AtomicBool::new(false));
+        let connector = TlsConnector::from(Arc::new(self.credentials.client_config(
+            pinned,
+            ALPN_TCP,
+            dialed_self.clone(),
+        )?));
         let name =
             ServerName::try_from(SERVER_NAME).map_err(|e| TransportError::Tls(e.to_string()))?;
-        tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
+        let result = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
             let stream = TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
             crate::qos::mark_socket(socket2::SockRef::from(&stream), addr.is_ipv6());
@@ -150,7 +154,11 @@ impl TcpEndpoint {
             Ok(start(tls, addr, peer_key, exported))
         })
         .await
-        .map_err(|_| TransportError::Timeout)?
+        .map_err(|_| TransportError::Timeout)?;
+        match result {
+            Err(_) if dialed_self.load(Ordering::Relaxed) => Err(TransportError::DialedSelf),
+            other => other,
+        }
     }
 
     pub fn close(&self) {
