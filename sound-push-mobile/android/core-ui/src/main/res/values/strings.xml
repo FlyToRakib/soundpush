@@ -148,6 +148,8 @@
     <string name="settings_stay_available">Stay available to paired devices</string>
     <string name="settings_stay_available_desc">Lets your computer start streams without opening the app.</string>
     <string name="settings_remind">Remind me to reconnect after restart</string>
+    <string name="settings_resume_routes">Start streams again after a restart</string>
+    <string name="settings_resume_routes_desc">When SoundPush opens again, the streams that were running start themselves.</string>
     <string name="settings_battery">Keep SoundPush running</string>
     <string name="settings_battery_desc">Some phones stop apps in the background. Allow SoundPush to run.</string>
     <string name="settings_privacy">Privacy</string>
@@ -165,6 +167,7 @@
     <string name="notif_channel_attention">Requests</string>
     <string name="notif_streaming">Streaming with %1$s</string>
     <string name="notif_mic_live">Microphone in use</string>
+    <string name="notif_mic_silenced">Another app is using the microphone</string>
     <string name="notif_request">%1$s needs your attention</string>
     <string name="notif_reconnect">Tap to reconnect SoundPush</string>
     <string name="tile_label">SoundPush</string>
@@ -323,6 +326,10 @@
     <string name="notif_rationale_allow">Allow</string>
     <string name="home_banner_notifications">Notifications are off</string>
     <string name="home_banner_notifications_body">You won\'t see stream controls outside the app.</string>
+
+    <!-- Another app took the microphone while SoundPush was using it (Android 10+) -->
+    <string name="home_banner_mic_in_use">Another app is using the microphone</string>
+    <string name="home_banner_mic_in_use_body">Your computer is hearing silence until that app stops. Close it, or end the call.</string>
 
     <!-- Bluetooth latency, USB tethering and mobile data hints -->
     <string name="hint_bluetooth_title">Bluetooth adds delay</string>

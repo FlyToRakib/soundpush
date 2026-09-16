@@ -230,6 +230,7 @@
   "visibility.hidden": "Nobody",
   "settings.autoConnect": "Reconnect paired devices automatically",
   "settings.resumeRoutes": "Resume streams after restart",
+  "settings.resumeRoutes.desc": "When SoundPush starts again, the streams that were running start themselves once the device is back.",
   "settings.privacyNote": "Audio never leaves your devices. SoundPush has no accounts, ads or tracking.",
   "settings.auditLog": "Security log",
   "settings.auditLog.desc": "Pairing, permission and stream events on this computer. Kept for 30 days and never sent anywhere.",

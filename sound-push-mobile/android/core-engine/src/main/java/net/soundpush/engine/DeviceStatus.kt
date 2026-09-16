@@ -9,12 +9,15 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioRecordingConfiguration
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -26,9 +29,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
- * What the phone's audio output and network look like right now, for hints (Bluetooth delay,
- * mobile data through USB tethering) and the troubleshooter. Event-driven: system callbacks,
- * no polling. Started lazily by the first screen or service that needs it.
+ * What the phone's audio output, network, screen and power look like right now, for hints
+ * (Bluetooth delay, mobile data through USB tethering), the troubleshooter, the battery policy
+ * (plan §14.6) and the live "microphone in use" notice (plan §8.3). Event-driven: system
+ * callbacks, no polling. Started lazily by the first screen or service that needs it.
  */
 object DeviceStatus {
     enum class Output { Speaker, Wired, Bluetooth, Usb, Other }
@@ -64,6 +68,9 @@ object DeviceStatus {
     private val _output = MutableStateFlow(Output.Speaker)
     private val _network = MutableStateFlow(NetworkInfo())
     private val _outputLatencyMs = MutableStateFlow(0)
+    private val _screenOn = MutableStateFlow(true)
+    private val _onPower = MutableStateFlow(false)
+    private val _micSilenced = MutableStateFlow(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     /** Always the application context (set in [start]), which lives as long as the process: no leak. */
     @SuppressLint("StaticFieldLeak")
@@ -74,6 +81,16 @@ object DeviceStatus {
     val network: StateFlow<NetworkInfo> = _network
     /** Output latency measured by the platform player (compatibility output); 0 when unknown. */
     val outputLatencyMs: StateFlow<Int> = _outputLatencyMs
+    /** Whether the screen is on. True until [start] has run, so nothing is throttled by mistake. */
+    val screenOn: StateFlow<Boolean> = _screenOn
+    /** Whether the phone is charging (a charger, or the computer's USB port). */
+    val onPower: StateFlow<Boolean> = _onPower
+    /**
+     * Whether Android is giving this app silence because another app holds the microphone
+     * (a call, a voice assistant). Android 10+ only; always false below that, where capture is
+     * exclusive and the recorder simply fails instead.
+     */
+    val micSilenced: StateFlow<Boolean> = _micSilenced
 
     fun reportOutputLatency(ms: Int) {
         _outputLatencyMs.value = ms
@@ -92,7 +109,10 @@ object DeviceStatus {
                 override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = refreshOutput(am)
             }, main)
             refreshOutput(am)
+            watchRecording(am, main)
         }
+        watchScreen(ctx)
+        watchPower(ctx)
         ctx.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) = refreshNetwork()
             override fun onLost(network: Network) = refreshNetwork()
@@ -107,6 +127,63 @@ object DeviceStatus {
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         refreshNetwork()
+    }
+
+    /**
+     * Android 10+ hands a silenced recording to an app whose microphone another app has taken
+     * (plan §8.3). The system reports the app's own recordings only, which is exactly what is
+     * needed: while SoundPush records, `isClientSilenced` says whether anything is getting through.
+     */
+    private fun watchRecording(am: AudioManager, main: Handler) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        am.registerAudioRecordingCallback(
+            object : AudioManager.AudioRecordingCallback() {
+                override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
+                    _micSilenced.value = configs.any { it.isClientSilenced }
+                }
+            },
+            main,
+        )
+        _micSilenced.value = am.activeRecordingConfigurations.any { it.isClientSilenced }
+    }
+
+    /** Screen on or off, for the battery policy (plan §14.6). The broadcasts cannot be declared. */
+    private fun watchScreen(ctx: Context) {
+        _screenOn.value = ctx.getSystemService(PowerManager::class.java)?.isInteractive != false
+        ContextCompat.registerReceiver(
+            ctx,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    _screenOn.value = intent.action == Intent.ACTION_SCREEN_ON
+                }
+            },
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    /**
+     * On a charger or on battery. The connect and disconnect broadcasts wake the app twice a day
+     * at most; `ACTION_BATTERY_CHANGED` would wake it every time the level moves.
+     */
+    private fun watchPower(ctx: Context) {
+        _onPower.value = ctx.getSystemService(BatteryManager::class.java)?.isCharging == true
+        ContextCompat.registerReceiver(
+            ctx,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    _onPower.value = intent.action == Intent.ACTION_POWER_CONNECTED
+                }
+            },
+            IntentFilter().apply {
+                addAction(Intent.ACTION_POWER_CONNECTED)
+                addAction(Intent.ACTION_POWER_DISCONNECTED)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
     }
 
     private fun refreshOutput(am: AudioManager) {

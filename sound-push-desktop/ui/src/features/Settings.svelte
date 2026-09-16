@@ -154,6 +154,13 @@
         onchange={(v) => updateSettings((x) => (x.autoConnectTrusted = v))}
       />
     </SettingRow>
+    <SettingRow label={t("settings.resumeRoutes")} description={t("settings.resumeRoutes.desc")}>
+      <Toggle
+        checked={s.resumeRoutesOnStart}
+        label={t("settings.resumeRoutes")}
+        onchange={(v) => updateSettings((x) => (x.resumeRoutesOnStart = v))}
+      />
+    </SettingRow>
     <SettingRow label={t("settings.auditLog")} description={t("settings.auditLog.desc")}>
       <Button onclick={() => (showAuditLog = true)}>{t("audit.view")}</Button>
     </SettingRow>

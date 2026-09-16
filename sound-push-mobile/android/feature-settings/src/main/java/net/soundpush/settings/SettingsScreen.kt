@@ -131,6 +131,11 @@ fun SettingsScreen(
             SettingSwitch(stringResource(R.string.settings_remind), s.mobile.remindAfterRestart) { v ->
                 SoundPush.updateSettings { it.copy(mobile = it.mobile.copy(remindAfterRestart = v)) }
             }
+            SettingSwitch(
+                stringResource(R.string.settings_resume_routes),
+                s.resumeRoutesOnStart,
+                stringResource(R.string.settings_resume_routes_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(resumeRoutesOnStart = v) } }
             Divider()
             NavRow(stringResource(R.string.settings_battery), stringResource(R.string.settings_battery_desc), onOpenBatteryGuide)
         }

@@ -423,6 +423,12 @@ impl SoundPushEngine {
     pub fn set_foreground(&self, foreground: bool) -> Result<(), FfiError> {
         Ok(self.handle.set_foreground(foreground)?)
     }
+
+    /// What "Auto" quality means right now: Opus (`false`) or uncompressed audio (`true`). The app
+    /// decides from the power state and the link (plan §14.6); see `EngineHandle::set_prefer_lossless`.
+    pub fn set_prefer_lossless(&self, prefer: bool) -> Result<(), FfiError> {
+        Ok(self.handle.set_prefer_lossless(prefer)?)
+    }
 }
 
 /// Write a log line from the app (Kotlin) through the engine logger, so the app's messages land in

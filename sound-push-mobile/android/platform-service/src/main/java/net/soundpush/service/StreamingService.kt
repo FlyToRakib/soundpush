@@ -107,8 +107,10 @@ class StreamingService : Service() {
                 syncAppAudioCapture(state)
             }
         }
-        // The notification names the current output (speaker, headphones, Bluetooth).
+        // The notification names the current output (speaker, headphones, Bluetooth), and says so
+        // while another app has taken the microphone (plan §8.3).
         scope.launch { DeviceStatus.output.collect { updateNotification() } }
+        scope.launch { DeviceStatus.micSilenced.collect { updateNotification() } }
         // A chosen output (Settings → Audio) follows its device as it connects and disconnects.
         scope.launch {
             combine(OutputPreference.target, DeviceStatus.output) { _, _ -> }.collect {
@@ -302,6 +304,7 @@ class StreamingService : Service() {
             session?.sessionToken,
             types.listenStarting,
             DeviceStatus.output.value,
+            DeviceStatus.micSilenced.value,
         )
 
     /** Run the microphone recorder exactly while the engine needs mic input. */

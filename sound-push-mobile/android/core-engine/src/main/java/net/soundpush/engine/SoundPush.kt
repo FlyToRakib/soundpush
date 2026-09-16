@@ -15,7 +15,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.soundpush_ffi.FfiException
 import uniffi.soundpush_ffi.MobilePlatform
 import uniffi.soundpush_ffi.SoundPushEngine
@@ -48,6 +51,13 @@ object SoundPush {
     @Volatile private var appVersion: String = ""
     /** Last playback path handed to the native backend (null until the first state). */
     @Volatile private var platformOutput: Boolean? = null
+
+    /** False while nothing can see the UI: the app is in the background, or the screen is off. */
+    private val _uiLive = MutableStateFlow(true)
+    /** The newest snapshot from the engine, still as JSON. Conflated: only the latest is decoded. */
+    private val rawState = MutableStateFlow<String?>(null)
+    /** A stats-only snapshot held back while the UI was hidden; published when it comes back. */
+    @Volatile private var held: EngineState? = null
 
     /** Remember the app version so any entry point (activity, service, widget, boot) can start the engine. */
     fun configure(appVersion: String) {
@@ -96,16 +106,13 @@ object SoundPush {
             NativeContext.init(app)
             OutputPreference.load(app)
             engine = SoundPushEngine(AndroidPlatform(app), appVersion)
+            // The engine's thread only hands the snapshot over; decoding happens in [consumeState].
             engine.setListener(object : StateListener {
                 override fun onState(stateJson: String) {
-                    runCatching { EngineJson.decodeFromString<EngineState>(stateJson) }
-                        .onSuccess {
-                            applyPlatformOutput(it)
-                            _state.value = it
-                        }
-                        .onFailure { log(LogLevel.Error, TAG, "could not decode engine state", it) }
+                    rawState.value = stateJson
                 }
             })
+            scope.launch { consumeState() }
             // Reconnect at once when the network changes, whether or not a stream is running.
             NetworkWatcher.start(app) { command { networkChanged() } }
             // Picking or clearing an output device (Settings → Audio) switches the playback path live.
@@ -120,6 +127,53 @@ object SoundPush {
     }
 
     private const val TAG = "SoundPush"
+
+    /** How long a snapshot waits while nothing can see the UI. */
+    private const val BACKGROUND_INTERVAL_MS = 500L
+
+    /**
+     * Decode and publish the engine's snapshots.
+     *
+     * On screen, every snapshot is decoded as it arrives (the engine publishes at most one per
+     * 50 ms). While the app is in the background or the screen is off, nothing draws the statistics
+     * and level meters and the notification never showed them, so decoding drops to one snapshot
+     * per [BACKGROUND_INTERVAL_MS] and a snapshot that moves nothing but those numbers is not
+     * published at all (plan §14.6, §8.4). Everything anyone can act on — routes, devices, settings,
+     * pairing, notices — still lands, so the notification, the foreground service and reconnection
+     * behave exactly as they do on screen. Streaming never passes through here.
+     */
+    private suspend fun consumeState() {
+        rawState.filterNotNull().collect { json ->
+            runCatching { EngineJson.decodeFromString<EngineState>(json) }
+                .onSuccess(::publish)
+                .onFailure { log(LogLevel.Error, TAG, "could not decode engine state", it) }
+            // [rawState] keeps only the newest snapshot, so the wait costs nothing but the wait.
+            if (!_uiLive.value) withTimeoutOrNull(BACKGROUND_INTERVAL_MS) { _uiLive.first { it } }
+        }
+    }
+
+    @Synchronized
+    private fun publish(next: EngineState) {
+        val last = _state.value
+        if (!_uiLive.value && last != null && StateUpdates.onlyLiveNumbersChanged(last, next)) {
+            held = next
+            return
+        }
+        held = null
+        applyPlatformOutput(next)
+        _state.value = next
+    }
+
+    /**
+     * Whether anything can see the UI. The app shell calls this when the app comes to the front or
+     * goes to the back, and when the screen turns on or off.
+     */
+    fun setUiLive(live: Boolean) {
+        if (_uiLive.value == live) return
+        _uiLive.value = live
+        // Whatever was held back while the screen was off is worth showing again.
+        if (live) scope.launch { held?.let(::publish) }
+    }
 
     /**
      * App log line through the engine logger (plan §28.1): the same log files and logcat stream as

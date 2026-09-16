@@ -373,4 +373,15 @@ impl EngineHandle {
     pub fn set_foreground(&self, foreground: bool) -> Result<(), EngineError> {
         self.send(Command::SetForeground { foreground })
     }
+
+    /// What the "Auto" quality setting resolves to on the routes this device starts: Opus
+    /// (`false`, the default) or uncompressed audio (`true`).
+    ///
+    /// Mobile apps set this from the power state and the link (plan §14.6): Opus on battery, where
+    /// the radio costs more than the codec does, and uncompressed on a charger over a link with
+    /// room for it. A quality the user picked is never overridden, and the engine's own bitrate
+    /// adaptation is untouched. Running routes pick the change up live.
+    pub fn set_prefer_lossless(&self, prefer: bool) -> Result<(), EngineError> {
+        self.send(Command::PreferLossless { prefer })
+    }
 }

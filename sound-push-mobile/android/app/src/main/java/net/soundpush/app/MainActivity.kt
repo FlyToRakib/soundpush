@@ -658,10 +658,25 @@ class MainActivity : AppCompatActivity() {
         val output by DeviceStatus.output.collectAsState()
         val network by DeviceStatus.network.collectAsState()
         val measuredMs by DeviceStatus.outputLatencyMs.collectAsState()
+        val micSilenced by DeviceStatus.micSilenced.collectAsState()
         val tips = state.settings.dismissedTips
         val receiving = state.routes.any { !it.isSending && it.status != "stopped" }
+        val micLive = state.routes.any { it.isMic && it.isSending && it.status != "stopped" }
         val dismiss = stringResource(R.string.common_dismiss)
         return buildList {
+            // Live while it lasts, gone when the other app lets go (plan §8.3). Not dismissible:
+            // it says why the computer is hearing nothing right now.
+            if (micLive && micSilenced) {
+                add(
+                    BannerModel(
+                        key = "micInUse",
+                        title = stringResource(R.string.home_banner_mic_in_use),
+                        message = stringResource(R.string.home_banner_mic_in_use_body),
+                        icon = SpIcons.Mic,
+                        warning = true,
+                    ),
+                )
+            }
             if (state.routes.isNotEmpty() && !notificationsEnabled) {
                 add(
                     BannerModel(

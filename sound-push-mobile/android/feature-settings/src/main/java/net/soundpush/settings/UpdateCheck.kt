@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import net.soundpush.engine.Caches
 
 /** Public project pages the app links to (opened in the browser). */
 internal object ProjectLinks {
@@ -18,6 +19,14 @@ internal object ProjectLinks {
     const val REPORT_BUG = "$REPO/issues/new/choose"
     const val SOURCE = REPO
     const val LATEST_API = "https://api.github.com/repos/FlyToRakib/soundpush/releases/latest"
+}
+
+/**
+ * Register this module's caches so `onTrimMemory` can drop them (plan §8.4). Called once from the
+ * application; the update check simply asks GitHub again next time.
+ */
+fun registerSettingsCaches() {
+    Caches.onTrim { UpdateChecker.forget() }
 }
 
 internal sealed interface UpdateStatus {
@@ -36,6 +45,11 @@ internal object UpdateChecker {
     /** Last successful result in this process, so reopening Settings does not ask GitHub again. */
     @Volatile var cached: UpdateStatus? = null
         private set
+
+    /** Drop the remembered result (memory pressure); the next check asks GitHub again. */
+    fun forget() {
+        cached = null
+    }
 
     /**
      * Automatic checks ([manual] false) run once per app process and fail silently (offline, rate-limited);

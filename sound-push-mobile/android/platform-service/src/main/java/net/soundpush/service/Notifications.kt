@@ -60,7 +60,9 @@ object Notifications {
     /**
      * The foreground-service notification. While this phone plays audio it is a media notification
      * tied to [session], which gives it media controls and, on Android 11+, the system output
-     * switcher. Stop and Mute are always there; the microphone route adds "Microphone in use".
+     * switcher. Stop and Mute are always there; the microphone route adds "Microphone in use", or
+     * says so when another app has taken the microphone and Android is sending silence ([micSilenced],
+     * plan §8.3).
      */
     fun streaming(
         context: Context,
@@ -69,6 +71,7 @@ object Notifications {
         session: MediaSessionCompat.Token? = null,
         connecting: Boolean = false,
         output: DeviceStatus.Output? = null,
+        micSilenced: Boolean = false,
     ) = run {
         val active = state?.routes?.filter { it.status == "active" }.orEmpty()
         val receiving = state?.routes?.filter { !it.isSending && it.status != "stopped" }.orEmpty()
@@ -109,8 +112,9 @@ object Notifications {
             action(ServiceR.drawable.ic_action_stop, R.string.route_stop, serviceAction(context, ACTION_STOP_ALL, 1))
         }
         if (micLive) {
-            builder.setSubText(context.getString(R.string.notif_mic_live))
-            if (session == null) builder.setContentText(context.getString(R.string.notif_mic_live))
+            val micText = context.getString(if (micSilenced) R.string.notif_mic_silenced else R.string.notif_mic_live)
+            builder.setSubText(micText)
+            if (session == null) builder.setContentText(micText)
             val micMuted = state?.routes?.filter { it.isMic && it.isSending }.orEmpty().let { it.isNotEmpty() && it.all { r -> r.muted } }
             action(
                 ServiceR.drawable.ic_action_mic_off,
