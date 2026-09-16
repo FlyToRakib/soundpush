@@ -128,7 +128,8 @@ export const engine = {
   hotkeyStatus: () => call<HotkeyStatus>("hotkey_status"),
   setHotkey: (kind: HotkeyKind, accelerator: string | null) => call<void>("set_hotkey", { kind, accelerator }),
   networkStatus: () => call<NetworkStatus>("network_status"),
-  fixFirewall: (includePublic: boolean) => call<NetworkStatus>("fix_firewall", { includePublic }),
+  fixFirewall: (includePublic: boolean, makePrivate: boolean) =>
+    call<NetworkStatus>("fix_firewall", { includePublic, makePrivate }),
   systemStatus: () => call<SystemStatus>("system_status"),
   tetheringStatus: () => call<TetheringStatus>("tethering_status"),
   requestMicrophone: () => call<void>("request_microphone"),

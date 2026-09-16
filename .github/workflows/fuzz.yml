@@ -3,7 +3,7 @@ name: Fuzz
 # Nightly fuzzing of every cargo-fuzz target in fuzz/ (docs/soundpush-final.md §29.1: 30 min per target).
 # The corpus grows across runs through the Actions cache; seed files committed under fuzz/corpus/<target>
 # are used as well. A crash fails the job and uploads the crashing input as an artifact:
-#   cargo +nightly fuzz run <target> <downloaded-file>   reproduces it locally.
+#   cargo +$NIGHTLY fuzz run <target> <downloaded-file>   reproduces it locally (NIGHTLY is below).
 on:
   schedule:
     - cron: "17 2 * * *"
@@ -27,6 +27,15 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Both halves of the fuzzing toolchain are pinned. cargo-fuzz is not in taiki-e/install-action's
+  # manifest, so `tool: cargo-fuzz` fell through to its cargo-binstall fallback and picked up
+  # whatever version was current that night, on top of whatever rustup was serving as `nightly`:
+  # a job that re-installs its own compiler every night eventually breaks for reasons that have
+  # nothing to do with the code under test, and it breaks all six targets at once. Bump this pair
+  # as a reviewed change, after `cd fuzz && cargo +<nightly> fuzz build` (no target name: builds
+  # every target) succeeds locally.
+  NIGHTLY: nightly-2026-09-16
+  CARGO_FUZZ_VERSION: 0.13.2
 
 jobs:
   targets:
@@ -61,27 +70,40 @@ jobs:
       SECONDS_PER_TARGET: ${{ inputs.seconds || 1800 }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz -> target
-          key: fuzz
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
+          # rust-toolchain.toml pins the repository to stable, so that — not the nightly the
+          # fuzzers are built with — is what rust-cache hashes into its key. Name the nightly here
+          # so bumping it starts from a clean fuzz/target instead of one built by another compiler.
+          key: fuzz-${{ env.NIGHTLY }}
+      # cargo-fuzz built from its own lockfile with the same nightly: reproducible, and cached in
+      # ~/.cargo/bin by the step above, so later runs find it already installed and skip the build.
+      - name: Install cargo-fuzz ${{ env.CARGO_FUZZ_VERSION }}
+        run: cargo "+$NIGHTLY" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
       - uses: actions/cache@v4
         with:
           path: fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
+      # Built separately from the fuzzing run so the log says which of the two broke: a red "Build"
+      # is the toolchain, a red "Fuzz" is a finding.
+      # Every cargo call needs the explicit +toolchain: cargo-fuzz runs from the repository root,
+      # where rust-toolchain.toml would otherwise select stable, which rejects the -Z sanitizer
+      # flags cargo-fuzz builds with.
+      - name: Build ${{ matrix.target }}
+        run: cargo "+$NIGHTLY" fuzz build "$TARGET"
       - name: Fuzz
         run: |
           mkdir -p "fuzz/corpus/$TARGET"
-          cargo +nightly fuzz run "$TARGET" "fuzz/corpus/$TARGET" -- \
+          cargo "+$NIGHTLY" fuzz run "$TARGET" "fuzz/corpus/$TARGET" -- \
             -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=4096 -timeout=10
       - name: Shrink the corpus
         if: success()
-        run: cargo +nightly fuzz cmin "$TARGET" "fuzz/corpus/$TARGET"
+        run: cargo "+$NIGHTLY" fuzz cmin "$TARGET" "fuzz/corpus/$TARGET"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
