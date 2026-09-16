@@ -61,11 +61,18 @@ mobile-check:
 mobile-format:
     cd sound-push-mobile/android && ./gradlew ktlintFormat
 
-# Rewrite gradle/verification-metadata.xml after a dependency changes (§31). Afterwards, add back the
-# aapt2 entries for the operating systems this machine is not: AGP picks aapt2 by OS, so a file
-# generated on one machine misses the others. The entries in the file say where they came from.
+# Rewrite gradle/verification-metadata.xml after a dependency changes (§31). It downloads everything
+# again into a throwaway Gradle home, which is slow but the only way to get a complete file: Gradle
+# writes a checksum only for what it actually fetches, so a warm cache silently leaves out the POM
+# and .module files it had already parsed, and the build then fails on a cold machine — CI — with
+# "checksums are missing from verification metadata". Afterwards, add back the aapt2 entries for the
+# operating systems this machine is not: AGP picks aapt2 by OS, so a file generated on one machine
+# misses the others. The entries in the file say where they came from.
 mobile-verification:
-    cd sound-push-mobile/android && ./gradlew --write-verification-metadata sha256 assembleDebug bundleDebug assembleRelease bundleRelease testDebugUnitTest lint ktlintCheck :benchmark:assembleBenchmark
+    rm -rf sound-push-mobile/android/.gradle-cold-home
+    cd sound-push-mobile/android && ./gradlew -g .gradle-cold-home --write-verification-metadata sha256 assembleDebug bundleDebug assembleRelease bundleRelease testDebugUnitTest lint ktlintCheck :benchmark:assembleBenchmark
+    cd sound-push-mobile/android && ./gradlew -g .gradle-cold-home --stop
+    rm -rf sound-push-mobile/android/.gradle-cold-home
 
 # Startup and jank measurements against a connected phone (adb devices) or a running emulator.
 mobile-benchmark:

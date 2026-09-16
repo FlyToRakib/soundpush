@@ -109,7 +109,10 @@ Gradle checks every downloaded dependency against
 `sound-push-mobile/android/gradle/verification-metadata.xml` (plan §31), so the Android build fails if
 an artifact changes underneath it. After changing a dependency or a plugin version, regenerate the
 file with `just mobile-verification` and read the note in that recipe about the `aapt2` entries for
-the operating systems your machine is not.
+the operating systems your machine is not. The recipe downloads every dependency again into a
+throwaway Gradle home, so it takes a while, and that is the point: Gradle records a checksum only for
+what it actually fetches, so a regeneration served from a warm cache leaves out the POM and `.module`
+files it had already parsed, and CI — which always starts cold — then fails on them.
 
 ## If something fails
 

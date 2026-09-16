@@ -28,6 +28,8 @@ captures/
 # Kotlin compiler daemon session files (sound-push-mobile/android/.kotlin/sessions).
 .kotlin/
 sound-push-mobile/android/core-engine/src/main/jniLibs/
+# Throwaway Gradle home `just mobile-verification` downloads into; the recipe deletes it afterwards.
+sound-push-mobile/android/.gradle-cold-home/
 
 # Generated
 sound-push-desktop/ui/src/lib/engine/bindings.ts
