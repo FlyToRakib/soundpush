@@ -833,7 +833,7 @@ fn a_second_phone_must_confirm_before_taking_the_virtual_microphone() {
         .block_on(two.start_route(desk_id.clone(), RouteKind::SendMicToVirtualMic, false))
         .expect_err("a second microphone feed needs confirmation");
     assert_eq!(refused.key(), "error.audio.virtualMicBusy");
-    assert_eq!(feeds(&desk.state()), [one_id.clone()]);
+    assert_eq!(feeds(&desk.state()), std::slice::from_ref(&one_id));
 
     // The user confirms, so it takes over and the first feed ends.
     rt.block_on(two.start_route(desk_id, RouteKind::SendMicToVirtualMic, true))
