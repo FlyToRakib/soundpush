@@ -197,6 +197,22 @@ static HANDSHAKE_FAILURES: Mutex<Vec<(IpAddr, Instant, u32)>> = Mutex::new(Vec::
 /// push everything else out of a rotated log. The first failure is reported immediately; the ones
 /// that follow are counted and summarized.
 fn log_handshake_failure(remote: SocketAddr, error: &quinn::ConnectionError) {
+    // The peer closed it on purpose. Two devices that reconnect at the same moment each dial the
+    // other, and the engine keeps one connection and closes the duplicate — often while its
+    // handshake is still running. That is the design working, not a failure worth a warning.
+    // An application close cannot be sent before the handshake completes, so QUIC carries it as
+    // a transport close with APPLICATION_ERROR; after it, as an ordinary application close.
+    let closed_on_purpose = match error {
+        quinn::ConnectionError::ApplicationClosed(_) => true,
+        quinn::ConnectionError::ConnectionClosed(close) => {
+            close.error_code == quinn::TransportErrorCode::APPLICATION_ERROR
+        }
+        _ => false,
+    };
+    if closed_on_purpose {
+        debug!(%remote, %error, "incoming handshake closed by the peer");
+        return;
+    }
     let now = Instant::now();
     let Ok(mut seen) = HANDSHAKE_FAILURES.lock() else {
         warn!(%remote, %error, "incoming handshake failed");

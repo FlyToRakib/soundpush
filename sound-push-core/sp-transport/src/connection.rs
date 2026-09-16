@@ -610,13 +610,14 @@ mod tests {
         let err = tcp.connect(own, Some(phone)).await.err().unwrap();
         assert!(matches!(err, TransportError::DialedSelf), "tcp: {err}");
 
-        // Another device refusing the pinned key is still an ordinary failure, not "ourselves".
+        // Another device refusing the pinned key is still an ordinary failure, not "ourselves" —
+        // and the device that was refused sees it as a certificate refusal, which is what tells
+        // its user to pair again.
         let stranger = Endpoint::bind(&DeviceIdentity::generate(), &config()).unwrap();
         let stranger_addr = SocketAddr::from(([127, 0, 0, 1], stranger.local_port()));
-        tokio::spawn(async move {
-            while let Some(h) = stranger.accept().await {
-                let _ = h.finish().await;
-            }
+        let refused = tokio::spawn(async move {
+            let h = stranger.accept().await.unwrap();
+            h.finish().await.err().unwrap()
         });
         let err = quic
             .connect(stranger_addr, Some(phone))
@@ -627,5 +628,10 @@ mod tests {
             !matches!(err, TransportError::DialedSelf),
             "a stranger is not this device: {err}"
         );
+        let seen = tokio::time::timeout(Duration::from_secs(5), refused)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(seen.is_certificate_refusal(), "quic refusal: {seen}");
     }
 }

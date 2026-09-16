@@ -607,9 +607,12 @@ pub(crate) async fn spawn(
                         Ok(conn) => {
                             let _ = tx.send(Internal::Incoming(conn));
                         }
-                        Err(_) => {
+                        // Only a refused certificate says the other device does not recognise
+                        // this one; a duplicate connection closed on purpose must not count.
+                        Err(e) if e.is_certificate_refusal() => {
                             let _ = tx.send(Internal::HandshakeRefused(remote));
                         }
+                        Err(_) => {}
                     }
                 });
             }
@@ -739,9 +742,11 @@ fn spawn_tcp_accept(tcp: Arc<TcpEndpoint>, tx: mpsc::UnboundedSender<Internal>) 
                     Ok(conn) => {
                         let _ = tx.send(Internal::Incoming(conn));
                     }
-                    Err(_) => {
+                    // As for QUIC: only a refused certificate counts.
+                    Err(e) if e.is_certificate_refusal() => {
                         let _ = tx.send(Internal::HandshakeRefused(remote));
                     }
+                    Err(_) => {}
                 }
             });
         }

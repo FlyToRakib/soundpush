@@ -64,3 +64,52 @@ pub enum TransportError {
     #[error("security error: {0}")]
     Security(#[from] sp_security::SecurityError),
 }
+
+impl TransportError {
+    /// The other device refused this one's certificate during the handshake: it does not
+    /// recognise this device's key.
+    ///
+    /// Only this is evidence that a device needs pairing again. A peer that closes a handshake on
+    /// purpose — two devices dialling each other at once, the duplicate dropped — or one that went
+    /// away mid-handshake is not, and must not be counted as a refusal.
+    pub fn is_certificate_refusal(&self) -> bool {
+        match self {
+            // TLS alerts travel in QUIC as crypto error codes, 0x100 + the alert.
+            Self::Connection(quinn::ConnectionError::ConnectionClosed(close)) => {
+                (0x100..0x200).contains(&u64::from(close.error_code))
+            }
+            Self::Io(e) => e
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+                .is_some_and(|tls| matches!(tls, rustls::Error::AlertReceived(_))),
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use super::*;
+
+    fn closed(code: quinn::TransportErrorCode) -> TransportError {
+        TransportError::Connection(quinn::ConnectionError::ConnectionClosed(
+            quinn::ConnectionClose {
+                error_code: code,
+                frame_type: None,
+                reason: Bytes::new(),
+            },
+        ))
+    }
+
+    #[test]
+    fn only_a_refused_certificate_counts_as_a_refusal() {
+        // bad_certificate (42), as a device that does not recognise our key sends it.
+        assert!(closed(quinn::TransportErrorCode::crypto(42)).is_certificate_refusal());
+        // Two devices dialled each other and one closed the duplicate during its handshake.
+        assert!(!closed(quinn::TransportErrorCode::APPLICATION_ERROR).is_certificate_refusal());
+        assert!(!TransportError::Timeout.is_certificate_refusal());
+        assert!(!TransportError::Closed.is_certificate_refusal());
+    }
+}
