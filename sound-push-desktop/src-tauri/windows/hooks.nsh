@@ -9,6 +9,10 @@
 ; silent) the uninstaller checks for the rule first (`netsh ... show rule` works without
 ; administrator rights and fails when there is no such rule) and only then asks once through
 ; UAC. Declining leaves the rule behind; it names the removed SoundPush.exe, so it allows nothing.
+;
+; The same fix can move a network from the Public to the Private profile when the user says it is
+; their own. That is a Windows setting every app on the computer relies on, not SoundPush's to take
+; back, so the uninstaller deliberately leaves it alone.
 !macro SOUNDPUSH_REMOVE_FIREWALL_RULE
   ${If} $UpdateMode <> 1
   ${AndIfNot} ${Silent}
