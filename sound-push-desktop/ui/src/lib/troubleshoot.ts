@@ -43,7 +43,18 @@ const names = (list: { name: string }[]) => list.map((p) => p.name).join(", ");
 function firewall(ctx: Context): Step[] {
   const n = ctx.network;
   if (!n?.supported) return [];
-  if (n.firewallEnabled && n.blocked) return [{ status: "problem", key: "trouble.check.firewallBlocked", action: "fixFirewall" }];
+  if (n.firewallEnabled && n.blocked) {
+    // A public network is the usual reason, and needs a different answer, so name it here too.
+    const onPublic = n.publicNetwork && n.publicNetworkName;
+    return [
+      {
+        status: "problem",
+        key: onPublic ? "trouble.check.firewallBlockedPublic" : "trouble.check.firewallBlocked",
+        args: onPublic ? [n.publicNetworkName ?? ""] : undefined,
+        action: "fixFirewall",
+      },
+    ];
+  }
   const steps: Step[] = [{ status: "ok", key: "trouble.check.firewallOk" }];
   if (n.publicNetwork && !n.allowedOnPublic) {
     steps.push({ status: "tip", key: "trouble.check.publicNetwork", args: [n.publicNetworkName ?? ""], action: "openNetworkSettings" });
