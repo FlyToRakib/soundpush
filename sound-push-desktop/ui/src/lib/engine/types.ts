@@ -387,6 +387,8 @@ export interface NetworkStatus {
   publicNetwork: boolean;
   publicNetworkName: string | null;
   allowedOnPublic: boolean;
+  /** The fix can move the connected public network to the private profile. */
+  canMakePrivate: boolean;
 }
 
 export type PermissionState = "granted" | "denied" | "notDetermined" | "restricted" | "unknown";

@@ -627,17 +627,24 @@ pub async fn network_status(
     Ok(status)
 }
 
-/// Add SoundPush's firewall rule through a UAC prompt, then check again.
+/// Add SoundPush's firewall rule — and, when asked, move the connected public network to the
+/// Private profile — through one UAC prompt, then check again.
 #[tauri::command]
 pub async fn fix_firewall(
     state: State<'_, AppState>,
     include_public: bool,
+    make_private: bool,
 ) -> CmdResult<crate::network::NetworkStatus> {
-    tauri::async_runtime::spawn_blocking(move || crate::network::fix_firewall(include_public))
-        .await
-        .map_err(|e| EngineError::Internal(e.to_string()))?
-        .map_err(EngineError::Internal)?;
-    network_status(state).await
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        crate::network::fix_firewall(include_public, make_private)?;
+        // Windows publishes a new network profile a beat after it is set.
+        Ok::<_, String>(crate::network::settled_status())
+    })
+    .await
+    .map_err(|e| EngineError::Internal(e.to_string()))?
+    .map_err(EngineError::Internal)?;
+    state.hooks.set_network_status(status.clone());
+    Ok(status)
 }
 
 /// USB tethering to a phone, the devices reached through it, and whether it carries this

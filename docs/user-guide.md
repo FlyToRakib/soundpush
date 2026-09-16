@@ -206,8 +206,9 @@ The desktop app also has short tips under **Settings → Help & diagnostics**.
 
 - Both must be on the **same network**. Guest networks, public hotspots and some office/university Wi-Fi block
   devices from seeing each other ("client isolation"). Use the phone's **hotspot** or **USB tethering** instead.
-- Windows: the network should be **Private** (Settings → Network & internet → *your network* → Private), and SoundPush
-  must be allowed through Windows Firewall on private networks.
+- Windows: SoundPush shows a **Fix** button when the firewall is in the way. It adds one rule for SoundPush only,
+  and — if you tell it the network is your own — moves that network to the **Private** profile, in a single
+  administrator prompt. A rule for private networks does nothing while Windows still calls the network public.
 - VPNs on either device can hide the local network; pause them.
 - Try connecting by address (Devices → Enter address) using the address in Settings → About.
 - Check **Who can find this computer** isn't set to *Nobody* while pairing.
