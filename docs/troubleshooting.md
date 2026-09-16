@@ -11,6 +11,19 @@ things people otherwise chase for a while:
 - **audio-enhancement software** on Windows (Nahimic, Sonic Studio and the like) that sits in the sound path and can
   make recordings silent.
 
+## "A device keeps trying to connect but doesn't recognise this computer"
+
+Devices remember each other by a key they exchange when you pair them, and each one refuses anything else — which is
+what keeps a stranger on your network from taking your microphone. So a device that was paired with SoundPush on a
+computer that has since been reinstalled, or whose SoundPush data was cleared, no longer recognises it: it keeps
+trying to connect, is refused every time, and neither device can do anything about it on its own.
+
+SoundPush tells you when that happens, names the address it is coming from, and records it in the security log
+(**Settings → Privacy & security → Security log**). The fix is to pair the two devices again: forget the old entry on
+the device that keeps trying, then pair from either side as usual.
+
+Nothing is wrong with your network in this case, and the streams you already have are unaffected.
+
 If support asks you to change something that is not in the ordinary settings, it will be in
 [Advanced settings](advanced.md).
 
