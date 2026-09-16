@@ -2417,16 +2417,18 @@ impl Actor {
         reply: Reply<String>,
         fallback: QualityFallback,
     ) {
-        if let Err(e) = self.check_local_capability(kind) {
-            let _ = reply.send(Err(e));
-            return;
-        }
+        // Starting a route that already runs is a no-op, answered before anything can refuse it:
+        // repeated start calls stay safe (plan §27.2), including at the receiver limit.
         if let Some(existing) = self
             .routes
             .iter()
             .find(|r| r.peer == peer && r.kind == kind && r.status != RouteStatus::Stopped)
         {
             let _ = reply.send(Ok(existing.key()));
+            return;
+        }
+        if let Err(e) = self.check_local_capability(kind) {
+            let _ = reply.send(Err(e));
             return;
         }
         let mut profile = self.profile_for(kind, &peer);

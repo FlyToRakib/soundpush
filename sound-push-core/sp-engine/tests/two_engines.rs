@@ -465,6 +465,11 @@ fn a_source_feeds_at_most_its_configured_number_of_receivers() {
         .block_on(phone_b.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
         .unwrap_err();
     assert_eq!(sp_engine::ErrorView::from(&refused).code, "SP-CFG-003");
+    // Asking again for a route that already runs stays a no-op, even at the limit.
+    assert!(
+        rt.block_on(phone_a.start_route(desk_id.clone(), RouteKind::ReceiveSystemAudio))
+            .is_ok()
+    );
     let log = rt.block_on(desk.audit_log()).unwrap();
     assert!(
         log.iter()
