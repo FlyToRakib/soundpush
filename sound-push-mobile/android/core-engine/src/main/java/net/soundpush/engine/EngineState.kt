@@ -22,6 +22,11 @@ data class EngineState(
     val settings: Settings = Settings(),
     val capabilities: Capabilities = Capabilities(),
     val micLevelDb: Float = -120f,
+    val micClipping: Boolean = false,
+    /** A feedback loop is being heard while monitoring the microphone on the speaker (plan §8.2). */
+    val micFeedback: Boolean = false,
+    /** Noise suppression switched itself off because capture could not keep up (plan §8.3). */
+    val noiseSuppressionSuspended: Boolean = false,
     val networkTests: List<NetworkTestView> = emptyList(),
 ) {
     val trustedPeers get() = peers.filter { it.trusted }
@@ -127,7 +132,7 @@ data class DeviceProfile(
     val customMaxMs: Int? = null,
     val quality: String? = null,
     val opusBitrate: Int? = null,
-    val redundancy: Boolean? = null,
+    val redundancy: String? = null,
 )
 
 @Serializable
@@ -141,6 +146,7 @@ data class RouteStats(
     val underruns: Long = 0,
     val driftPpm: Int = 0,
     val levelDb: Float = -120f,
+    val clipping: Boolean = false,
 )
 
 @Serializable
@@ -221,7 +227,7 @@ data class StreamSettings(
     val customMaxMs: Int = 120,
     val quality: String = "auto",
     val opusBitrate: Int = 128_000,
-    val redundancy: Boolean = false,
+    val redundancy: String = "auto",
 )
 
 @Serializable
@@ -242,12 +248,14 @@ data class MicSettings(
     val device: String? = null,
     val gainDb: Float = 0f,
     val noiseSuppression: Boolean = false,
+    val noiseSuppressionAt: String = "sender",
     val mode: String = "voiceCommunication",
     val systemAgc: Boolean = false,
     val systemNoiseSuppression: Boolean = true,
     val systemEchoCancellation: Boolean = true,
     val monitor: Boolean = false,
     val highPass: Boolean = true,
+    val echoDucking: Boolean = false,
 )
 
 @Serializable
@@ -272,7 +280,7 @@ data class SavedRoute(val peerId: String, val kind: String, val keep: Boolean = 
 
 @Serializable
 data class Settings(
-    val version: Int = 2,
+    val version: Int = 3,
     val deviceName: String = "",
     val theme: String = "system",
     val language: String = "system",

@@ -25,6 +25,7 @@ import net.soundpush.engine.OutputPreference
 import net.soundpush.engine.SoundPush
 import net.soundpush.ui.R
 import net.soundpush.ui.components.Choice
+import net.soundpush.ui.components.LevelMeter
 import net.soundpush.ui.components.SectionTitle
 import net.soundpush.ui.components.SettingChoice
 import net.soundpush.ui.components.SettingSlider
@@ -42,6 +43,7 @@ fun AudioScreen(state: EngineState) {
     val percent = rememberFormat(R.string.unit_percent)
     val ms = rememberFormat(R.string.unit_ms)
     val gain = rememberFormat(R.string.unit_db_gain)
+    val balance = rememberBalanceLabel()
 
     Column(
         Modifier
@@ -109,6 +111,26 @@ fun AudioScreen(state: EngineState) {
                     listOf(10, 24, 32, 64, 96, 128, 192, 256, 320, 450, 510).map { Choice((it * 1000).toString(), stringResource(R.string.unit_kbps, it)) },
                 ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(opusBitrate = v.toInt())) } }
             }
+            Divider()
+            // "Resilient" (plan §15.6). Auto is the default and keeps the automatic behaviour.
+            SettingChoice(
+                stringResource(R.string.audio_redundancy),
+                s.stream.redundancy,
+                listOf(
+                    Choice("auto", stringResource(R.string.audio_redundancy_auto)),
+                    Choice("on", stringResource(R.string.audio_redundancy_on)),
+                    Choice("off", stringResource(R.string.audio_redundancy_off)),
+                ),
+            ) { v -> SoundPush.updateSettings { it.copy(stream = it.stream.copy(redundancy = v)) } }
+            Caption(
+                stringResource(
+                    when (s.stream.redundancy) {
+                        "on" -> R.string.audio_redundancy_on_desc
+                        "off" -> R.string.audio_redundancy_off_desc
+                        else -> R.string.audio_redundancy_auto_desc
+                    },
+                ),
+            )
         }
 
         SectionTitle(stringResource(R.string.audio_playback))
@@ -121,6 +143,14 @@ fun AudioScreen(state: EngineState) {
                 range = 0f..2f,
                 format = { percent((it * 100).roundToInt()) },
             ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(volume = v)) } }
+            // Balance and mono go together: one earbud in, or a speaker on one side only.
+            SettingSlider(
+                label = stringResource(R.string.audio_balance),
+                value = s.output.balance,
+                range = -1f..1f,
+                steps = 39,
+                format = balance,
+            ) { v -> SoundPush.updateSettings { it.copy(output = it.output.copy(balance = snapBalance(v))) } }
             SettingSwitch(stringResource(R.string.audio_mono), s.output.mono) { v ->
                 SoundPush.updateSettings { it.copy(output = it.output.copy(mono = v)) }
             }
@@ -164,11 +194,16 @@ fun AudioScreen(state: EngineState) {
 
         SectionTitle(stringResource(R.string.audio_mic))
         SpCard {
+            // The recommended preset is marked in the list, as the plan describes (§4.3).
+            val recommended = stringResource(R.string.mic_recommended_badge)
             SettingChoice(
                 stringResource(R.string.audio_mic_mode),
                 s.mic.mode,
                 listOf("voiceCommunication", "default", "raw", "voicePerformance", "voiceRecognition", "camcorder", "mic")
-                    .map { mode -> Choice(mode, micModeLabel(mode)) },
+                    .map { mode ->
+                        val label = micModeLabel(mode)
+                        Choice(mode, if (mode == RECOMMENDED_MIC_MODE) "$label · $recommended" else label)
+                    },
             ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(mode = v)) } }
             Divider()
             SettingSlider(
@@ -177,11 +212,44 @@ fun AudioScreen(state: EngineState) {
                 range = 0f..20f,
                 format = { gain(it.roundToInt()) },
             ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(gainDb = v.roundToInt().toFloat())) } }
+            // The live level while the microphone is streaming or being monitored, with the clip
+            // indicator the volume boost needs (plan §8.3).
+            if (state.micLevelDb > -119f) {
+                LevelMeter(stringResource(R.string.audio_mic_level), state.micLevelDb, state.micClipping)
+            }
+            SettingSwitch(
+                stringResource(R.string.audio_high_pass),
+                s.mic.highPass,
+                stringResource(R.string.audio_high_pass_desc),
+            ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(highPass = v)) } }
+            if (state.noiseSuppressionSuspended) {
+                Caption(stringResource(R.string.audio_noise_suppression_suspended))
+            }
             SettingSwitch(
                 stringResource(R.string.audio_noise_suppression),
                 s.mic.noiseSuppression,
                 stringResource(R.string.audio_noise_suppression_desc),
             ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(noiseSuppression = v)) } }
+            if (s.mic.noiseSuppression) {
+                // Where the work happens: this phone's battery, or the computer's CPU (plan §4.3).
+                SettingChoice(
+                    stringResource(R.string.audio_noise_suppression_where),
+                    s.mic.noiseSuppressionAt,
+                    listOf(
+                        Choice("sender", stringResource(R.string.audio_noise_suppression_sender)),
+                        Choice("receiver", stringResource(R.string.audio_noise_suppression_receiver)),
+                    ),
+                ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(noiseSuppressionAt = v)) } }
+                Caption(
+                    stringResource(
+                        if (s.mic.noiseSuppressionAt == "receiver") {
+                            R.string.audio_noise_suppression_receiver_desc
+                        } else {
+                            R.string.audio_noise_suppression_sender_desc
+                        },
+                    ),
+                )
+            }
             SettingSwitch(
                 stringResource(R.string.audio_echo),
                 s.mic.systemEchoCancellation && AudioEffects.echoCancellation,
@@ -205,14 +273,32 @@ fun AudioScreen(state: EngineState) {
                 s.mic.monitor,
                 stringResource(R.string.audio_monitor_desc),
             ) { v -> SoundPush.updateSettings { it.copy(mic = it.mic.copy(monitor = v)) } }
+            if (state.micFeedback) {
+                Caption(stringResource(R.string.audio_feedback))
+            }
         }
     }
 }
 
+/** Android's own preset for voice; the list marks it so the choice is obvious (plan §4.3). */
+private const val RECOMMENDED_MIC_MODE = "voiceCommunication"
+
 @Composable
 private fun Divider() = HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
+/** Explanatory line under a control, in the same style as the rest of the screen. */
+@Composable
+private fun Caption(text: String) = Text(
+    text,
+    style = MaterialTheme.typography.bodySmall,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier = Modifier.padding(bottom = Tokens.Space.sm),
+)
+
 private fun snap5(value: Float) = (value / 5).roundToInt() * 5
+
+/** Balance in twentieths, matching the desktop's 5 % steps. */
+private fun snapBalance(value: Float) = (value * 20).roundToInt() / 20f
 
 /**
  * Where this phone plays (plan §23.1 "output", where Android allows): Automatic, or one of the
@@ -255,6 +341,27 @@ private fun outputTargetLabel(target: OutputPreference.Target): String = stringR
         OutputPreference.Target.Usb -> R.string.output_usb
     },
 )
+
+/**
+ * "Center", "Left 40 %", "Right 40 %" — the same wording as the desktop. Built outside
+ * composition so the slider can relabel itself while it is dragged.
+ */
+@Composable
+private fun rememberBalanceLabel(): (Float) -> String {
+    val center = stringResource(R.string.audio_balance_center)
+    val left = rememberFormat(R.string.audio_balance_left)
+    val right = rememberFormat(R.string.audio_balance_right)
+    return remember(center, left, right) {
+        { value ->
+            val percent = (snapBalance(value) * 100).roundToInt()
+            when {
+                percent == 0 -> center
+                percent < 0 -> left(-percent)
+                else -> right(percent)
+            }
+        }
+    }
+}
 
 @Composable
 private fun micModeLabel(mode: String): String = when (mode) {

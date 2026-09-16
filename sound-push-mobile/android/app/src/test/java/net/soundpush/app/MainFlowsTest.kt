@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.tryPerformAccessibilityChecks
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -181,5 +183,84 @@ class MainFlowsTest {
         compose.onNodeWithText(text(R.string.perm_mic_blocked_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.common_open_settings)).performClick()
         assertTrue(opened && dismissed)
+    }
+    /** Balance and the 80 Hz low-cut, which the engine and the desktop already had (plan §4.3). */
+    @Test
+    fun audioScreenOffersBalanceAndTheLowCutFilter() {
+        show { AudioScreen(idle) }
+        compose.onNodeWithText(text(R.string.audio_balance)).assertExists()
+        compose.onNodeWithText(text(R.string.audio_balance_center)).assertExists()
+        compose.onNode(hasText(text(R.string.audio_high_pass)) and isToggleable()).assertIsOn()
+        compose.onRoot().tryPerformAccessibilityChecks()
+    }
+
+    /** The recommended microphone preset is marked in the list (plan §4.3). */
+    @Test
+    fun theRecommendedMicrophoneModeIsMarked() {
+        show { AudioScreen(idle) }
+        compose.onNodeWithText(text(R.string.audio_mic_mode)).performScrollTo().performClick()
+        val recommended = text(R.string.mic_voiceCommunication) + " · " + text(R.string.mic_recommended_badge)
+        compose.onNodeWithText(recommended).assertExists()
+        compose.onNodeWithText(text(R.string.mic_raw)).assertExists()
+    }
+
+    /** "Resilient" is a user-facing choice that still defaults to the automatic behaviour (plan §15.6). */
+    @Test
+    fun resilientDefaultsToAutoAndExplainsItself() {
+        show { AudioScreen(idle) }
+        compose.onNodeWithText(text(R.string.audio_redundancy)).assertExists()
+        compose.onNodeWithText(text(R.string.audio_redundancy_auto_desc)).assertExists()
+        compose.onRoot().tryPerformAccessibilityChecks()
+    }
+
+    @Test
+    fun resilientExplainsAlwaysOn() {
+        val always = idle.copy(settings = idle.settings.copy(stream = StreamSettings(redundancy = "on")))
+        show { AudioScreen(always) }
+        compose.onNodeWithText(text(R.string.audio_redundancy_on_desc)).assertExists()
+    }
+
+    /** Where noise suppression runs only matters while it is on (plan §4.3, §15.7). */
+    @Test
+    fun whereNoiseSuppressionRunsIsHiddenWhileItIsOff() {
+        show { AudioScreen(idle) }
+        compose.onNodeWithText(text(R.string.audio_noise_suppression_where)).assertDoesNotExist()
+    }
+
+    @Test
+    fun noiseSuppressionOffersWhereItRuns() {
+        val on = idle.copy(settings = idle.settings.copy(mic = idle.settings.mic.copy(noiseSuppression = true)))
+        show { AudioScreen(on) }
+        compose.onNodeWithText(text(R.string.audio_noise_suppression_where)).assertExists()
+        compose.onNodeWithText(text(R.string.audio_noise_suppression_sender_desc)).assertExists()
+        compose.onRoot().tryPerformAccessibilityChecks()
+    }
+
+    /** Clipping is shown and announced, not only coloured (plan §8.3). */
+    @Test
+    fun theLevelMeterShowsAndAnnouncesClipping() {
+        val loud = idle.copy(micLevelDb = -1f, micClipping = true)
+        show { AudioScreen(loud) }
+        compose.onNodeWithText(text(R.string.audio_clipping)).assertExists()
+        compose
+            .onNode(hasStateDescription(text(R.string.a11y_level_clipping, text(R.string.a11y_level, -1))))
+            .assertExists()
+        compose.onRoot().tryPerformAccessibilityChecks()
+    }
+
+    /** A feedback loop while monitoring says what to do about it (plan §8.2). */
+    @Test
+    fun aFeedbackLoopIsExplainedOnTheAudioScreen() {
+        show { AudioScreen(idle.copy(micFeedback = true)) }
+        compose.onNodeWithText(text(R.string.audio_feedback)).assertExists()
+        compose.onRoot().tryPerformAccessibilityChecks()
+    }
+
+    /** Noise suppression switching itself off is explained where the setting is (plan §8.3). */
+    @Test
+    fun suspendedNoiseSuppressionIsExplained() {
+        show { AudioScreen(idle.copy(noiseSuppressionSuspended = true)) }
+        compose.onNodeWithText(text(R.string.audio_noise_suppression_suspended)).assertExists()
+        compose.onRoot().tryPerformAccessibilityChecks()
     }
 }

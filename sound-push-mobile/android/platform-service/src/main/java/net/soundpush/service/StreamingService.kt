@@ -191,7 +191,7 @@ class StreamingService : Service() {
             val peer = state?.connectedPeers?.firstOrNull { it.canSendSystemAudio }
             when {
                 peer == null -> Notifications.listenUnavailable(this@StreamingService)
-                state.routes.none { it.kind == LISTEN_KIND } -> SoundPush.command { startRoute(peer.deviceId, LISTEN_KIND) }
+                state.routes.none { it.kind == LISTEN_KIND } -> SoundPush.command { startRoute(peer.deviceId, LISTEN_KIND, false) }
             }
             // The engine's keep-alive takes over once the route opens; the stop grace period covers the gap.
             types = types.copy(listenStarting = false)

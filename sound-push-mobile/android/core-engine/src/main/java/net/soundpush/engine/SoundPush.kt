@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uniffi.soundpush_ffi.FfiException
 import uniffi.soundpush_ffi.MobilePlatform
 import uniffi.soundpush_ffi.SoundPushEngine
@@ -121,6 +122,9 @@ object SoundPush {
 
     private const val TAG = "SoundPush"
 
+    /** The computer's virtual microphone already has a feed; the user decides whether to take it. */
+    private const val VIRTUAL_MIC_BUSY = "error.audio.virtualMicBusy"
+
     /**
      * App log line through the engine logger (plan §28.1): the same log files and logcat stream as
      * the engine, so one log tells the whole story. Before the native library is loaded it falls
@@ -151,6 +155,27 @@ object SoundPush {
                 engine.block()
             } catch (e: FfiException.Engine) {
                 _errors.tryEmit(ErrorView(key = e.key, message = e.detail, fix = e.fix))
+            }
+        }
+    }
+
+    /**
+     * Start a route. Only one device at a time can be a computer's microphone, so the engine
+     * refuses a second one with `error.audio.virtualMicBusy`; [onMicrophoneBusy] then runs on the
+     * main thread so the app can ask "Replace current microphone source?" and call this again with
+     * [replace] (plan §8.2). Every other error goes to [errors] as usual.
+     */
+    fun startRoute(peerId: String, kind: String, replace: Boolean = false, onMicrophoneBusy: () -> Unit = {}) {
+        if (!isStarted) return
+        scope.launch {
+            try {
+                engine.startRoute(peerId, kind, replace)
+            } catch (e: FfiException.Engine) {
+                if (e.key == VIRTUAL_MIC_BUSY) {
+                    withContext(Dispatchers.Main) { onMicrophoneBusy() }
+                } else {
+                    _errors.tryEmit(ErrorView(key = e.key, message = e.detail, fix = e.fix))
+                }
             }
         }
     }

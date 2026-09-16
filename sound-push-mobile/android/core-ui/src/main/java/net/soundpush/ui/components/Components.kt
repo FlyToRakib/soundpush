@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -52,6 +54,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import net.soundpush.ui.R
 import net.soundpush.ui.icons.SpIcons
 import net.soundpush.ui.theme.LocalSpColors
@@ -407,6 +410,53 @@ fun StatusBanner(
                     if (hasAction) TextButton(onClick = onAction!!) { Text(actionLabel!!) }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Live input level, −60…0 dBFS. [clipping] means the soft limiter after the volume boost is
+ * working (plan §8.3), so the bar turns red and the announcement says so instead of only
+ * looking different.
+ */
+@Composable
+fun LevelMeter(label: String, db: Float, clipping: Boolean = false, modifier: Modifier = Modifier) {
+    val rounded = db.coerceIn(-60f, 0f).roundToInt()
+    val fraction = ((rounded + 60) / 60f).coerceIn(0f, 1f)
+    val level = stringResource(R.string.a11y_level, rounded)
+    val state = if (clipping) stringResource(R.string.a11y_level_clipping, level) else level
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(vertical = Tokens.Space.xs)
+            .semantics(mergeDescendants = true) {
+                contentDescription = label
+                stateDescription = state
+                liveRegion = LiveRegionMode.Polite
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .weight(1f)
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction)
+                    .background(if (clipping || rounded > -3) MaterialTheme.colorScheme.error else LocalSpColors.current.success),
+            )
+        }
+        if (clipping) {
+            Spacer(Modifier.width(Tokens.Space.sm))
+            Text(
+                stringResource(R.string.audio_clipping),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

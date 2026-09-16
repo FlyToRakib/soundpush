@@ -144,6 +144,11 @@ class MainActivity : AppCompatActivity() {
     /** Screen-capture consent was refused for streams the user started: offer to ask again. */
     private var captureRefused by mutableStateOf<Pending.Start?>(null)
 
+    /** A microphone route waiting for "Replace current microphone source?" (plan §8.2). */
+    private data class MicTakeover(val peerId: String, val kind: String, val peerName: String)
+
+    private var micTakeover by mutableStateOf<MicTakeover?>(null)
+
     private fun takePending(): Pending? = pending.also { pending = null }
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -172,7 +177,7 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK && data != null) StreamingService.startAppAudio(this, result.resultCode, data)
         when (val p = takePending()) {
             is Pending.Start -> when {
-                ok -> p.kinds.forEach { kind -> SoundPush.command { startRoute(p.peerId, kind) } }
+                ok -> p.kinds.forEach { kind -> startRoute(p.peerId, kind) }
                 // Consent is asked every time and can't be blocked: explain and let the user try again.
                 else -> captureRefused = p
             }
@@ -341,7 +346,18 @@ class MainActivity : AppCompatActivity() {
             askCaptureConsent(Pending.Start(peerId, kinds))
             return
         }
-        kinds.forEach { kind -> SoundPush.command { startRoute(peerId, kind) } }
+        kinds.forEach { kind -> startRoute(peerId, kind) }
+    }
+
+    /**
+     * One route, asking first when another device is already the computer's microphone
+     * (plan §8.2); confirming starts the same route again, taking it over.
+     */
+    private fun startRoute(peerId: String, kind: String, replace: Boolean = false) {
+        SoundPush.startRoute(peerId, kind, replace) {
+            val name = SoundPush.state.value?.peers?.firstOrNull { it.deviceId == peerId }?.name.orEmpty()
+            micTakeover = MicTakeover(peerId, kind, name)
+        }
     }
 
     private fun withCamera(block: () -> Unit) {
@@ -621,6 +637,21 @@ class MainActivity : AppCompatActivity() {
                     }) { Text(stringResource(R.string.common_retry)) }
                 },
                 dismissButton = { TextButton(onClick = { captureRefused = null }) { Text(stringResource(R.string.common_cancel)) } },
+            )
+        }
+        micTakeover?.let { pending ->
+            AlertDialog(
+                onDismissRequest = { micTakeover = null },
+                icon = { Icon(SpIcons.Mic, null) },
+                title = { Text(stringResource(R.string.mic_takeover_title), textAlign = TextAlign.Center) },
+                text = { Text(stringResource(R.string.mic_takeover_body, pending.peerName)) },
+                confirmButton = {
+                    Button(onClick = {
+                        micTakeover = null
+                        startRoute(pending.peerId, pending.kind, replace = true)
+                    }) { Text(stringResource(R.string.mic_takeover_replace)) }
+                },
+                dismissButton = { TextButton(onClick = { micTakeover = null }) { Text(stringResource(R.string.common_cancel)) } },
             )
         }
     }
