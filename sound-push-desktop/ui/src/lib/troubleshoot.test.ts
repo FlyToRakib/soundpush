@@ -10,6 +10,7 @@ const network: NetworkStatus = {
   publicNetwork: false,
   publicNetworkName: null,
   allowedOnPublic: false,
+  canMakePrivate: false,
 };
 const system: SystemStatus = {
   microphone: "granted",
@@ -37,7 +38,14 @@ describe("troubleshooter", () => {
   it("offers the firewall fix first when incoming connections are blocked", async () => {
     const state = await baseState();
     const steps = diagnose("noDevices", { state, network: { ...network, blocked: true }, system, virtualMicInstalled: null });
-    expect(steps[0]).toMatchObject({ status: "problem", action: "fixFirewall" });
+    expect(steps[0]).toMatchObject({ status: "problem", action: "fixFirewall", key: "trouble.check.firewallBlocked" });
+  });
+
+  it("names the public network, because that is what the fix has to deal with", async () => {
+    const state = await baseState();
+    const blocked = { ...network, blocked: true, publicNetwork: true, publicNetworkName: "Loops 3", canMakePrivate: true };
+    const steps = diagnose("noDevices", { state, network: blocked, system, virtualMicInstalled: null });
+    expect(steps[0]).toMatchObject({ key: "trouble.check.firewallBlockedPublic", args: ["Loops 3"], action: "fixFirewall" });
   });
 
   it("explains a missing virtual microphone and a pending restart", async () => {

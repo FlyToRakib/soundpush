@@ -128,6 +128,7 @@ const mockNetwork = {
   publicNetwork: false,
   publicNetworkName: null,
   allowedOnPublic: false,
+  canMakePrivate: false,
 };
 
 const mockReport: NetworkReport = {

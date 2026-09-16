@@ -60,6 +60,10 @@ First public preview. Nothing has been released yet; everything below is new.
 
 ### Fixed
 
+- Windows firewall fix: on a network Windows calls public, "Allow SoundPush" used to add a rule for private networks
+  only, spend the administrator prompt and leave the phone just as blocked. It now offers to move that network to the
+  Private profile, or to allow SoundPush on public networks, and does either in the same single prompt.
+- The "Windows Firewall blocks other devices" notice no longer stays up while a paired device is connected.
 - Windows build: dual-stack UDP socket and COM feature flags.
 - Repeated handshake failures and stuck dials between engines.
 - Desktop: the engine stops cleanly on quit (speakers unmuted, peers told), and start failures are shown instead of

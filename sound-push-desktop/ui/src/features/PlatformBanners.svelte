@@ -1,6 +1,7 @@
 <script lang="ts">
   // Problems with the computer itself that stop SoundPush from working, each with its fix.
   import Banner from "../lib/components/Banner.svelte";
+  import { isConnected } from "../lib/devices";
   import { engine } from "../lib/engine/client";
   import { t } from "../lib/i18n";
   import { store } from "../lib/stores/engine.svelte";
@@ -12,9 +13,12 @@
   const net = $derived(platform.network);
   const sys = $derived(platform.system);
   const dismissed = $derived(store.state?.settings.dismissedTips ?? []);
+  // A device connected right now is proof the firewall is not in the way, whatever the rules say,
+  // so the notice is raised only while it is actually costing the user something.
+  const connected = $derived((store.state?.peers ?? []).some((p) => p.trusted && isConnected(p.connection)));
 </script>
 
-{#if net?.firewallEnabled && net.blocked}
+{#if net?.firewallEnabled && net.blocked && !connected}
   <Banner severity="warning" message={t("banner.firewall")} actionLabel={t("banner.firewall.fix")} onaction={() => (ui.firewallFix = true)} />
 {/if}
 {#if sys?.systemAudio === "denied"}
