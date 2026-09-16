@@ -35,7 +35,7 @@ use tracing::{debug, info, warn};
 use crate::audit::{AuditEntry, AuditKind, AuditLog, permission_name, policy_name};
 use crate::error::{ErrorView, Severity};
 use crate::health::LinkHealth;
-use crate::net::{local_addresses, resolve, sort_candidates};
+use crate::net::{local_addresses, race_candidates, resolve, sort_candidates};
 use crate::nettest::NetworkReport;
 use crate::pairing_limit::{Decision, PairingLimiter};
 use crate::pipeline::monitor::MicMonitor;
@@ -66,6 +66,8 @@ const LOCAL_ADDRESS_REFRESH: Duration = Duration::from_secs(30);
 const TRUST_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 /// Network candidates get this head start before the USB (adb reverse) candidate (plan §17.3).
 const USB_FALLBACK_DELAY: Duration = Duration::from_secs(2);
+/// A single candidate's handshake is given up after this long; the others race on regardless.
+const CANDIDATE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Time to open audio devices once a route is accepted.
 const PIPELINE_START_DEADLINE: Duration = Duration::from_secs(20);
 /// A blocked device that keeps reconnecting is written to the security log at most this often.
@@ -1342,7 +1344,7 @@ impl Actor {
 
     // ============================================================ dialing
 
-    /// Dial candidates in order. Returns the conn_id the resulting session will use.
+    /// Race the candidates (plan §17.3). Returns the conn_id the resulting session will use.
     /// With `usb_port`, a TLS-over-TCP attempt to that loopback port (an `adb reverse` forward)
     /// races the network candidates, starting after [`USB_FALLBACK_DELAY`] if there are any.
     fn dial(
@@ -1360,25 +1362,23 @@ impl Actor {
         let tx = self.internal_tx.clone();
         let task = tokio::spawn(async move {
             let has_network = !addrs.is_empty();
-            let network = async move {
-                let mut last = EngineError::Unreachable;
-                for addr in addrs.into_iter().take(8) {
-                    match tokio::time::timeout(
-                        Duration::from_secs(3),
-                        endpoint.connect(addr, pinned),
-                    )
-                    .await
+            // The ranked candidates race each other, each starting 250 ms after the one before
+            // it; the first authenticated handshake wins and the rest are cancelled.
+            let network = race_candidates(addrs, move |addr| {
+                let endpoint = endpoint.clone();
+                async move {
+                    match tokio::time::timeout(CANDIDATE_TIMEOUT, endpoint.connect(addr, pinned))
+                        .await
                     {
-                        Ok(Ok(conn)) => return Ok(conn),
+                        Ok(Ok(conn)) => Ok(conn),
                         Ok(Err(e)) => {
                             debug!(%addr, error = %e, "dial failed");
-                            last = e.into();
+                            Err(EngineError::from(e))
                         }
-                        Err(_) => last = EngineError::Unreachable,
+                        Err(_) => Err(EngineError::Unreachable),
                     }
                 }
-                Err(last)
-            };
+            });
             let usb = async move {
                 let (Some(tcp), Some(port)) = (tcp, usb_port) else {
                     return Err(EngineError::Unreachable);

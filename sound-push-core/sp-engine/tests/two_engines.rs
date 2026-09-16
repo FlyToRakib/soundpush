@@ -2,10 +2,13 @@
 //! reconnect and resume, shared encoders, per-device profiles, USB (TCP) and the network test.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // test helpers fail the test on purpose
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use sp_security::pairing::QrPairingPayload;
 
 use sp_engine::settings::{DeviceProfile, QualityMode};
 use sp_engine::sp_audio_io::null::NullBackend;
@@ -357,6 +360,43 @@ fn qr_pairing_route_and_audio() {
     let log = rt.block_on(desk.audit_log()).unwrap();
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].kind, AuditKind::LogCleared);
+}
+
+#[test]
+fn unreachable_candidates_do_not_delay_the_connection() {
+    let desk_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let desk = start(&desk_dir, "Desk", sine());
+    let phone = start(&phone_dir, "Phone", Arc::new(NullBackend::default()));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    // Put two black holes ahead of the desk's best address in its pairing code (a code carries
+    // three). They rank best (192.168/16) and equal ranks keep their order, so they are dialled
+    // first; each one costs the full 3 s handshake timeout. Dialling in order would need about
+    // 6 s; racing the candidates 250 ms apart reaches the real address at once (plan §17.3).
+    let uri = rt.block_on(desk.start_pairing()).unwrap();
+    let mut payload = QrPairingPayload::from_uri(&uri).unwrap();
+    let port = desk.state().local.port;
+    payload.addresses.truncate(1);
+    for octet in [11u8, 12] {
+        payload
+            .addresses
+            .insert(0, SocketAddr::from(([192, 168, 254, octet], port)));
+    }
+    let desk_id = desk.state().local.device_id.clone();
+    let started = Instant::now();
+    rt.block_on(phone.pair_with_qr(payload.to_uri())).unwrap();
+    wait_for_within(
+        &phone,
+        "phone connects past the black holes",
+        Duration::from_secs(4),
+        |s| connected(s, &desk_id),
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "candidates were not raced: {:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
