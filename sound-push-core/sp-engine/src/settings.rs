@@ -220,7 +220,7 @@ pub struct MicSettings {
     pub high_pass: bool,
     /// Lower this device's microphone while it plays the other side on its speakers, so the other
     /// side does not hear itself back. Desktops have no acoustic echo canceller
-    /// (docs/adr/0009-desktop-echo-control.md); Android uses the platform one instead.
+    /// (docs/adr/0020-desktop-echo-control.md); Android uses the platform one instead.
     pub echo_ducking: bool,
 }
 

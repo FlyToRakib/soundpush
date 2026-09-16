@@ -361,7 +361,7 @@ const DUCK_HOLD_BLOCKS: u32 = 20;
 
 /// Half-duplex echo control: lowers the microphone while this device plays the far side on its
 /// own speakers. Used where no acoustic echo canceller is available (plan §15.7 and
-/// docs/adr/0009-desktop-echo-control.md).
+/// docs/adr/0020-desktop-echo-control.md).
 pub struct DuckGate {
     gain: Gain,
     target: f32,
