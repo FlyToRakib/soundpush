@@ -1,6 +1,6 @@
 # Implementation status
 
-Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-14.
+Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-16.
 
 Legend: ✅ done and tested · 🟡 implemented, needs real-device verification · ⏳ not started · ⛔ blocked on something outside the repo
 
@@ -30,7 +30,13 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | `sp-engine` (actor, sessions, pairing, routes, permissions, reconnect, settings, state) | ✅ | unit tests plus two-engine tests: pairing → audio → prompt → stop → forget, restart-reconnect, resume without a second prompt, shared encoder, live codec switch, USB (TCP) + network test, resume after restart, anti-flap fallback to Stable, security log, pairing rate limit. Audio devices open off the actor. `#![forbid(unsafe_code)]` |
 | Connection `Degraded` state (§19.1) and anti-flap (§20) | ✅ | `health.rs`: loss > 3 % or jitter > 30 ms for 3 s, back after 5 s below 1 % / 15 ms; > 5 drops in 2 min holds the device on Stable for 10 min with a notice |
 | DTX during silence (§15.2) | ✅ | Opus only, `FEATURE_DTX` capability bit 31; header-only DTX packets after 200 ms hangover, keep-alive every 400 ms; receiver plays comfort silence without loss or underruns |
-| DSCP EF marking (§16.3) | 🟡 | `sp-transport/src/qos.rs`: qWAVE flows on Windows; `IP_TOS`/`IPV6_TCLASS` elsewhere (TCP carries it; QUIC packets not yet, quinn-udp 0.5 sends ECN-only TOS per packet). Needs a packet capture on real networks |
+| DSCP EF marking (§16.3) | 🟡 | `sp-transport/src/qos.rs`: qWAVE flows on Windows; `IP_TOS`/`IPV6_TCLASS` elsewhere (TCP carries it; QUIC packets not yet, quinn-udp 0.5.15 sends ECN-only TOS per packet — re-checked, still no per-packet or per-socket DSCP). A test pins that version and fails when the dependency moves, so it is re-examined. Needs a packet capture on real networks |
+| Candidate racing (§17.3) | ✅ | `net.rs` `race_candidates`: ranked candidates race with a 250 ms stagger, first authenticated handshake wins, losers cancelled; USB keeps its 2 s head start. Unit tests plus a two-engine test where black-hole candidates rank first |
+| Lossless quality fallback (§8.1, §15.6) | ✅ | `health.rs` `QualityFallback` + `actor/profiles.rs`: PCM → Opus 256 kb/s after 5 s above 2 % loss, back after 15 s below 0.5 %, with a notice both ways; carried across the restart a 1.0 peer needs |
+| Transport pinning (§16.1) | ✅ / 🟡 | `settings.transport`: Auto (default), QUIC, TCP, USB; TCP also moves the TLS-over-TCP listener from loopback to every interface while pinned. Desktop and Android Advanced settings. Needs a real UDP-blocked network to verify |
+| Multi-device limits (§19.2) | ✅ | `settings.maxReceivers` (default 8, 1–16) enforced per source for local and peer-requested routes (`SP-CFG-003`, `DeviceBusy`); `EngineState.streaming` carries the bandwidth/CPU estimate both UIs show before the limit is reached |
+| Mixed source: system audio + microphone (§5.1, §9.2) | ✅ / 🟡 | `SOURCE_MIXED` capability bit and the `mixed` endpoint; sender pipeline mixes a second capture with an independent gain per part, microphone DSP on its half, microphone mute silencing only it. Desktop and Android home task, gains on the desktop Audio page. Pipeline and two-engine tests; needs real hardware for the two capture clocks |
+| Stable public error codes (§36.4) | ✅ | `error.rs` `code()` and `stop_reason_code()`, in state snapshots, the FFI error, both UIs, diagnostics and logs; documented in [error-codes.md](error-codes.md) |
 | Security log (§21.1, §28.2) and pairing rate limit (5/min per address) | ✅ | `audit.rs` (1000 entries / 30 days, local only), `pairing_limit.rs`, `StopReason::RateLimited`; viewers in desktop and Android Settings |
 | Logging (§28.1) | ✅ / 🟡 | `logging.rs`: size rotation 5 × 10 MB desktop, 3 × 2 MB Android; "Detailed logs" setting raises the level to debug and switches off after 24 h; Kotlin logs go through `log_message` FFI into the same files and logcat; Android diagnostics include the log files |
 | Performance benches (§22.2) | ✅ | `cargo bench -p sp-media`: Opus encode 10 ms stereo 128 kb/s ≈ 101 µs (budget 300), decode ≈ 26 µs, RNNoise ≈ 94 µs (200), mic DSP chain ≈ 6 µs, jitter push+pop ≈ 0.15 µs, drift resample ≈ 4 µs (x64 dev PC). Budgets in `benches/media.rs` |
