@@ -63,8 +63,9 @@ jobs:
               | sed -E 's/^---- (.*) stdout ----/\1/; s/^test (.*) \.\.\. FAILED/\1/' \
               | sort -u \
               | while read -r name; do echo "::error title=Test failed::$name"; done
-            # The first assertion message of each failure, which is usually the whole story.
-            grep -E "panicked at|assertion .*failed" test-output.txt | head -5 \
+            # Where each failure panicked and the message on the line after it, which is usually
+            # the whole story.
+            grep -E -A1 "panicked at" test-output.txt | grep -v '^--$' | head -10 \
               | while read -r line; do echo "::error title=Test failure::${line:0:400}"; done
             exit 1
           }
