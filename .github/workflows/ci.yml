@@ -52,7 +52,29 @@ jobs:
           set -o pipefail
           cargo clippy --workspace --all-targets --message-format=json \
             | node tools/ci/clippy-gate.mjs .github/clippy-allowed.txt
-      - run: cargo test --workspace --exclude sound-push-desktop
+      # Failing test names are raised as annotations, which anyone can read; the job log itself
+      # needs admin rights on the repository, so a failure nobody can diagnose is no use.
+      - name: cargo test
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --exclude sound-push-desktop 2>&1 | tee test-output.txt || {
+            grep -E '^(test .* FAILED|---- .* stdout ----)' test-output.txt \
+              | sed -E 's/^---- (.*) stdout ----/\1/; s/^test (.*) \.\.\. FAILED/\1/' \
+              | sort -u \
+              | while read -r name; do echo "::error title=Test failed::$name"; done
+            # The first assertion message of each failure, which is usually the whole story.
+            grep -E "panicked at|assertion .*failed" test-output.txt | head -5 \
+              | while read -r line; do echo "::error title=Test failure::${line:0:400}"; done
+            exit 1
+          }
+      - name: Test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-output-${{ matrix.os }}
+          path: test-output.txt
+          if-no-files-found: ignore
       # sp-audio-io/tests/pulse_server.rs: speaker muting, per-app capture and device events against a real
       # PulseAudio server. The tests are #[ignore]d without a server and share it, so run them one at a time.
       # The same tests run against PipeWire in the "Audio backend" job.
