@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -27,9 +28,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -241,13 +244,13 @@ fun HomeScreen(
                 statusItems()
                 taskItems()
             }
-            HomeColumn(Modifier.weight(1f)) {
+            HomeColumn(Modifier.weight(1f), revealKeys = state.routes.map { it.routeId }) {
                 routeItems()
                 peerItems()
             }
         }
     } else {
-        HomeColumn(Modifier.readableWidth()) {
+        HomeColumn(Modifier.readableWidth(), revealKeys = state.routes.map { it.routeId }) {
             statusItems()
             routeItems()
             taskItems()
@@ -297,9 +300,27 @@ fun HomeScreen(
     }
 }
 
+/**
+ * One scrolling column of Home.
+ *
+ * [revealKeys] identifies what is streaming in this column. A lazy list keeps whatever was at its
+ * top in place when items are inserted above it, so a stream that starts — its card is added above
+ * the tasks the user just tapped — would land outside the visible list, cut off under the title.
+ * When a new key appears the list scrolls back to the top, so the new stream and its Stop button
+ * are in view.
+ */
 @Composable
-private fun HomeColumn(modifier: Modifier, content: LazyListScope.() -> Unit) {
+private fun HomeColumn(modifier: Modifier, revealKeys: List<String> = emptyList(), content: LazyListScope.() -> Unit) {
+    val listState = rememberLazyListState()
+    // What was already streaming when the screen opened is not news: only later additions scroll.
+    var shown by remember { mutableStateOf(revealKeys.toSet()) }
+    LaunchedEffect(revealKeys) {
+        val added = revealKeys.any { it !in shown }
+        shown = revealKeys.toSet()
+        if (added) listState.animateScrollToItem(0)
+    }
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxHeight(),
         contentPadding = PaddingValues(start = Tokens.Space.md, end = Tokens.Space.md, top = Tokens.Space.xs, bottom = Tokens.Space.lg),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),

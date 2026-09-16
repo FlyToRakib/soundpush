@@ -6,6 +6,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasStateDescription
@@ -123,6 +126,22 @@ class MainFlowsTest {
         }
         compose.onNodeWithText(text(R.string.task_listen)).performClick()
         assertEquals("aa11" to listOf("receiveSystemAudio"), started)
+        compose.onRoot().tryPerformAccessibilityChecks()
+    }
+
+    @Test
+    // Shorter than the list once a stream is added, as on a phone with the title and navigation bar
+    // taking their share: only then can the new card end up outside the visible list.
+    @Config(qualifiers = "w393dp-h560dp-xxhdpi")
+    fun aStreamThatStartsIsScrolledIntoViewNotLeftAboveTheList() {
+        // The list anchors on the item at its top, so the "Streaming now" card inserted above the
+        // tasks used to land outside the visible list, cut off under the title.
+        var state by mutableStateOf(idle)
+        show { HomeScreen(state, onStartRoutes = { _, _ -> state = listening }, onPair = {}, onOpenDevices = {}, onShowMessage = {}) }
+        compose.onNodeWithText(text(R.string.task_listen)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.home_active)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.route_receiveSystemAudio, "Rakibs-MacBook-Air")).assertIsDisplayed()
         compose.onRoot().tryPerformAccessibilityChecks()
     }
 
