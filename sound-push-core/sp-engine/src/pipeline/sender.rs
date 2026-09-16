@@ -229,9 +229,16 @@ impl Drop for Sender {
 /// often a few samples short. Taking whatever happens to be there and padding the rest with
 /// zeros turns that jitter into a gap in the voice every few frames. Instead the reader keeps
 /// [`MIX_PREFILL_FRAMES`] in hand before it starts — about 20 ms, on the microphone half only —
-/// and only ever takes whole frames. If the capture does run dry (it stalled, or its clock is
-/// genuinely stalled) it plays one silent frame and fills the cushion again, rather than clicking
-/// on every late callback.
+/// and only ever takes whole frames. If the capture does run dry (it genuinely stalled) it plays
+/// one silent frame and fills the cushion again, rather than clicking on every late callback.
+///
+/// Everything is measured relative to how far the encoder has fallen behind the system audio.
+/// When the encode thread stalls — a CPU spike, another program starting — both captures keep
+/// filling their rings, and the encoder then works through the system audio's backlog back to
+/// back. The microphone's backlog is the same length and has to be kept, not trimmed to the
+/// usual limit: trimming it left that whole stretch without a voice, and the voice out of step
+/// with the system audio afterwards. Nor is that shared backlog clock drift, so the controller
+/// does not see it either.
 ///
 /// Two audio devices never run at exactly the same rate — a USB microphone against the sound
 /// card's loopback differs by tens to hundreds of ppm — so a cushion on its own would still drain
@@ -263,9 +270,11 @@ impl MixReader {
         }
     }
 
-    fn take(&mut self, input: &mut rtrb::Consumer<f32>, out: &mut [f32]) {
+    /// Mix one frame of microphone into `out`. `behind` is the system audio still queued after
+    /// the frame being mixed, in samples: how far the encoder has fallen behind.
+    fn take(&mut self, input: &mut rtrb::Consumer<f32>, out: &mut [f32], behind: usize) {
         let frame = out.len();
-        let keep = frame * MIX_MAX_BACKLOG_FRAMES;
+        let keep = frame * MIX_MAX_BACKLOG_FRAMES + behind;
         if input.slots() > keep {
             let stale = input.slots() - keep;
             if let Ok(chunk) = input.read_chunk(stale) {
@@ -283,7 +292,7 @@ impl MixReader {
         // Measured before this frame is taken, so the target includes it: what the controller
         // holds on to is the full cushion left once the frame is gone.
         let ratio = self.drift.update(
-            (available + self.pending.len()) as u64,
+            (available + self.pending.len()).saturating_sub(behind) as u64,
             (frame * (MIX_PREFILL_FRAMES + 1)) as u64,
         );
         // What resampling at `ratio` needs to produce the rest of this frame, plus the
@@ -445,6 +454,9 @@ fn encode_loop(
         buf[..a.len()].copy_from_slice(a);
         buf[a.len()..].copy_from_slice(b);
         chunk.commit_all();
+        // System audio still queued behind this frame: how far the encoder has fallen behind,
+        // which a mixed source's microphone must stay level with.
+        let behind = input.slots();
 
         let current = fanout.generation.load(Ordering::Relaxed);
         if current != generation {
@@ -476,7 +488,7 @@ fn encode_loop(
 
         // A mixed source (plan §5.1) takes one frame of microphone alongside the system audio.
         let mixing = if let Some(mic) = mix_input.as_mut() {
-            mix_reader.take(mic, &mut mix_buf);
+            mix_reader.take(mic, &mut mix_buf, behind);
             true
         } else {
             false
@@ -863,13 +875,13 @@ mod tests {
 
         // One frame in hand is not enough to start: silence, and nothing is taken.
         push_frames(&mut p, 1, 0.5);
-        reader.take(&mut c, &mut out);
+        reader.take(&mut c, &mut out, 0);
         assert!(out.iter().all(|s| *s == 0.0));
         assert_eq!(c.slots(), FRAME);
 
         // With the cushion, whole frames come out.
         push_frames(&mut p, 1, 0.5);
-        reader.take(&mut c, &mut out);
+        reader.take(&mut c, &mut out, 0);
         assert!(out.iter().all(|s| *s == 0.5));
 
         // A partial frame is never mixed with zeros: half a frame short plays a whole silent
@@ -879,7 +891,7 @@ mod tests {
         for _ in 0..FRAME / 2 {
             p.push(0.5).unwrap();
         }
-        reader.take(&mut c, &mut out);
+        reader.take(&mut c, &mut out, 0);
         assert!(out.iter().all(|s| *s == 0.0));
         assert_eq!(c.slots(), FRAME / 2);
     }
@@ -914,7 +926,7 @@ mod tests {
                 }
                 pushed += CALLBACK;
             }
-            reader.take(&mut c, &mut out);
+            reader.take(&mut c, &mut out, 0);
             // The first ticks build the cushion; after that no frame may contain a hole.
             if tick >= MIX_PREFILL_FRAMES * 2 && out.contains(&0.0) {
                 gaps += 1;
@@ -943,7 +955,7 @@ mod tests {
                 pushed += CALLBACK;
             }
             most = most.max(c.slots());
-            reader.take(&mut c, &mut out);
+            reader.take(&mut c, &mut out, 0);
             if tick >= MIX_PREFILL_FRAMES * 2 && out.contains(&0.0) {
                 gaps += 1;
             }
@@ -966,6 +978,42 @@ mod tests {
     }
 
     #[test]
+    fn after_an_encoder_stall_the_voice_catches_up_with_the_system_audio() {
+        let (mut p, mut c) = mix_ring();
+        let mut reader = MixReader::new(1);
+        let mut out = vec![0.0f32; FRAME];
+        // Running normally for a while.
+        push_frames(&mut p, MIX_PREFILL_FRAMES, 0.5);
+        for _ in 0..50 {
+            push_frames(&mut p, 1, 0.5);
+            reader.take(&mut c, &mut out, 0);
+        }
+        // The encode thread stalls for 120 ms; both captures keep delivering. The system audio's
+        // ring now holds 12 frames the encoder works through back to back, and the microphone's
+        // ring holds the same 12 — far past the usual backlog limit, and all of it needed.
+        const STALL: usize = 12;
+        push_frames(&mut p, STALL, 0.5);
+        let mut gaps = 0;
+        for done in 0..STALL {
+            let behind = (STALL - 1 - done) * FRAME;
+            reader.take(&mut c, &mut out, behind);
+            if out.contains(&0.0) {
+                gaps += 1;
+            }
+        }
+        assert_eq!(
+            gaps, 0,
+            "{gaps} of {STALL} frames after the stall had no voice"
+        );
+        // Level with the system audio again: the cushion, not the stall, is what is left.
+        assert!(
+            c.slots() <= FRAME * (MIX_PREFILL_FRAMES + 1),
+            "{} samples still queued",
+            c.slots()
+        );
+    }
+
+    #[test]
     fn a_faster_capture_clock_cannot_drift_the_mix_behind() {
         let (mut p, mut c) = mix_ring();
         let mut reader = MixReader::new(1);
@@ -973,7 +1021,7 @@ mod tests {
         // Three frames arrive for every one the encode thread takes.
         for _ in 0..20 {
             push_frames(&mut p, 3, 0.5);
-            reader.take(&mut c, &mut out);
+            reader.take(&mut c, &mut out, 0);
             assert!(c.slots() <= FRAME * MIX_MAX_BACKLOG_FRAMES);
         }
     }
@@ -1053,16 +1101,23 @@ mod tests {
         }
         // And it is where the mix sits, not a moment passing through. Both fake devices share one
         // clock, so nothing but a real fault in the mix can move it.
-        let mut held = 0;
+        let mut seen = Vec::with_capacity(20);
         for _ in 0..20 {
             std::thread::sleep(Duration::from_millis(10));
-            if close(last_level(out)) {
-                held += 1;
-            }
+            seen.push(last_level(out));
         }
+        let held = seen.iter().filter(|l| close(**l)).count();
+        // Every level on one line: CI shows the line after the panic, and what the other samples
+        // were is the whole diagnosis.
+        let levels: Vec<String> = seen
+            .iter()
+            .map(|l| l.map_or("-".into(), |v| format!("{v:.3}")))
+            .collect();
         assert!(
             held >= 19,
-            "{what}: only {held} of 20 samples stayed at {expected}"
+            "{what}: only {held} of 20 samples stayed at {expected}; levels {} (packets so far {})",
+            levels.join(" "),
+            packets(out).len()
         );
     }
 
