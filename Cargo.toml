@@ -9,7 +9,10 @@ members = [
     "sound-push-core/sp-audio-io",
     "sound-push-core/sp-engine",
     "sound-push-core/sp-ffi",
+    "sound-push-core/sp-testkit",
     "sound-push-desktop/src-tauri",
+    "tools/latency-probe",
+    "tools/netsim",
     "tools/soak",
 ]
 

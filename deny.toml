@@ -51,8 +51,10 @@ wildcards = "warn"
 allow-wildcard-paths = true
 # Dependency direction (§11.2): apps depend on the engine, never the other way round.
 # soundpush-soak (tools/soak, unpublished) is a top-level harness that drives two engines like an app does.
+# sp-testkit is unpublished test infrastructure that runs the engine's own pipelines over a simulated
+# path; tools/netsim and tools/latency-probe reach the engine through it, so they need no entry here.
 deny = [
-    { crate = "sp-engine", wrappers = ["sound-push-desktop", "sp-ffi", "soundpush-soak"] },
+    { crate = "sp-engine", wrappers = ["sound-push-desktop", "sp-ffi", "soundpush-soak", "sp-testkit"] },
     { crate = "sp-audio-io", wrappers = ["sp-engine", "sound-push-desktop", "sp-ffi"] },
 ]
 

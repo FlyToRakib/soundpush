@@ -47,3 +47,13 @@ mobile-build: mobile-bindings mobile-native
 
 mobile-install: mobile-build
     adb install -r sound-push-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+
+# Tools --------------------------------------------------------------------
+
+# End-to-end pipeline latency over a simulated link; `just latency --help` for the options.
+latency *args:
+    cargo run -q -p soundpush-latency-probe --bin latency-probe -- {{args}}
+
+# Network impairment profiles, simulated and applied for real; `just netsim list` shows them.
+netsim *args:
+    cargo run -q -p soundpush-netsim --bin netsim -- {{args}}

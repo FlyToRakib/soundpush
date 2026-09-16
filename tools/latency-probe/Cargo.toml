@@ -1,0 +1,19 @@
+[package]
+name = "soundpush-latency-probe"
+description = "End-to-end media pipeline latency from a chirp and its cross-correlation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "latency-probe"
+path = "src/main.rs"
+
+[dependencies]
+sp-media = { path = "../../sound-push-core/sp-media" }
+sp-testkit = { path = "../../sound-push-core/sp-testkit" }
+
+[lints]
+workspace = true

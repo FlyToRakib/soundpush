@@ -27,6 +27,9 @@ if-addrs = "0.13"
 rand = "0.8"
 
 [dev-dependencies]
+# Simulated links and pipeline scenarios (tests/sim_network.rs). sp-testkit depends on sp-engine,
+# which Cargo allows for a dev-dependency and which keeps the helpers out of the shipped library.
+sp-testkit = { path = "../sp-testkit" }
 tempfile = "3"
 tracing-subscriber = "0.3"
 
