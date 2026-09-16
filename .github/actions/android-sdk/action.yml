@@ -1,0 +1,48 @@
+name: Android SDK
+description: >
+  Android command-line tools, licences and the NDK, from the runner's own SDK when it has one.
+
+# Replaces android-actions/setup-android, which started failing on every run on 2026-09-16 while
+# the workflows were unchanged. The hosted runners already ship the Android SDK, so the only work
+# left is accepting the licences and adding the NDK — few enough steps to own, and one less
+# moving tag between a green build and a red one. Everything here is idempotent, so it is safe to
+# re-run on a warm runner, and it installs the command-line tools itself when an image (or a
+# self-hosted runner) turns out not to have them.
+
+inputs:
+  ndk:
+    description: NDK version to install, e.g. 27.2.12479018. Empty installs no NDK.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Android command-line tools
+      shell: bash
+      env:
+        NDK: ${{ inputs.ndk }}
+      run: |
+        set -euo pipefail
+        sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/android-sdk}}"
+        tools="$sdk/cmdline-tools/latest/bin"
+        if [ ! -x "$tools/sdkmanager" ]; then
+          echo "::notice title=Android SDK::No command-line tools in $sdk; downloading them."
+          zip="$RUNNER_TEMP/cmdline-tools.zip"
+          curl -fsSL -o "$zip" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          mkdir -p "$sdk/cmdline-tools"
+          unzip -q "$zip" -d "$RUNNER_TEMP/cmdline-tools"
+          rm -rf "$sdk/cmdline-tools/latest"
+          mv "$RUNNER_TEMP/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
+        fi
+        # `yes` closes the pipe once sdkmanager stops reading, which SIGPIPEs it: that is success.
+        yes | "$tools/sdkmanager" --sdk_root="$sdk" --licenses > /dev/null || true
+        if [ -n "$NDK" ]; then
+          "$tools/sdkmanager" --sdk_root="$sdk" "ndk;$NDK"
+          echo "ANDROID_NDK_HOME=$sdk/ndk/$NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$sdk/ndk/$NDK" >> "$GITHUB_ENV"
+        fi
+        echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+        echo "$tools" >> "$GITHUB_PATH"
+        echo "$sdk/platform-tools" >> "$GITHUB_PATH"
