@@ -1,6 +1,6 @@
 # Implementation status
 
-Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-14.
+Tracks [`soundpush-final.md`](soundpush-final.md) against the code. Updated 2026-09-16.
 
 Legend: ✅ done and tested · 🟡 implemented, needs real-device verification · ⏳ not started · ⛔ blocked on something outside the repo
 
@@ -13,8 +13,14 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Wire protocol spec, pairing/security doc, threat model, ADRs 0001–0019 | ✅ | `docs/protocol`, `docs/security`, `docs/adr` (index maps the plan's ADR numbers) |
 | Open-source files (full GPL-3.0 LICENSE, CONTRIBUTING, CoC, SECURITY, PRIVACY, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot) | ✅ | |
 | CI quality gates: fmt, clippy `-D warnings`, tests, svelte-check, vitest, `cargo deny`, `npm audit --audit-level=high`, Android unit tests + lint, coverage, release-tool tests, desktop e2e hook | 🟡 | `ci.yml`; Android job fixed (host `libasound2-dev` for the binding build). Coverage (`cargo-llvm-cov`): core crates 92 % lines, gated at 80 %; sp-engine 74 %, reported only. e2e job runs `npm run test:e2e` once it exists. Needs a green run on GitHub |
+| Kotlin style gate (§29.3) | ✅ | ktlint through the Gradle plugin on every module, rules in `sound-push-mobile/android/.editorconfig` (IntelliJ "official" style, 165 columns, Composables exempt from the naming rule); generated bindings and the generated Compose theme excluded. `just mobile-check` / `just mobile-format` |
+| JS/TS style gate (§29.3) | ✅ | ESLint flat config (js + typescript-eslint + eslint-plugin-svelte, Prettier-compatible) and Prettier over `sound-push-desktop/ui`; `npm run lint` in `ci.yml`, `npm run format` to fix |
+| Gradle dependency verification (§31) | ✅ | `sound-push-mobile/android/gradle/verification-metadata.xml`, SHA-256 for 855 components including `aapt2` for all three host platforms; regenerate with `just mobile-verification` |
+| Backend integration jobs (§29.1) | 🟡 | `ci.yml` "Audio backend": the PulseAudio suite against PipeWire on Ubuntu, and `sp-audio-io/tests/wasapi_smoke.rs` (enumeration, render, system loopback) on Windows, which reports and passes where the runner has no audio endpoint. Verified on a Windows machine; the PipeWire leg needs a green run on GitHub |
+| Android Macrobenchmark (§29.1) | 🟡 | `sound-push-mobile/android/benchmark` (cold and warm startup, frame timing) against the app's profileable `benchmark` build type; nightly and on-demand `android-benchmark.yml` on an emulator, `just mobile-benchmark` against a phone. Builds and packages; the measurements need a device |
 | Fuzz targets (media, control, framing, QR, beacon) + nightly fuzzing | ✅ | `fuzz/` — `cargo +nightly fuzz run <target>`; `fuzz.yml` runs each target 30 min nightly, corpus cached, crashes uploaded |
 | Documentation site (MkDocs Material, GitHub Pages) | 🟡 | `mkdocs.yml`, `docs.yml`; builds with `--strict`. Needs Pages enabled (Settings → Pages → GitHub Actions) and a push to `main` |
+| Documentation deliverables (§36.3) | ✅ | the last two were the UX ones: `docs/ux/flows.md` (every flow as implemented, both apps) and `docs/ux/copy.md` (the wording rules the strings already follow). Contributor docs, so excluded from the site like the ADRs |
 | Community translation (Weblate) | 🟡 | component settings in `docs/translating.md`, `.weblate`; needs the Hosted Weblate project created |
 
 ## Phase 1 — Core engine + "Listen to PC on phone"
@@ -34,7 +40,8 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Security log (§21.1, §28.2) and pairing rate limit (5/min per address) | ✅ | `audit.rs` (1000 entries / 30 days, local only), `pairing_limit.rs`, `StopReason::RateLimited`; viewers in desktop and Android Settings |
 | Logging (§28.1) | ✅ / 🟡 | `logging.rs`: size rotation 5 × 10 MB desktop, 3 × 2 MB Android; "Detailed logs" setting raises the level to debug and switches off after 24 h; Kotlin logs go through `log_message` FFI into the same files and logcat; Android diagnostics include the log files |
 | Performance benches (§22.2) | ✅ | `cargo bench -p sp-media`: Opus encode 10 ms stereo 128 kb/s ≈ 101 µs (budget 300), decode ≈ 26 µs, RNNoise ≈ 94 µs (200), mic DSP chain ≈ 6 µs, jitter push+pop ≈ 0.15 µs, drift resample ≈ 4 µs (x64 dev PC). Budgets in `benches/media.rs` |
-| Simulated network (§29.1) | ✅ | `sp-engine/tests/sim_network.rs`: real sender/receiver pipelines through a seeded link with loss + redundancy, 40 ms jitter/reordering, duplication, 800 ms blackout; ~4 s |
+| Simulated network (§29.1) and `sp-testkit` (§12.1) | ✅ | `sound-push-core/sp-testkit`: seeded impairment link (loss, jitter, reordering, duplication, blackouts) with named profiles, a signal backend, chirp generation and cross-correlation; 12 tests. `sp-engine/tests/sim_network.rs` is now its four scenarios: loss + redundancy, 40 ms jitter/reordering, duplication, 800 ms blackout; ~4 s |
+| Developer tools (§11.1) | ✅ | `tools/netsim` lists and applies the impairment profiles (`tc netem` on Linux, clumsy options elsewhere); `tools/latency-probe` measures end-to-end pipeline latency from a chirp's cross-correlation with percentiles, JSON output and a `--max-ms` budget. `just netsim`, `just latency` |
 | Settings schema migrations (§29.1) | ✅ | `settings.rs` `migrate` (raw JSON, one step per version, written back); version 2 |
 | Desktop app (Tauri shell, tray, autostart, sleep inhibit, diagnostics, UI) | 🟡 | builds and launches on macOS (identity in Keychain, listening on UDP 47650); svelte-check clean, Vitest units, Playwright e2e against the mock engine in light and dark with axe WCAG 2.1 AA checks (`npm run test:e2e`) |
 | Desktop window lifecycle (plan §13.1, §24) | 🟡 | `window_state.rs`: size, position and maximized state restored onto a connected monitor; the window waits up to 1.5 s for the engine; autostart opens it only when "Start in the background" is off or onboarding is unfinished; one-time "SoundPush keeps running" hint on the first close to the tray |
@@ -81,6 +88,10 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 | Linux app capture (PipeWire/PulseAudio) | 🟡 | `sp-audio-io/src/pulse.rs` (`AppRouting`): the app's streams (or every other app's) move to a private null sink recorded from its monitor; a loopback keeps them audible on the speakers (~30 ms later); streams opened while capturing follow; streams go back on stop, and after a crash on the next start. App picker on the Audio page (`application.process.binary`). Tested against PulseAudio 16 in a container (only / everything except / late streams / crash cleanup); PipeWire needs a desktop session |
 | Audio focus (pause/duck/mix), headphone-unplug pause, auto-resume | 🟡 | Android service; "Lower volume" uses a separate output duck gain (`set_output_duck`), route volumes are never overwritten |
 | Quick Settings tile, reboot reminder, OEM battery guide link | 🟡 | |
+| Android memory and battery (§8.4, §14.6) | 🟡 | `Caches` + `Application.onTrimMemory` release the remembered release check and stale diagnostics exports; engine snapshots are decoded off the engine thread and, while the app is hidden or the screen is off, at most twice a second, with stats/meter-only changes dropped (`StateUpdates`, unit-tested). Needs a battery measurement on a phone |
+| "Auto" quality follows the power state (§14.6) | 🟡 | `EngineHandle::set_prefer_lossless` decides what Auto resolves to on routes this device starts; the phone sets it from the charger, the link quality and the network (`preferLossless`, unit-tested). Desktops never set it. Needs a real-link check |
+| Live "microphone in use by another app" notice (§8.3) | 🟡 | `DeviceStatus.micSilenced` from `AudioManager.AudioRecordingCallback`; Home banner and a line in the streaming notification while it lasts. Needs a phone (a call or an assistant holding the mic) |
+| "Resume streams after restart" (§24) | ✅ | the engine setting now has a toggle in both apps: Android Settings → Background, desktop Settings → Privacy & security |
 | Android "output audio effects" / compatibility output | ⏳ | needs non-cpal playback path |
 | Media Feature Pack detection (Windows N) | 🟡 | `src-tauri/src/system.rs` (missing `mfplat.dll`), Home banner → Optional features |
 | Windows Firewall / Public network fix | 🟡 | `src-tauri/src/network.rs`: firewall policy + network category read as a normal user; "Allow SoundPush" runs `netsh` through UAC (UDP, this exe, private/domain; public only if chosen); the uninstaller removes the rule with one UAC prompt (`windows/hooks.nsh`) |
@@ -107,9 +118,9 @@ Legend: ✅ done and tested · 🟡 implemented, needs real-device verification 
 
 | Item | Status |
 |---|---|
-| Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices); in-process soak and latency harness: `tools/soak` |
+| Real-device matrix, 24 h soak, battery measurement | ⏳ (needs devices); in-process soak and latency harnesses: `tools/soak`, `tools/latency-probe`, `tools/netsim` |
 | External security review | ⏳ |
-| Release workflow: NSIS (x64 + ARM64), universal DMG, deb/rpm/AppImage, APK, SHA256SUMS, CycloneDX SBOMs, draft GitHub Release, beta pre-releases | 🟡 (`release.yml`, not yet run on GitHub) |
+| Release workflow: NSIS (x64 + ARM64), universal DMG, deb/rpm/AppImage, APK **and Play App Bundle** (per-ABI and density splits), SHA256SUMS, CycloneDX SBOMs, draft GitHub Release, beta pre-releases | 🟡 (`release.yml`, not yet run on GitHub. Gradle signs both Android artifacts from `ANDROID_KEYSTORE_*`; without the secrets they keep the public debug key and their names say so) |
 | Desktop auto-update signed with a free minisign key; Android update check against GitHub Releases | 🟡 (needs the `TAURI_SIGNING_*` secrets and a first published release) |
 | Update channels (stable/beta) and staged rollout 10 % → 50 % → 100 % over 72 h, hold/halt | 🟡 (`settings.updateChannel`, `check_update`, `rollout.ts`, `update-channels.yml` + `tools/release/channels.mjs`; unit-tested; needs a first published release) |
 | Store manifests: winget, Homebrew cask, Flathub, F-Droid, Play listing texts | 🟡 (`packaging/`, fastlane metadata, filled per release by `fill-manifests.mjs`; winget validated, AppStream validated. Submissions need store accounts; Flathub needs screenshots and portal-based autostart/sleep inhibit) |

@@ -74,6 +74,43 @@ Computer: Home → **Use phone as headset** (needs the virtual mic from step 4).
 | Devices → Forget device | The device can no longer connect until paired again |
 | Permissions → "Can use this phone's microphone" = Don't allow | Mic requests are refused |
 
+## 7. Automated checks
+
+Everything here runs without a phone. `just lint`, `just core-test`, `just desktop-check` and
+`just mobile-check` are what CI runs on every pull request.
+
+| Command | What it covers |
+|---|---|
+| `just mobile-check` | The Android gate: debug APK, App Bundle, unit and screenshot tests, Android lint, ktlint |
+| `just mobile-format` | Fixes the Kotlin style violations ktlint can fix by itself |
+| `just desktop-check` | ESLint, Prettier, svelte-check and the production build |
+| `just desktop-format` | Rewrites the formatting differences Prettier reports |
+| `just latency --link congested` | End-to-end pipeline latency over a simulated link |
+| `just netsim list` | The impairment profiles, and how to apply them to a real interface |
+| `cargo test -p sp-audio-io --test wasapi_smoke -- --nocapture` | WASAPI enumeration, render and loopback (Windows) |
+
+### Startup and jank (Macrobenchmark)
+
+Measure against a **real phone**, which is the only number worth quoting. Connect it with USB
+debugging on and run:
+
+```sh
+just mobile-benchmark
+```
+
+Results land in `sound-push-mobile/android/benchmark/build/outputs/connected_android_test_additional_output`.
+The nightly *Android benchmark* workflow runs the same thing on an emulator and can be started by hand
+from the Actions tab; an emulator's numbers are a trend, not a verdict, which is why the pull-request
+gate leaves them out.
+
+### Dependency verification
+
+Gradle checks every downloaded dependency against
+`sound-push-mobile/android/gradle/verification-metadata.xml` (plan §31), so the Android build fails if
+an artifact changes underneath it. After changing a dependency or a plugin version, regenerate the
+file with `just mobile-verification` and read the note in that recipe about the `aapt2` entries for
+the operating systems your machine is not.
+
 ## If something fails
 
 - Computer: Settings → Help & diagnostics → **Export diagnostics**, and send the file.

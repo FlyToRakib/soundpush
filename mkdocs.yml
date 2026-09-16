@@ -46,6 +46,7 @@ exclude_docs: |
   /adr/
   /protocol/
   /security/
+  /ux/
 
 nav:
   - Home: index.md
