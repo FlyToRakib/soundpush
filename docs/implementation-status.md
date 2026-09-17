@@ -18,9 +18,11 @@ from the commit history or from an earlier version of this page.
 
 ## What works today, in plain words
 
-**Everything is built and tested by machine. Nothing has yet been used on a phone, a Mac, an ARM64 PC
-or a real Wi-Fi network by a person.** That is the single biggest caveat on this page, and it applies
-to every platform below.
+**Everything is built and tested by machine, and in September 2026 the Windows app and the Android app
+were used together by a person** — a Windows 11 PC and a Xiaomi Redmi Note 9 Pro (Android 12) on home
+Wi-Fi: pairing, listening, the phone as microphone through VB-CABLE, headset mode, the
+notification and the Home screen, with the fixes that turned up committed. **Nothing has yet been used
+on a Mac, a Linux desktop, an ARM64 PC, another phone or any other network by a person.**
 
 **Windows** is the furthest along. The desktop app builds as an NSIS installer for x64 and ARM64
 (`windows-build.yml`), and its WASAPI paths — system audio, per-application capture, device
@@ -46,7 +48,8 @@ with accessibility checks (`app/src/test/.../MainFlowsTest.kt`) and Light/Dark/R
 (`ScreenshotTest.kt`). It has the streaming service, notification and Quick Settings controls, the
 widget, pairing by QR and code, microphone modes, app-audio capture, the audio screen, a
 troubleshooter that runs real checks, and the security log.
-**No physical phone has run it** — the development phone has never enumerated over USB.
+It has run on one physical phone (Redmi Note 9 Pro, Android 12, MIUI) with the Windows app; no other
+phone or Android version has been tried by a person.
 
 **The shared engine** is the most thoroughly tested part: protocol, pairing and trust, QUIC and
 TLS-over-TCP transports, discovery, Opus and PCM, the jitter buffer, drift compensation, redundancy,
@@ -121,7 +124,7 @@ interrupt and resume. Core line coverage is gated at 80 % in CI.
 | §23.1–§23.5 UI and accessibility | Information architecture, flows, theming, WCAG AA | Done | Desktop: `svelte-check`, Vitest, and Playwright e2e in light and dark with axe WCAG 2.1 AA checks. Android: Robolectric flow tests with ATF checks. No screen-reader pass on NVDA, VoiceOver or Orca. |
 | §23.6 Copy and localisation | i18n from day one, community translations | Partial | The machinery is complete — `ui/src/lib/i18n/` with plurals and `Intl` formats, RTL, pseudo-locales `en-XA`/`ar-XB`, and [translating.md](translating.md). **The only locale file is `en.json`**, and Android has no `values-*` language folder. |
 | §24 Desktop startup and background | Autostart, start hidden, resume routes, update timing | Done | "Resume streams after restart" exists globally in both apps: `settings.rs:518` `resume_routes_on_start`, with toggles at `features/Settings.svelte:202` and `SettingsScreen.kt:137`. Update timing: `updater.svelte.ts` delays the first check by 30 s after a sign-in launch and leaves metered connections alone. |
-| §25 Mobile background | Foreground service, OS constraints, lifecycle | Done | `StreamingService.kt`, `BootReceiver.kt`, `BatteryGuide.kt`. Untested on a phone. |
+| §25 Mobile background | Foreground service, OS constraints, lifecycle | Done | `StreamingService.kt`, `BootReceiver.kt`, `BatteryGuide.kt`. Used on one phone (MIUI, Android 12); battery drain not measured. |
 | §26 Permissions | Android runtime permissions, desktop and macOS TCC, SoundPush-level consent | Done | `src-tauri/src/macos.rs` reads status without prompting and deep-links to System Settings; it compiles for macOS in CI but has never been exercised there. |
 | §27 Error handling | A shared taxonomy with stable public codes | Done | `sp-engine/src/error.rs` `code()` and `stop_reason_code()` reach state snapshots, the FFI, both UIs, diagnostics and logs; listed in [error-codes.md](error-codes.md). |
 | §28.1 Logging | Rotation 5 × 10 MB desktop, 3 × 2 MB Android; a debug level that reverts after 24 h | Partial | `sp-engine/src/logging.rs` and `settings.rs:625-641` (`schedule_debug_logging`, `expire_debug_logging`, unit-tested). The desktop toggle is live at `features/Settings.svelte:251`. **Android has no Detailed logging toggle** — the setting reaches `EngineState.kt:316` but no screen offers it. |
@@ -136,7 +139,7 @@ interrupt and resume. Core line coverage is gated at 80 % in CI.
 | §29.3 Quality gates | Format, clippy `-D warnings`, ktlint, eslint, coverage, dependency checks | Done | `.github/workflows/ci.yml` runs: `core` (Ubuntu, Windows and macOS — `cargo fmt --check`, the clippy gate through `tools/ci/clippy-gate.mjs`, workspace tests, PulseAudio server tests), `backends` (PipeWire and WASAPI), `coverage` (core gated at 80 % lines, engine reported), `desktop-ui` (eslint, Prettier, svelte-check, Vitest, `npm audit`), `desktop-e2e` (Playwright; the `test:e2e` script now exists, so the job really runs), `release-tools`, `dependencies` (`cargo-deny`) and `android` (assemble, bundle, unit tests, lint, ktlint, SHA-256 dependency verification). Alongside it: `fuzz.yml`, `windows-driver.yml`, `docs.yml`, `android-benchmark.yml`, and the Windows, macOS and Linux build workflows. |
 | §30 Standards and Definition of Done | Conventions and a review checklist | Done | `CONTRIBUTING.md`, `clippy.toml`. No `TODO`, `FIXME`, `todo!()` or `unimplemented!()` anywhere in the application code. |
 | §31 Dependency strategy | Pinned, audited, verified | Done | `deny.toml`; `android/gradle/verification-metadata.xml` covers 855 components and is regenerated against a cold Gradle home by `just mobile-verification`. |
-| §32 Build, release and update | Installers for four platforms, checksums, SBOMs, a signed updater, channels, staged rollout | Partial | `release.yml` builds NSIS x64 and ARM64, a universal DMG, deb/rpm/AppImage, and an Android APK **and App Bundle**, with checksums and SBOMs; `update-channels.yml` with `tools/release/channels.mjs` does stable/beta and the 10 % → 50 % → 100 % rollout. Nothing has been released and the signing secrets are unset. |
+| §32 Build, release and update | Installers for four platforms, checksums, SBOMs, a signed updater, channels, staged rollout | Partial | `release.yml` builds NSIS x64 and ARM64, a universal DMG, deb/rpm/AppImage, and an Android APK **and App Bundle**, with checksums and SBOMs; `update-channels.yml` with `tools/release/channels.mjs` does stable/beta and the 10 % → 50 % → 100 % rollout. Every 0.x version is a GitHub pre-release that still reaches the stable update channel. The first release, 0.1.0, is being prepared. |
 | §33.1 Extension points | Designed into v1 | Done | Symmetric route model ([ADR-0009](adr/0009-symmetric-route-model.md)), capability bits, settings migrations (`settings.rs` `migrate`, schema v3). |
 | §33.2–§33.3 Roadmap and local API | Post-1.0 | Not started | By design. |
 | §36.1 Open-source model | GPL-3.0, no telemetry, everything free | Done | `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `PRIVACY.md`, `CHANGELOG.md`, issue and PR templates, CODEOWNERS, Dependabot. |
@@ -200,8 +203,8 @@ What is genuinely missing or partial, with the plan section it belongs to.
 3. **§22.2 — No benchmark regression tracking.** `sp-media/benches/media.rs` exists and lists a budget
    per bench, but no workflow runs `cargo bench` and nothing asserts the budgets, so a 10 % regression
    would pass unnoticed. The bench file says as much in its own header comment.
-4. **§29.2 — No hardware matrix at all.** Nothing has run on a physical Android phone, a Mac, an ARM64
-   Windows PC, or a Wayland or Flatpak Linux session.
+4. **§29.2 — No hardware matrix.** One Windows 11 PC and one Android 12 phone have been used; nothing has
+   run on another phone, a Mac, an ARM64 Windows PC, or a Wayland or Flatpak Linux session.
 5. **§23.5 — No screen-reader pass.** The automated axe and ATF checks pass; NVDA, VoiceOver and Orca
    have not been used, and no external accessibility audit has been done.
 6. **§23.6, §36.5 — No translations.** `ui/src/lib/i18n/en.json` is the only locale file, and Android

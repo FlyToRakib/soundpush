@@ -10,6 +10,33 @@ Free and open-source audio routing between your computer and phone.
 
 Secure pairing, end-to-end encrypted, no accounts, no ads, no telemetry.
 
+## Status: early preview (0.x)
+
+SoundPush works, and it is young. Releases before 1.0 are published as **pre-releases**: expect rough edges,
+and please [report what you find](https://github.com/FlyToRakib/soundpush/issues/new/choose).
+
+| Platform | State |
+|---|---|
+| Windows 11 (x64) | Tested on a real PC with a phone: pairing, listening, phone as microphone (through VB-CABLE) and headset. Windows 10 is supported but untested |
+| Android 8+ | Tested on a real phone (Xiaomi, Android 12) and by automated UI tests; other phones and Android versions are untested — reports welcome |
+| Linux (x64) | Builds and passes automated tests against real PipeWire and PulseAudio; **not yet used by a person — help wanted** |
+| macOS 13+ | Builds in CI; **never run on a Mac — help wanted** |
+| Windows on ARM64 | Builds in CI; **untested — help wanted** |
+
+The installers are not code-signed yet, so Windows and macOS warn the first time; the
+[user guide](docs/user-guide.md#1-install) shows how to continue. Known limitations are listed in the
+[changelog](CHANGELOG.md).
+
+## Download and install
+
+1. Open **[Releases](https://github.com/FlyToRakib/soundpush/releases)** and download the file for your system:
+   `…_x64-setup.exe` (Windows), `…_android.apk` (Android), `.deb`/`.rpm`/`.AppImage` (Linux), `.dmg` (macOS).
+2. Install SoundPush on your computer **and** your phone, on the same Wi-Fi (or connected by USB).
+3. Open both, choose **Pair** on the computer and scan the QR code with the phone.
+4. Pick a task, for example **Listen to computer**.
+
+Step-by-step instructions, the virtual microphone and troubleshooting: [user guide](docs/user-guide.md).
+
 ## Repository layout
 
 | Folder | What it is |

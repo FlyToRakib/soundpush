@@ -10,9 +10,33 @@ The release workflow copies that section into the GitHub Release notes.
 
 ## [Unreleased]
 
-First public preview. Nothing has been released yet; everything below is new.
+The first public release of SoundPush — an **early preview**, published as a GitHub pre-release. It works, it is
+young, and your reports decide what gets fixed first: [open an issue](https://github.com/FlyToRakib/soundpush/issues/new/choose).
 
-### Added
+### Highlights
+
+- **Hear your computer on your phone**, **use your phone as the computer's microphone**, or both at once as a
+  **wireless headset**; send your **phone's app audio** to a computer or another phone.
+- Pair once with a QR code. Everything is end-to-end encrypted, with no account, no ads and no telemetry.
+- Wi-Fi, a phone hotspot or USB; several listeners at once.
+- Desktop app for Windows, macOS and Linux; Android app for Android 8 and newer.
+
+### Known limitations
+
+- **Tested by a person on Windows 11 (x64) and one Android 12 phone only.** Linux, macOS and Windows on ARM64 build
+  and pass automated tests but have never been used by a person. If you try one, please tell us how it went.
+- **Installers are not code-signed.** Windows SmartScreen says *Windows protected your PC* (choose **More info → Run
+  anyway**) and macOS asks you to **Open Anyway** in Privacy & Security.
+- **Phone as microphone on Windows needs VB-CABLE**, a free virtual cable by VB-Audio. SoundPush downloads and starts
+  its official installer from **Audio → Install VB-CABLE**; SoundPush's own driver comes later.
+- **English only** for now. Translations are welcome ([translating](https://github.com/FlyToRakib/soundpush/blob/HEAD/docs/translating.md)).
+- **No echo cancellation on the computer**: use headphones when the phone is the microphone and the computer's
+  speakers are on, or turn on **Reduce echo on speakers** ([ADR-0020](https://github.com/FlyToRakib/soundpush/blob/HEAD/docs/adr/0020-desktop-echo-control.md)).
+- **Networks that keep devices apart** (many office, school, hotel and public Wi-Fi networks) stop the devices from
+  finding each other. Use a phone hotspot or USB instead.
+- Battery use on phones and end-to-end delay have not been measured on real networks yet.
+
+### Everything in this release
 
 - **Shared Rust core** (`sound-push-core`): wire protocol, Ed25519 device identity, QR and code pairing with an
   encrypted trust store, QUIC transport with key-pinned mutual TLS, mDNS and signed-beacon discovery, Opus and PCM
@@ -32,7 +56,7 @@ First public preview. Nothing has been released yet; everything below is new.
 - **Connection type** in Settings → Advanced: automatic (the default), Wi-Fi/Ethernet only, TCP only for networks that
   block the fast protocol, or USB only.
 - **Error codes**: every message carries a stable code such as `SP-NET-004`, listed with its fix on the new
-  [error codes](docs/error-codes.md) page and included in diagnostics exports and logs.
+  [error codes](https://github.com/FlyToRakib/soundpush/blob/HEAD/docs/error-codes.md) page and included in diagnostics exports and logs.
 - **Virtual microphone**: built-in "SoundPush Microphone" driver on macOS; one-click VB-CABLE install from the Audio page
   on Windows; only real virtual cables are used, never a speaker.
 - **Automatic updates on desktop**: signed update manifests (minisign key, no paid certificate), "Check for updates"
@@ -92,50 +116,17 @@ First public preview. Nothing has been released yet; everything below is new.
 - **Troubleshooter**: a VPN that carries your whole connection, a network that blocks devices from talking to each
   other, and audio-enhancement software that is running and is known to break recording.
 - **Advanced settings** (Settings → Help & support): continuous capture, keep audio devices open and real-time audio
-  priority, folded away and explained in [`docs/advanced.md`](docs/advanced.md).
+  priority, folded away and explained in [`docs/advanced.md`](https://github.com/FlyToRakib/soundpush/blob/HEAD/docs/advanced.md).
 - **Flatpak and Wayland**: global shortcuts, launch at sign-in and "keep the computer awake" go through
   `xdg-desktop-portal`, which is the only way they can work there.
 
-### Changed
-
-- Windows virtual microphone plan: bundled VB-CABLE first, SoundPush's own signed driver later (ADR-0003, ADR-0007).
-- Engine notices close by themselves; messages stay open while hovered or focused.
-- Connecting now tries a device's addresses at the same time, 250 ms apart, instead of one after another: a device
-  that answers on its second address no longer waits out the first one's timeout.
-- Lossless audio drops to Opus 256 kb/s by itself when the connection keeps losing packets, and goes back to lossless
-  once it is stable again. Both changes are announced.
-- Android debug builds share one signing key so builds from any machine update each other. Release builds are signed
-  by Gradle from the release keystore when CI has one, and produce a Play App Bundle alongside the APK.
-- Android battery: with the app in the background or the screen off, stream statistics and level meters stop being
-  decoded and drawn. Streams, the notification and reconnection are unaffected.
-- "Auto" quality on the phone now means uncompressed audio on a charger over a good link, and Opus on battery.
-
-### Fixed
-
-- Windows firewall fix: on a network Windows calls public, "Allow SoundPush" used to add a rule for private networks
-  only, spend the administrator prompt and leave the phone just as blocked. It now offers to move that network to the
-  Private profile, or to allow SoundPush on public networks, and does either in the same single prompt.
-- The "Windows Firewall blocks other devices" notice no longer stays up while a paired device is connected.
-- Windows firewall fix, hardened: the system directory now comes from Windows itself rather than an environment
-  variable, the tools it runs are named by their full path, and the elevated step starts in the system folder — so
-  nothing on the computer can decide what the administrator prompt actually runs.
-- Update checks stay out of the way: the first one waits half a minute when Windows, macOS or Linux started SoundPush
-  at sign-in, and a metered connection is left alone. "Check for updates" always works.
-- Audio devices no longer stay claimed after the last stream: what SoundPush keeps between streams is released a
-  minute later, and the phone-microphone check no longer polls when no connected device could supply one.
-- Windows build: dual-stack UDP socket and COM feature flags.
-- Repeated handshake failures and stuck dials between engines.
-- Desktop: the engine stops cleanly on quit (speakers unmuted, peers told), and start failures are shown instead of
-  "Starting…" forever.
-- macOS: the microphone permission prompt no longer repeats endlessly (signed app with the audio-input entitlement).
-- Windows uninstaller removes SoundPush's data when "Delete the application data" is ticked.
-- Android: computer-initiated app-audio streams ask for screen-capture consent instead of sending silence.
-- Pairing by address: "Back" no longer submits the form.
-- CI: the Android job builds the Kotlin bindings again (the host build needed the ALSA development package).
-- rustls 0.23.45, which closes RUSTSEC-2026-0285: TLS 1.3 handshake messages were accepted at the wrong encryption
-  level when they followed a key change inside the same record.
-- CI: the Android job configures again. Its Gradle dependency verification file was written on a machine that already
-  had part of the dependency metadata, so thirteen checksums were missing and a machine starting cold — every CI run —
-  refused the build before it ran a task.
+- **Connections that adapt**: a device's addresses are tried together, 250 ms apart, and the first to answer wins;
+  lossless audio drops to Opus 256 kb/s by itself while the connection keeps losing packets and returns once it is
+  stable, and both are announced.
+- **Windows firewall help**: one administrator prompt either allows SoundPush on the current network or moves a
+  network Windows wrongly calls public to Private.
+- **Battery-friendly Android**: with the app in the background or the screen off, statistics and meters stop being
+  drawn; streams, the notification and reconnection carry on. "Auto" quality is uncompressed on a charger over a good
+  link, and Opus on battery.
 
 [Unreleased]: https://github.com/FlyToRakib/soundpush/commits/HEAD
