@@ -286,7 +286,7 @@ jobs:
       - uses: ./.github/actions/android-sdk
         with:
           ndk: 27.2.12479018
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: cargo install cargo-ndk --locked
       # The host build of sp-ffi (needed to generate the Kotlin bindings) links cpal, whose Linux
       # backend builds alsa-sys: without libasound2-dev and pkg-config its build script fails (exit 101).
