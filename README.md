@@ -25,7 +25,7 @@ The full implementation plan is in [`docs/soundpush-final.md`](docs/soundpush-fi
 
 ## Using SoundPush
 
-- Download: [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest) (with `SHA256SUMS`)
+- Download: [GitHub Releases](https://github.com/FlyToRakib/soundpush/releases) (with `SHA256SUMS`)
 - [User guide](docs/user-guide.md): install, pairing, every task, virtual microphone per OS, USB, troubleshooting
 - [Privacy policy](PRIVACY.md) · [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md)
 

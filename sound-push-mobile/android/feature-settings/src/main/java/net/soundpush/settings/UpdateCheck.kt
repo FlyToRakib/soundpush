@@ -3,7 +3,9 @@ package net.soundpush.settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import net.soundpush.engine.Caches
 import java.net.HttpURLConnection
@@ -12,14 +14,16 @@ import java.net.URL
 /** Public project pages the app links to (opened in the browser). */
 internal object ProjectLinks {
     private const val REPO = "https://github.com/FlyToRakib/soundpush"
-    const val RELEASES = "$REPO/releases/latest"
+
+    // Not /releases/latest: GitHub leaves pre-releases out of it, and every 0.x release is one.
+    const val RELEASES = "$REPO/releases"
     const val USER_GUIDE = "$REPO/blob/HEAD/docs/user-guide.md"
     const val ERROR_CODES = "$REPO/blob/HEAD/docs/error-codes.md"
     const val PRIVACY = "$REPO/blob/HEAD/PRIVACY.md"
     const val LICENSE = "$REPO/blob/HEAD/LICENSE"
     const val REPORT_BUG = "$REPO/issues/new/choose"
     const val SOURCE = REPO
-    const val LATEST_API = "https://api.github.com/repos/FlyToRakib/soundpush/releases/latest"
+    const val RELEASES_API = "https://api.github.com/repos/FlyToRakib/soundpush/releases?per_page=30"
 }
 
 /**
@@ -59,8 +63,12 @@ internal object UpdateChecker {
     suspend fun check(currentVersion: String, manual: Boolean): UpdateStatus {
         if (!manual) cached?.let { return it }
         return try {
-            val (tag, url) = fetchLatest()
-            val result = if (isNewer(tag, currentVersion)) UpdateStatus.Available(tag.removePrefix("v"), url) else UpdateStatus.UpToDate
+            val newest = newestStable(fetchReleases())
+            val result = if (newest != null && isNewer(newest.tag, currentVersion)) {
+                UpdateStatus.Available(newest.tag.removePrefix("v"), newest.url)
+            } else {
+                UpdateStatus.UpToDate
+            }
             cached = result
             if (manual || result is UpdateStatus.Available) result else UpdateStatus.Idle
         } catch (e: Exception) {
@@ -68,8 +76,23 @@ internal object UpdateChecker {
         }
     }
 
-    private suspend fun fetchLatest(): Pair<String, String> = withContext(Dispatchers.IO) {
-        val connection = URL(ProjectLinks.LATEST_API).openConnection() as HttpURLConnection
+    /** One published release, as far as the check needs it. */
+    data class Release(val tag: String, val url: String, val draft: Boolean = false, val preRelease: Boolean = false)
+
+    /**
+     * The newest release on the stable channel, by the same rule as the desktop's update channels
+     * (tools/release/channels.mjs): a plain x.y.z tag, not a draft, and not marked pre-release, except
+     * that every 0.x release is marked pre-release on GitHub because it is a preview.
+     */
+    fun newestStable(releases: List<Release>): Release? = releases
+        .filter { release ->
+            val version = parse(release.tag)
+            !release.draft && version != null && !version.preRelease && (!release.preRelease || version.numbers[0] == 0)
+        }
+        .reduceOrNull { best, release -> if (isNewer(release.tag, best.tag)) release else best }
+
+    private suspend fun fetchReleases(): List<Release> = withContext(Dispatchers.IO) {
+        val connection = URL(ProjectLinks.RELEASES_API).openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = 10_000
             connection.readTimeout = 10_000
@@ -77,10 +100,16 @@ internal object UpdateChecker {
             connection.setRequestProperty("User-Agent", "SoundPush-Android")
             check(connection.responseCode == HttpURLConnection.HTTP_OK) { "HTTP ${connection.responseCode}" }
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val release = Json.parseToJsonElement(body).jsonObject
-            val tag = requireNotNull(release["tag_name"]?.jsonPrimitive?.content)
-            val url = release["html_url"]?.jsonPrimitive?.content ?: ProjectLinks.RELEASES
-            tag to url
+            (Json.parseToJsonElement(body) as JsonArray).mapNotNull { element ->
+                val release = element as? JsonObject ?: return@mapNotNull null
+                val tag = release["tag_name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                Release(
+                    tag = tag,
+                    url = release["html_url"]?.jsonPrimitive?.content ?: ProjectLinks.RELEASES,
+                    draft = release["draft"]?.jsonPrimitive?.booleanOrNull == true,
+                    preRelease = release["prerelease"]?.jsonPrimitive?.booleanOrNull == true,
+                )
+            }
         } finally {
             connection.disconnect()
         }

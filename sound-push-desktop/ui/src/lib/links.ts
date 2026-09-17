@@ -11,7 +11,8 @@ export const LINKS = {
   reportBug: `${REPO}/issues/new/choose`,
   releases: `${REPO}/releases`,
   /** Where the Android app is downloaded (onboarding QR code). */
-  androidApp: `${REPO}/releases/latest`,
+  // Not /releases/latest: GitHub leaves pre-releases out of it, and every 0.x release is one.
+  androidApp: `${REPO}/releases`,
   translate: `${REPO}/blob/HEAD/docs/translating.md`,
 } as const;
 

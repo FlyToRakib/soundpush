@@ -18,7 +18,7 @@ Contents: [Install](#1-install) · [Pair](#2-pair-your-phone-and-computer) · [T
 
 ## 1. Install
 
-Download from **[GitHub Releases](https://github.com/FlyToRakib/soundpush/releases/latest)**. Each release lists a
+Download from **[GitHub Releases](https://github.com/FlyToRakib/soundpush/releases)**. Each release lists a
 `SHA256SUMS` file; to check a download run `sha256sum -c --ignore-missing SHA256SUMS` (Linux/macOS) or
 `Get-FileHash .\file` (PowerShell) and compare.
 
@@ -246,7 +246,7 @@ Install the latest build (it is signed consistently), then reset the permission 
 
 ### An update won't install
 
-Download the latest version from the [releases page](https://github.com/FlyToRakib/soundpush/releases/latest) and
+Download the latest version from the [releases page](https://github.com/FlyToRakib/soundpush/releases) and
 install it over the current one; your paired devices and settings are kept.
 
 ### Reporting a problem
