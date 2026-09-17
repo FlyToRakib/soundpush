@@ -78,10 +78,9 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: sound-push-mobile/android
           # An emulator is not a phone: the measurements are indicative, so the usual refusal to
-          # benchmark on one is suppressed and the numbers are read as a trend, not a verdict.
-          script: >
-            ./gradlew :benchmark:connectedBenchmarkAndroidTest --console=plain
-            -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR,LOW-BATTERY,UNLOCKED
+          # benchmark on one is suppressed (benchmark/build.gradle.kts) and the numbers are read as a
+          # trend, not a verdict.
+          script: ./gradlew :benchmark:connectedBenchmarkAndroidTest --console=plain
       - name: Results
         if: always()
         uses: actions/upload-artifact@v4

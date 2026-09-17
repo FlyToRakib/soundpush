@@ -43,6 +43,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       publish: ${{ steps.version.outputs.publish }}
+      channel: ${{ steps.version.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
 
@@ -491,11 +492,13 @@ jobs:
           cat release-body.md
 
       # Beta versions are GitHub pre-releases: they never become "latest" and reach only the beta update channel.
+      # Every 0.x version is marked pre-release on GitHub too, so the release page says it is an early preview;
+      # a 0.x version without a suffix still reaches the stable update channel (tools/release/channels.mjs).
       - name: Create or update the draft release
         env:
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
-          prerelease=$( [ "$CHANNEL" = beta ] && echo true || echo false )
+          prerelease=$( [ "$CHANNEL" = beta ] || [ "${VERSION%%.*}" = 0 ] && echo true || echo false )
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --draft --prerelease="$prerelease" --title "SoundPush $VERSION" --notes-file release-body.md
             gh release upload "$TAG" dist/* --clobber

@@ -38,6 +38,17 @@ describe("pickReleases", () => {
     assert.equal(picked.beta.tag_name, "v0.3.0");
   });
 
+  it("keeps a 0.x preview on the stable channel although GitHub marks it pre-release", () => {
+    const picked = pickReleases([release("v0.1.0", { prerelease: true }), release("v0.2.0-beta.1")]);
+    assert.equal(picked.stable.tag_name, "v0.1.0");
+    assert.equal(picked.beta.tag_name, "v0.2.0-beta.1");
+  });
+
+  it("takes a version from 1.0 on off the stable channel when it is marked pre-release", () => {
+    const picked = pickReleases([release("v1.0.0"), release("v1.0.1", { prerelease: true })]);
+    assert.equal(picked.stable.tag_name, "v1.0.0");
+  });
+
   it("handles no releases", () => {
     assert.deepEqual(pickReleases([]), { stable: null, beta: null });
   });

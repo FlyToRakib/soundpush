@@ -15,12 +15,19 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // CI runs on an emulator, and a phone on a desk is rarely charged and locked: the numbers are read
+        // as a trend, so these conditions do not abort the run. Set here rather than on the command line,
+        // which the configuration cache does not support.
+        testInstrumentationRunnerArguments["androidx.benchmark.suppressErrors"] = "EMULATOR,LOW-BATTERY,UNLOCKED"
     }
 
     buildTypes {
         // Matches the app's "benchmark" build type: release code, profileable, debug-signed.
         create("benchmark") {
             isDebuggable = false
+            // The app's libraries only have debug and release. The tested app's dependencies are resolved
+            // from this module as well, so it needs the same fallback as the app's own benchmark type.
+            matchingFallbacks += "release"
         }
     }
 

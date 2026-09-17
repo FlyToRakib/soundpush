@@ -58,7 +58,9 @@ export function pickReleases(releases) {
   );
   const newest = (list) => list.reduce((best, r) => (!best || compareVersions(r.tag_name, best.tag_name) > 0 ? r : best), null);
   return {
-    stable: newest(candidates.filter((r) => !TAG.exec(r.tag_name)[4] && !r.prerelease)),
+    // 0.x releases are all marked pre-release on GitHub (they are previews), so for them the flag does not
+    // take a version off the stable channel; from 1.0 on, ticking "pre-release" does.
+    stable: newest(candidates.filter((r) => !TAG.exec(r.tag_name)[4] && (!r.prerelease || TAG.exec(r.tag_name)[1] === "0"))),
     beta: newest(candidates),
   };
 }
