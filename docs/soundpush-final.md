@@ -815,7 +815,7 @@ Rules for RT threads: no allocation, no locks, no syscalls except the audio API,
 | Module | Location | Responsibility |
 |---|---|---|
 | Tray | `src-tauri/src/tray` | Active routes, per-route mute/stop, mic mute toggle, quick connect to recent devices, open window, quit. Status icon states: idle / streaming / mic live (red dot) / problem. |
-| Windowing | `src-tauri/src/main.rs` | Create/destroy window, remember size/position, start minimized. |
+| Windowing | `src-tauri/src/main.rs`, `main_window.rs` | Create/destroy window; every open shows it in the normal state at the default size, centered and fitted to the work area (maximizing lasts only while it is open); start minimized. |
 | Autostart | `platform/*/startup.rs` | Windows: HKCU `Run` value with `--autostart`; Linux: XDG `~/.config/autostart/soundpush.desktop`; macOS: `SMAppService` login item. Detect external disablement. |
 | Hotkeys | `platform/*/hotkeys.rs` | Global push-to-talk / toggle-mute, configurable; conflict detection. |
 | Power | `platform/windows/power.rs` | Sleep/resume notifications (`WM_POWERBROADCAST`), optional prevent-sleep while streaming. |

@@ -10,6 +10,7 @@ mod hooks;
 mod hotkeys;
 #[cfg(target_os = "macos")]
 mod macos;
+mod main_window;
 mod network;
 mod os_events;
 #[cfg(target_os = "linux")]
@@ -21,7 +22,6 @@ mod tray;
 mod usb;
 mod virtual_mic;
 mod webview2;
-mod window_state;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -83,7 +83,13 @@ pub fn show_main_window(app: &AppHandle) {
         return;
     }
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        let _ = window.unminimize();
+        if window.is_visible().unwrap_or(true) {
+            // Only minimized or behind other windows: it comes back as the user left it.
+            let _ = window.unminimize();
+        } else {
+            // Closed into memory: it opens like a new window.
+            main_window::reset(&window);
+        }
         let _ = window.show();
         let _ = window.set_focus();
         // A window kept in memory received no snapshots while it was hidden (see
@@ -102,10 +108,15 @@ pub fn show_main_window(app: &AppHandle) {
         .unwrap_or(None);
     match WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
         .title("SoundPush")
-        .inner_size(1000.0, 700.0)
-        .min_inner_size(760.0, 520.0)
+        // Always the normal state at the default size (see `main_window`); maximizing is the
+        // user's choice for as long as the window stays open.
+        .inner_size(main_window::DEFAULT_SIZE.0, main_window::DEFAULT_SIZE.1)
+        .min_inner_size(main_window::MIN_SIZE.0, main_window::MIN_SIZE.1)
+        .maximized(false)
+        // Shrunk to the work area on small or highly scaled screens, never under the taskbar.
+        .prevent_overflow()
         .center()
-        // Sized and placed like last time before it appears.
+        // Shown and focused below, the same way a window kept in memory is.
         .visible(false)
         // Ctrl/Cmd + and − scale the whole UI (text scaling for low vision).
         .zoom_hotkeys_enabled(true)
@@ -113,9 +124,6 @@ pub fn show_main_window(app: &AppHandle) {
         .build()
     {
         Ok(window) => {
-            if let Some(saved) = app.try_state::<window_state::WindowState>() {
-                saved.restore(&window);
-            }
             let _ = window.show();
             let _ = window.set_focus();
         }
@@ -185,7 +193,7 @@ fn main() {
                 hooks: hooks.clone(),
             });
             app.manage(hotkeys::Hotkeys::default());
-            app.manage(window_state::WindowState::load(&data_dir));
+            main_window::remove_legacy_state(&data_dir);
             app.manage(Arc::new(default_devices::DefaultDevices::new(&data_dir)));
             if let Err(e) = tray::create(app) {
                 // A desktop without tray support must not stop SoundPush; the window stays reachable.
@@ -353,9 +361,6 @@ fn main() {
         // Tauri ends the process right after this without dropping managed state, so the engine
         // must stop here: unmute the speakers, tell peers, release sleep prevention.
         RunEvent::Exit => {
-            if let Some(saved) = app.try_state::<window_state::WindowState>() {
-                saved.save();
-            }
             // Give the computer its own default input and output back before leaving.
             if let Some(devices) = app.try_state::<Arc<default_devices::DefaultDevices>>() {
                 devices.restore();
@@ -367,18 +372,11 @@ fn main() {
                 engine.shutdown(std::time::Duration::from_secs(2));
             }
         }
-        RunEvent::WindowEvent { label, event, .. } if label == MAIN_WINDOW => match event {
-            WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                if let (Some(saved), Some(window)) = (
-                    app.try_state::<window_state::WindowState>(),
-                    app.get_webview_window(MAIN_WINDOW),
-                ) {
-                    saved.track(&window);
-                }
-            }
-            WindowEvent::CloseRequested { api, .. } => on_close_requested(app, &api),
-            _ => {}
-        },
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == MAIN_WINDOW => on_close_requested(app, &api),
         _ => {}
     });
 }
@@ -396,9 +394,6 @@ pub fn keeps_window_in_memory(app: &AppHandle) -> bool {
 /// webview loaded. The first time the window stays open for a one-time explanation; on desktops
 /// without a tray the window is minimized instead of disappearing.
 fn on_close_requested(app: &AppHandle, api: &tauri::CloseRequestApi) {
-    if let Some(saved) = app.try_state::<window_state::WindowState>() {
-        saved.save();
-    }
     let Some(state) = app
         .try_state::<AppState>()
         .and_then(|s| s.engine.get().map(|e| e.state()))
