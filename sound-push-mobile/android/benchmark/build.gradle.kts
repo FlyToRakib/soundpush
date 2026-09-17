@@ -28,6 +28,9 @@ android {
             // The app's libraries only have debug and release. The tested app's dependencies are resolved
             // from this module as well, so it needs the same fallback as the app's own benchmark type.
             matchingFallbacks += "release"
+            // A build type made here has no signing config of its own, and Android refuses to install an
+            // unsigned APK (INSTALL_PARSE_FAILED_NO_CERTIFICATES). The test APK only needs a debug key.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
