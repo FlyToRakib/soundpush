@@ -71,7 +71,7 @@ jobs:
           }
       - name: Test output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-test-output-${{ matrix.os }}
           path: test-output.txt
@@ -176,7 +176,7 @@ jobs:
             cargo llvm-cov report --summary-only | awk '$1 != "" && $1 !~ /^-+$/ { printf "%-60s %s\n", $1, $10 }'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage
@@ -221,7 +221,7 @@ jobs:
         if: steps.suite.outputs.present == 'true'
         working-directory: sound-push-desktop/ui
         run: npm run test:e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure() && steps.suite.outputs.present == 'true'
         with:
           name: desktop-e2e-report
@@ -307,7 +307,7 @@ jobs:
         run: ./gradlew assembleDebug bundleDebug testDebugUnitTest lint ktlintCheck --console=plain
       - name: Reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-reports
           path: |

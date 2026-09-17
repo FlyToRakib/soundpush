@@ -83,7 +83,7 @@ jobs:
           script: ./gradlew :benchmark:connectedBenchmarkAndroidTest --console=plain
       - name: Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-api-${{ matrix.api }}
           path: sound-push-mobile/android/benchmark/build/outputs/connected_android_test_additional_output
