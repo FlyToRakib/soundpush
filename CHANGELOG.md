@@ -10,6 +10,8 @@ The release workflow copies that section into the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-18
+
 The first public release of SoundPush — an **early preview**, published as a GitHub pre-release. It works, it is
 young, and your reports decide what gets fixed first: [open an issue](https://github.com/FlyToRakib/soundpush/issues/new/choose).
 
@@ -129,4 +131,5 @@ young, and your reports decide what gets fixed first: [open an issue](https://gi
   drawn; streams, the notification and reconnection carry on. "Auto" quality is uncompressed on a charger over a good
   link, and Opus on battery.
 
-[Unreleased]: https://github.com/FlyToRakib/soundpush/commits/HEAD
+[Unreleased]: https://github.com/FlyToRakib/soundpush/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/FlyToRakib/soundpush/releases/tag/v0.1.0
