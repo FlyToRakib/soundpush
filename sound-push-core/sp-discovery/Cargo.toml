@@ -10,7 +10,7 @@ rust-version.workspace = true
 sp-protocol = { path = "../sp-protocol" }
 sp-security = { path = "../sp-security" }
 mdns-sd = "0.13"
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }
 thiserror = "2"
 tracing = "0.1"
