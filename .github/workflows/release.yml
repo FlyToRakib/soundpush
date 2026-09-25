@@ -284,7 +284,7 @@ jobs:
       - uses: ./.github/actions/android-sdk
         with:
           ndk: 27.2.12479018
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: cargo install cargo-ndk --locked
       # sp-ffi's host build (for the Kotlin bindings) links cpal's ALSA backend (alsa-sys).
       - name: Host audio libraries for the binding build
