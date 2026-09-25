@@ -94,7 +94,7 @@ The same steps run in GitHub Actions (`.github/workflows/windows-build.yml`).
    .\ui\node_modules\.bin\tauri build --bundles nsis
    ```
 
-3. The installer is at `target\release\bundle\nsis\SoundPush_0.1.0_x64-setup.exe` (repository root `target` folder).
+3. The installer is at `target\release\bundle\nsis\SoundPush_0.1.1_x64-setup.exe` (repository root `target` folder).
 4. For development with live reload, run `.\ui\node_modules\.bin\tauri dev` from `sound-push-desktop`.
 
 Virtual microphone on Windows: open **Audio → Install VB-CABLE** in the app. See [`docs/virtual-microphone.md`](docs/virtual-microphone.md).
@@ -133,9 +133,9 @@ To build on the Mac itself:
 
 Easiest: GitHub → **Actions** → **Linux build** → latest run → artifact `SoundPush-Linux` (x86_64):
 
-- Ubuntu, Debian, Linux Mint, Pop!_OS: `sudo apt install ./SoundPush_0.1.0_amd64.deb`
-- Fedora, openSUSE: `sudo dnf install ./SoundPush-0.1.0-1.x86_64.rpm`
-- Other distributions: `chmod +x SoundPush_0.1.0_amd64.AppImage`, then run it.
+- Ubuntu, Debian, Linux Mint, Pop!_OS: `sudo apt install ./SoundPush_0.1.1_amd64.deb`
+- Fedora, openSUSE: `sudo dnf install ./SoundPush-0.1.1-1.x86_64.rpm`
+- Other distributions: `chmod +x SoundPush_0.1.1_amd64.AppImage`, then run it.
 
 SoundPush uses PipeWire (the default on current Ubuntu and Fedora) or PulseAudio; on both it can
 send one app's sound (or everything except one app) and mute the speakers while sending. The packages

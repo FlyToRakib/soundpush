@@ -5211,7 +5211,7 @@ dependencies = [
 
 [[package]]
 name = "sound-push-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crash-handler",
  "dbus",
@@ -5244,7 +5244,7 @@ dependencies = [
 
 [[package]]
 name = "soundpush-latency-probe"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sp-media",
  "sp-testkit",
@@ -5252,14 +5252,14 @@ dependencies = [
 
 [[package]]
 name = "soundpush-netsim"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sp-testkit",
 ]
 
 [[package]]
 name = "soundpush-soak"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sp-engine",
  "tokio",
@@ -5293,7 +5293,7 @@ dependencies = [
 
 [[package]]
 name = "sp-audio-io"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "block2",
  "cpal",
@@ -5316,7 +5316,7 @@ dependencies = [
 
 [[package]]
 name = "sp-discovery"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mdns-sd",
  "socket2 0.5.10",
@@ -5329,7 +5329,7 @@ dependencies = [
 
 [[package]]
 name = "sp-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "if-addrs",
@@ -5354,7 +5354,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "android_logger",
  "jni 0.21.1",
@@ -5372,7 +5372,7 @@ dependencies = [
 
 [[package]]
 name = "sp-media"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "criterion",
@@ -5385,7 +5385,7 @@ dependencies = [
 
 [[package]]
 name = "sp-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "proptest",
@@ -5395,7 +5395,7 @@ dependencies = [
 
 [[package]]
 name = "sp-security"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -5414,7 +5414,7 @@ dependencies = [
 
 [[package]]
 name = "sp-testkit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "rand 0.8.8",
@@ -5425,7 +5425,7 @@ dependencies = [
 
 [[package]]
 name = "sp-transport"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "quinn",

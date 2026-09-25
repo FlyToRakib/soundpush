@@ -10,6 +10,26 @@ The release workflow copies that section into the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-25
+
+**Install this one.** The signing keys that 0.1.0 was signed with were exposed and have been replaced, so
+0.1.1 is signed with new keys and 0.1.0 should not be used.
+
+### Security
+
+- **New signing keys.** A backup archive holding the project's Android release key, the desktop updater key and
+  their passwords was committed to this public repository by mistake and removed shortly afterwards. No build was
+  tampered with, and nothing in the app itself was affected, but anyone who copied the archive could have signed
+  software that looked like SoundPush. Both keys were replaced the same day and 0.1.0 was withdrawn.
+  - **Android:** the new key is a different identity, so Android cannot update 0.1.0 in place: **uninstall
+    SoundPush first**, then install the 0.1.1 APK. Pairing has to be done again afterwards.
+  - **Desktop:** install 0.1.1 over 0.1.0 as usual. It carries the new update key, so later versions update
+    themselves again; 0.1.0 installs cannot update themselves to it.
+- **The repository refuses signing material.** A check in CI and a pre-commit hook (`tools/ci/no-secrets.mjs`)
+  reject keystores, key and password files, private keys and tokens by name and by content, and look inside
+  archives, which is how these got in.
+
+
 ## [0.1.0] - 2026-09-18
 
 The first public release of SoundPush — an **early preview**, published as a GitHub pre-release. It works, it is
@@ -131,5 +151,6 @@ young, and your reports decide what gets fixed first: [open an issue](https://gi
   drawn; streams, the notification and reconnection carry on. "Auto" quality is uncompressed on a charger over a good
   link, and Opus on battery.
 
-[Unreleased]: https://github.com/FlyToRakib/soundpush/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/FlyToRakib/soundpush/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/FlyToRakib/soundpush/releases/tag/v0.1.1
 [0.1.0]: https://github.com/FlyToRakib/soundpush/releases/tag/v0.1.0
