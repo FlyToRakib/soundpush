@@ -239,6 +239,8 @@ jobs:
         with:
           node-version: 22
       - run: node --test tools/release/*.test.mjs tools/ci/*.test.mjs
+      # No signing key, password or token reaches this public repository (tools/ci/no-secrets.mjs).
+      - run: node tools/ci/no-secrets.mjs
 
   desktop-ui:
     name: Desktop UI

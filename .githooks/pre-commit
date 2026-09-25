@@ -1,0 +1,10 @@
+#!/bin/sh
+# Refuses a commit that carries signing material. Enable once per clone:
+#   git config core.hooksPath .githooks
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+# shellcheck disable=SC2086
+node tools/ci/no-secrets.mjs $staged || {
+  echo "pre-commit: refusing to commit signing material."
+  exit 1
+}

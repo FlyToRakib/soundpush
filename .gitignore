@@ -35,12 +35,17 @@ sound-push-mobile/android/.gradle-cold-home/
 sound-push-desktop/ui/src/lib/engine/bindings.ts
 sound-push-mobile/android/core-engine/src/main/java/uniffi/
 
-# Secrets / signing
+# Secrets / signing. Never commit signing material, not even zipped: see tools/ci/no-secrets.mjs,
+# which fails the build if any of it appears, and docs/release-signing.md for where keys belong.
 *.jks
 *.keystore
 *.pfx
 *.p12
 .env
+.soundpush/
+.soundpush*
+*soundpush-release.*
+*soundpush-updater.*
 
 # Local tool config
 .claude/
