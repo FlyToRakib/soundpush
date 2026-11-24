@@ -354,6 +354,84 @@ mod tests {
         DatagramSink, SendFailed, Sender, SenderConfig, Subscriber, Subscription,
     };
 
+    #[test]
+    fn discontinuity_reanchors_after_dtx_for_all_idle_durations() {
+        // Advance only the output clock, just as an Android device continues to pull
+        // while WASAPI has no samples. No real-time sleeps are needed here.
+        for seconds in [1, 3, 5, 10, 30, 60] {
+            let profile = build_profile(LatencyProfile::Balanced, Quality::Auto, 1, false);
+            let controls = Arc::new(ReceiverControls::new(1.0, 20, 80));
+            let (mut producer, consumer) = rtrb::RingBuffer::new(1024);
+            let mut playout = Playout::new(
+                &profile,
+                1,
+                consumer,
+                decoder_for(&profile).unwrap(),
+                Codec::Opus,
+                controls.clone(),
+                None,
+            );
+            let mut encoder =
+                sp_media::codec::encoder_for(&profile, OpusApplication::LowDelay).unwrap();
+            let mut encoded = Vec::new();
+            encoder.encode(&vec![0.2; 480], &mut encoded).unwrap();
+            let audio = Bytes::copy_from_slice(&encoded);
+            let mut out = vec![0.0; 480];
+            for n in 0..10 {
+                producer
+                    .push(InboundPacket {
+                        timestamp: n * 480,
+                        arrival_samples: n * 480,
+                        codec: Codec::Opus,
+                        discontinuity: false,
+                        redundant: false,
+                        dtx: false,
+                        payload: audio.clone(),
+                    })
+                    .unwrap();
+                playout.fill(&mut out);
+            }
+            producer
+                .push(InboundPacket {
+                    timestamp: 4800,
+                    arrival_samples: 4800,
+                    codec: Codec::Opus,
+                    discontinuity: false,
+                    redundant: false,
+                    dtx: true,
+                    payload: Bytes::new(),
+                })
+                .unwrap();
+            for _ in 0..seconds * 100 {
+                playout.fill(&mut out);
+            }
+            let before = playout.jitter.stats();
+            for n in 0..100 {
+                producer
+                    .push(InboundPacket {
+                        timestamp: (11 + n) * 480,
+                        arrival_samples: (11 + n + seconds * 100) * 480,
+                        codec: Codec::Opus,
+                        discontinuity: n == 0,
+                        redundant: false,
+                        dtx: false,
+                        payload: audio.clone(),
+                    })
+                    .unwrap();
+                playout.fill(&mut out);
+            }
+            let after = playout.jitter.stats();
+            assert!(
+                after.played - before.played > 90,
+                "{seconds}s gap must resume"
+            );
+            assert_eq!(
+                after.late, before.late,
+                "{seconds}s gap must not turn recovery audio into late loss"
+            );
+        }
+    }
+
     fn start_sender(
         backend: &NullBackend,
         profile: StreamProfile,

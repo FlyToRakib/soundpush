@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
 use sp_audio_io::{AudioBackend, AudioStream, CaptureSource, ErrorCallback};
@@ -31,6 +31,28 @@ const DTX_HANGOVER_MS: u64 = 200;
 /// interval, so a receiver that lost the first ones still learns the sender is silent.
 const DTX_SIGNAL_FRAMES: u64 = 2;
 const DTX_KEEPALIVE_MS: u64 = 400;
+
+/// Ignore normal callback jitter. A sustained empty capture ring is a break in the
+/// sample clock, not clock drift. Observing an empty ring (rather than elapsed time
+/// between encodes) avoids treating a scheduled-out encoder with queued audio as a break.
+const CAPTURE_GAP: Duration = Duration::from_millis(100);
+
+#[derive(Default)]
+struct CaptureGap {
+    empty_since: Option<Instant>,
+}
+
+impl CaptureGap {
+    fn observe(&mut self, ready: bool, now: Instant) -> bool {
+        if !ready {
+            self.empty_since.get_or_insert(now);
+            return false;
+        }
+        self.empty_since
+            .take()
+            .is_some_and(|since| now.duration_since(since) >= CAPTURE_GAP)
+    }
+}
 
 /// A datagram could not be handed to the transport (closed, congested or malformed).
 /// Media is best effort: callers count these and move on.
@@ -441,9 +463,12 @@ fn encode_loop(
     let dtx_hangover = DTX_HANGOVER_MS * 48 / frame.max(1) as u64;
     let dtx_keepalive = (DTX_KEEPALIVE_MS * 48 / frame.max(1) as u64).max(1);
     let mut silent_frames: u64 = 0;
+    let mut capture_gap = CaptureGap::default();
 
     while running.load(Ordering::Relaxed) {
-        if input.slots() < buf.len() {
+        let ready = input.slots() >= buf.len();
+        let resumed = capture_gap.observe(ready, Instant::now());
+        if !ready {
             std::thread::sleep(Duration::from_millis(1));
             continue;
         }
@@ -462,6 +487,17 @@ fn encode_loop(
         if current != generation {
             refresh_targets(fanout, &mut targets);
             generation = current;
+        }
+
+        if resumed {
+            // Keep timestamps monotonic, but tell each receiver that its local playout
+            // clock must re-anchor. Restart the silence hangover so this notification
+            // is not suppressed by DTX; do not reuse audio from before the gap as redundancy.
+            for target in &mut targets {
+                target.restart = true;
+            }
+            previous.clear();
+            silent_frames = 0;
         }
 
         // Live control changes. A shared encoder follows its most constrained receiver.
@@ -676,6 +712,131 @@ mod tests {
     use sp_media::profile::{LatencyProfile, Quality, build_profile};
 
     use super::*;
+
+    #[test]
+    fn capture_gap_ignores_callback_jitter_and_encoder_backlog() {
+        let start = Instant::now();
+        let mut gap = CaptureGap::default();
+        assert!(!gap.observe(true, start));
+        assert!(!gap.observe(false, start));
+        assert!(!gap.observe(true, start + Duration::from_millis(20)));
+        // A delayed encoder with data waiting never observed a stopped sample clock.
+        assert!(!gap.observe(true, start + Duration::from_secs(60)));
+        assert!(!gap.observe(false, start + Duration::from_secs(61)));
+        assert!(gap.observe(true, start + Duration::from_secs(62)));
+        assert!(!gap.observe(true, start + Duration::from_secs(63)));
+    }
+
+    #[test]
+    fn capture_resume_marks_all_subscribers_and_retries_failed_submission() {
+        struct RejectOnce {
+            reject: AtomicBool,
+            packets: Collect,
+        }
+        impl DatagramSink for RejectOnce {
+            fn send(&self, data: Bytes) -> Result<(), SendFailed> {
+                if self.reject.swap(false, Ordering::Relaxed) {
+                    Err(SendFailed)
+                } else {
+                    self.packets.send(data)
+                }
+            }
+        }
+        let profile = build_profile(LatencyProfile::Balanced, Quality::Auto, 1, true);
+        let mut encoder = encoder_for(&profile, OpusApplication::LowDelay).unwrap();
+        let (mut producer, mut consumer) = rtrb::RingBuffer::new(48_000);
+        let running = Arc::new(AtomicBool::new(true));
+        let fanout = Arc::new(Fanout::default());
+        let controls = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
+        let a = Arc::new(RejectOnce {
+            reject: AtomicBool::new(false),
+            packets: Collect::default(),
+        });
+        let b = Arc::new(Collect::default());
+        for (id, sink) in [(1, a.clone() as Arc<dyn DatagramSink>), (2, b.clone())] {
+            let c = Arc::new(SenderControls::new(0.0, false, profile.bitrate));
+            c.redundancy.store(true, Ordering::Relaxed);
+            fanout.entries.lock().unwrap().push(Entry {
+                id,
+                subscriber: Subscriber {
+                    route: id as u8,
+                    sink,
+                    dtx: true,
+                    controls: c,
+                },
+            });
+        }
+        let thread = {
+            let running = running.clone();
+            let fanout = fanout.clone();
+            let controls = controls.clone();
+            std::thread::spawn(move || {
+                encode_loop(
+                    &running,
+                    &controls,
+                    &fanout,
+                    &mut consumer,
+                    None,
+                    encoder.as_mut(),
+                    Codec::Opus,
+                    1,
+                    480,
+                    None,
+                )
+            })
+        };
+        let wait_for = |producer: &rtrb::Producer<f32>| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while producer.slots() < 48_000 {
+                assert!(Instant::now() < deadline, "encoder did not consume input");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        // Reach DTX before the real no-samples interval, not merely encoded zero samples.
+        producer
+            .write_chunk_uninit(480 * 40)
+            .unwrap()
+            .fill_from_iter(std::iter::repeat_n(0.0, 480 * 40));
+        wait_for(&producer);
+        std::thread::sleep(CAPTURE_GAP + Duration::from_millis(30));
+        a.reject.store(true, Ordering::Relaxed);
+        producer
+            .write_chunk_uninit(480 * 8)
+            .unwrap()
+            .fill_from_iter(std::iter::repeat_n(0.2, 480 * 8));
+        wait_for(&producer);
+        running.store(false, Ordering::Relaxed);
+        thread.join().unwrap();
+        for collected in [&a.packets, b.as_ref()] {
+            let received = packets(collected);
+            let resumed: Vec<_> = received
+                .iter()
+                .filter(|p| p.header.sample_timestamp >= 480 * 40)
+                .collect();
+            assert!(!resumed.is_empty());
+            assert!(resumed[0].header.flags.contains(MediaFlags::DISCONTINUITY));
+            assert_eq!(
+                resumed
+                    .iter()
+                    .filter(|p| p.header.flags.contains(MediaFlags::DISCONTINUITY))
+                    .count(),
+                1
+            );
+            assert!(
+                received
+                    .windows(2)
+                    .all(|p| p[0].header.sample_timestamp < p[1].header.sample_timestamp)
+            );
+        }
+        let first_b = packets(&b)
+            .into_iter()
+            .find(|p| p.header.sample_timestamp >= 480 * 40)
+            .unwrap();
+        assert!(
+            !first_b.header.flags.contains(MediaFlags::REDUNDANT),
+            "must not attach pre-gap audio"
+        );
+    }
 
     #[derive(Default)]
     struct Collect(Mutex<Vec<Bytes>>);

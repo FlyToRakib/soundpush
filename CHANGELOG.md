@@ -10,6 +10,12 @@ The release workflow copies that section into the GitHub Release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Resume audio after system-audio capture stops during Opus DTX silence. The first media packet
+  after a sustained capture gap now marks a discontinuity so receivers resynchronize their
+  playback clocks instead of discarding the resumed audio as late.
+
 ## [0.1.1] - 2026-09-25
 
 **Install this one.** The signing keys that 0.1.0 was signed with were exposed and have been replaced, so
